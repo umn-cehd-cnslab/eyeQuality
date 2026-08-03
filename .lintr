@@ -1,0 +1,13 @@
+linters: linters_with_defaults(
+    # this codebase's dominant convention is camelCase with a snake_case
+    # unit suffix (recordingFrequency_hz, calculateGaze_va, gazeX.preprocessed_va,
+    # etc.) -- not a style object_name_linter can express, and not something
+    # to rename; disabled rather than generating hundreds of false positives.
+    object_name_linter = NULL,
+    line_length_linter(120),
+    commented_code_linter = NULL,
+    cyclocomp_linter = NULL
+  )
+exclusions: list(
+    "tests/testthat.R"
+  )
