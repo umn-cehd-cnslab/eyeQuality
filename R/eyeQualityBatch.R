@@ -4,6 +4,8 @@
 #' @param directoryBIDS filepath to the BIDS directory of ET data to process
 #' @param batchName string label for what to call the batch. This will be added to the output files
 #' @param numberCores optional parameter to specify number of cores to use. If not specified, function will use 80\\% of available cores
+#' @param displayDimensionX_mm integer of display width in millimeters, passed through to `eyeQuality()` for every file in the batch. For example our 1920x1080 screen has a width of 594 mm
+#' @param displayDimensionY_mm integer of display height in millimeters, passed through to `eyeQuality()` for every file in the batch. For example our 1920x1080 screen has a height of 344 mm
 #' @param ... additional parameters
 #'
 #' @importFrom readr read_delim
@@ -17,6 +19,8 @@ eyeQualityBatch <-
   function(directoryBIDS,
            batchName,
            numberCores = NULL,
+           displayDimensionX_mm = 594,
+           displayDimensionY_mm = 344,
            ...) {
     # options(error=traceback)
 
@@ -97,8 +101,8 @@ eyeQualityBatch <-
         tryCatch(
           eyeQuality(
             x,
-            displayDimensionX_mm = 594,
-            displayDimensionY_mm = 344,
+            displayDimensionX_mm = displayDimensionX_mm,
+            displayDimensionY_mm = displayDimensionY_mm,
             saveData = TRUE,
             batchName = batchName,
             ...
