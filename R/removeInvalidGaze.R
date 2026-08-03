@@ -32,6 +32,9 @@ removeInvalidGaze <- function(data, whichEye, software, threshold = 2) {
     data[data == -9999] <-
       NA #-9999 used to mark missing values, changed to NA
   }
+  else {
+    stop("removeInvalidGaze: unrecognized software value '", software, "'")
+  }
   #FIXME: this function is overwriting the columns. we should create new columns?
   return(data)
 }
