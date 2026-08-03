@@ -16,5 +16,5 @@ plotGazeHeatmap <- function(data) {
     scale_y_continuous(limits = c(0, 1080), expand = c(0, 0)) +
     # scale_fill_viridis() +
     scale_fill_distiller(palette = "Spectral") +
-    theme(legend.position = 'none')
+    theme(legend.position = "none")
 }

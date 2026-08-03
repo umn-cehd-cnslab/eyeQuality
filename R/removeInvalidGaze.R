@@ -10,15 +10,15 @@
 #' @export
 #'
 removeInvalidGaze <- function(data, whichEye, software, threshold = 2) {
-  #extract relevant gaze point columns
+  # extract relevant gaze point columns
   cols <-
     colnames(data)[grepl(whichEye, colnames(data), ignore.case = TRUE) &
-                     !grepl("valid", colnames(data))]
-  #define validity column
+      !grepl("valid", colnames(data))]
+  # define validity column
   validityCol <-
     colnames(data)[grepl(whichEye, colnames(data), ignore.case = TRUE) &
-                     grepl("valid", colnames(data))]
-  #create new .valid columns and replace gazepoint data with NA for invalid gazepoints, leaving raw columns untouched
+      grepl("valid", colnames(data))]
+  # create new .valid columns and replace gazepoint data with NA for invalid gazepoints, leaving raw columns untouched
   if (str_detect(software, "TobiiPro")) {
     for (i in cols) {
       newCol <- paste0(i, ".valid")
@@ -26,8 +26,7 @@ removeInvalidGaze <- function(data, whichEye, software, threshold = 2) {
       data[[newCol]] <- data[[i]]
       data[[newCol]][tidyr::replace_na(replaceRows, FALSE)] <- NA
     }
-  }
-  else if (str_detect(software, "TobiiStudio")) {
+  } else if (str_detect(software, "TobiiStudio")) {
     validityVals <- data[[validityCol]]
     for (i in cols) {
       newCol <- paste0(i, ".valid")
@@ -36,8 +35,7 @@ removeInvalidGaze <- function(data, whichEye, software, threshold = 2) {
       #-9999 used to mark missing values, changed to NA
       data[[newCol]][data[[newCol]] == -9999] <- NA
     }
-  }
-  else {
+  } else {
     stop("removeInvalidGaze: unrecognized software value '", software, "'")
   }
   return(data)

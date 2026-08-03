@@ -30,7 +30,7 @@ test_that("removeInvalidGaze creates .valid columns for invalid TobiiPro gaze po
 
   expect_equal(result$gazeLeftX.valid, c(1, NA, 3, 4))
   expect_equal(result$gazeLeftY.valid, c(1, NA, 3, 4))
-  #raw columns must be left untouched
+  # raw columns must be left untouched
   expect_equal(result$gazeLeftX, c(1, 2, 3, 4))
   expect_equal(result$gazeLeftY, c(1, 2, 3, 4))
 })
@@ -47,7 +47,7 @@ test_that("removeInvalidGaze creates .valid columns for out-of-threshold TobiiSt
 
   expect_equal(result$gazeLeftX.valid, c(1, NA, 3, NA))
   expect_equal(result$gazeLeftY.valid, c(1, NA, 3, 4))
-  #raw columns must be left untouched, including the -9999 sentinel value
+  # raw columns must be left untouched, including the -9999 sentinel value
   expect_equal(result$gazeLeftX, c(1, 2, 3, -9999))
   expect_equal(result$gazeLeftY, c(1, 2, 3, 4))
 })

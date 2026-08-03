@@ -13,14 +13,14 @@
 #'
 getSequenceGroupEndpoints <- function(data, group_column) {
   group_endpoints <- data %>%
-    dplyr::select(.data$recordingTimestamp_ms,!!rlang::sym(group_column)) %>%
+    dplyr::select(.data$recordingTimestamp_ms, !!rlang::sym(group_column)) %>%
     dplyr::ungroup() %>%
     dplyr::mutate(
       "start_flag" = !!rlang::sym(group_column) != dplyr::lag(!!rlang::sym(group_column), n = 1),
       "end_flag" = !!rlang::sym(group_column) != dplyr::lead(!!rlang::sym(group_column), n = 1),
     ) %>%
     dplyr::filter(.data$start_flag == TRUE |
-                    .data$end_flag == TRUE) %>%
+      .data$end_flag == TRUE) %>%
     dplyr::ungroup() %>%
     dplyr::mutate(
       "group" = !!rlang::sym(group_column),

@@ -25,7 +25,7 @@ listBidsFiles <-
 
     # initialize list of files to append as we search directory
     files <- list()
-    directories_for_files = list()
+    directories_for_files <- list()
     skipped_dirs <- character(0)
 
     # Next we find the list the directories to check.
@@ -55,8 +55,9 @@ listBidsFiles <-
             # pull subdirectories in subject_dir
             session_dirs <-
               list.dirs(subject_dir,
-                        full.names = TRUE,
-                        recursive = FALSE)
+                full.names = TRUE,
+                recursive = FALSE
+              )
             # loop through session directories to match
             for (session_dir in session_dirs) {
               # if the session_dir matches sessionPattern_regex
@@ -114,7 +115,7 @@ listBidsFiles <-
     }
     attr(result, "skipped") <- skipped_dirs
 
-    if (length(files) == 0 ) {
+    if (length(files) == 0) {
       print("WARNING: No files found. If you expect to have data files in your directory, please check your directory structure.")
       print("Confirm subjectPattern_regex and session_Pattern_regex correctly find file(s) in your subject/session directories.")
       print("Otherwise specify a modalityPattern_regex with the naming convention for your eyetracking files.")

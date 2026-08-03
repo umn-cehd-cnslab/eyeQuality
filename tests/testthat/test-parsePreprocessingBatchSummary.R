@@ -15,9 +15,9 @@
 # print_or_save()'s exact output format. `successful` and `failed` are
 # character vectors of filepaths (possibly empty) for the two sections.
 write_batch_summary_fixture <- function(dir,
-                                         successful = character(0),
-                                         failed = character(0),
-                                         filename = "preprocessing_batch_summary_desc-test.txt") {
+                                        successful = character(0),
+                                        failed = character(0),
+                                        filename = "preprocessing_batch_summary_desc-test.txt") {
   lines <- c(
     "-----------------",
     "starting batch run: 2026-01-01 00:00:00",

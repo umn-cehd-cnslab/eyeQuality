@@ -8,7 +8,7 @@
 #' @export
 #'
 #'
-detectImportSourceType  <- function(data) {
+detectImportSourceType <- function(data) {
   colNames <- names(data)
   if ("StudioVersionRec" %in% colNames) {
     sourceType <- "TobiiStudio"

@@ -9,9 +9,9 @@
 #' @export
 #'
 calculateVisualAngle <- function(gaze_px, distanceZ, displayResolution_px, displayDimension_mm) {
-  Rad = atan2(((gaze_px - ((
+  Rad <- atan2(((gaze_px - ((
     displayResolution_px + 1
   ) * .5)) * displayDimension_mm), (distanceZ * displayResolution_px))
-  Ang = Rad * (180 / pi)
+  Ang <- Rad * (180 / pi)
   return(Ang)
 }

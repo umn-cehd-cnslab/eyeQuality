@@ -31,7 +31,8 @@ parsePreprocessingBatchSummary <-
             str_extract(.data[[1]], "data size \\(MB\\): ([\\S]+),", group = 1)
           ),
           nfiles = as.numeric(str_extract(
-            .data[[1]], "n \\(ET Files\\): ([\\S]+),", group = 1
+            .data[[1]], "n \\(ET Files\\): ([\\S]+),",
+            group = 1
           )),
           nPreprocessed = as.numeric(
             str_extract(.data[[1]], "n \\(preprocessed\\): ([\\S]+),", group = 1)
@@ -41,16 +42,19 @@ parsePreprocessingBatchSummary <-
           ),
           runDuration = str_extract(.data[[1]], "run duration: ([\\S\\s]+),", group = 1),
           runTime = as.numeric(str_extract(
-            .data[[1]], "runtime \\(s\\): ([\\S]+)$", group = 1
+            .data[[1]], "runtime \\(s\\): ([\\S]+)$",
+            group = 1
           )),
         ) %>%
-        select(directory,
-               datasize,
-               nfiles,
-               nPreprocessed,
-               nFailed,
-               runDuration,
-               runTime) %>%
+        select(
+          directory,
+          datasize,
+          nfiles,
+          nPreprocessed,
+          nFailed,
+          runDuration,
+          runTime
+        ) %>%
         return()
     } else if (info_to_extract %in% c("failedfiles", "successfulfiles")) {
       lines <- read_lines(str_glue(batch_summary_file))

@@ -26,7 +26,7 @@ calculateGaze_va <-
     print("Calculating VA...")
     data_va <- data
 
-    #calculate visual angle
+    # calculate visual angle
     data_va$gazeX_va <-
       round(calculateVisualAngle(data[[gazeX]], data[[distanceZ]], displayResolutionX_px, displayDimensionX_mm), 2)
     data_va$gazeY_va <-

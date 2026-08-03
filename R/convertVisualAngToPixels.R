@@ -13,6 +13,6 @@
 convertVisualAngToPixels <- function(gazeVA, distanceZ, displayResolution_px, displayDimension_mm) {
   px <-
     (tan(deg2rad(gazeVA)) * distanceZ * displayResolution_px / displayDimension_mm) + (displayResolution_px /
-                                                                2)
+      2)
   return(px)
 }

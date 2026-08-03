@@ -19,30 +19,34 @@ saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = 
   runtimesdesc <- paste0("_desc-", ifelse(is.null(batchName), NULL, paste0(batchName, "_")), "preproc_runtimes")
   qcsummarydesc <- paste0("_desc-", ifelse(is.null(batchName), NULL, paste0(batchName, "_")), "preproc_qcsummary")
 
-  #save event data
+  # save event data
   write.table(
-    data.frame("raw_data_row"=rownames(events), events),
+    data.frame("raw_data_row" = rownames(events), events),
     file = create_new_filename(inputFile, eventdesc, ".tsv", outputDir = outputDir),
-    row.names=FALSE,
-    sep="\t")
-  #save raw data
+    row.names = FALSE,
+    sep = "\t"
+  )
+  # save raw data
   write.table(
-    data.frame("raw_data_row"=rownames(data), data),
+    data.frame("raw_data_row" = rownames(data), data),
     file = create_new_filename(inputFile, preprocdesc, ".tsv", outputDir = outputDir),
-    row.names=FALSE,
-    sep="\t")
-  #save timing data
+    row.names = FALSE,
+    sep = "\t"
+  )
+  # save timing data
   write.table(
     timing,
     file = create_new_filename(inputFile, runtimesdesc, ".tsv", outputDir = outputDir),
-    row.names=FALSE,
-    sep="\t")
-  #save output summary data
+    row.names = FALSE,
+    sep = "\t"
+  )
+  # save output summary data
   write.table(
-    data.frame("qc_metric"=rownames(summaryData), summaryData),
+    data.frame("qc_metric" = rownames(summaryData), summaryData),
     file = create_new_filename(inputFile, qcsummarydesc, ".tsv", outputDir = outputDir),
-    row.names=FALSE,
-    sep="\t")
+    row.names = FALSE,
+    sep = "\t"
+  )
   print("--- FILES SAVED ---")
 }
 
@@ -75,7 +79,7 @@ create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, 
     }
   }
 
-  fs::dir_create(newdirectory) #create the derivatives directory, if it doesn't exist
+  fs::dir_create(newdirectory) # create the derivatives directory, if it doesn't exist
 
   # Concatenate appendname, filename, and extension (if any)
   newfilename <- fs::path(
@@ -103,39 +107,39 @@ sinkToOutputFile <- function(runlog) {
 #' @export
 
 sinkReset <- function() {
-  for(i in seq_len(sink.number())){
+  for (i in seq_len(sink.number())) {
     sink()
   }
   # sink(type = "message")
 }
 
 print_or_save <- function(expression, savedata, filename = NULL) {
-  if (savedata){
+  if (savedata) {
     # if we are saving data, print this to terminal.
     if (typeof(expression) == "character") {
       cat(
         expression,
-        file=filename,
-        append=TRUE
+        file = filename,
+        append = TRUE
       )
     } else {
       write.table(
         expression,
         file = filename,
-        append=TRUE,
+        append = TRUE,
       )
     }
-    cat("\n",file=filename,append=TRUE)
+    cat("\n", file = filename, append = TRUE)
   } else {
-    #otherwise print to terminal
+    # otherwise print to terminal
     print(expression)
   }
 }
 
 get_filesizes <- function(filelist) {
-  total_size_bytes = 0
-  for(i in filelist) {
-    total_size_bytes = total_size_bytes + file.info(i)$size
+  total_size_bytes <- 0
+  for (i in filelist) {
+    total_size_bytes <- total_size_bytes + file.info(i)$size
   }
-  return(total_size_bytes/1000000) #return in MB
+  return(total_size_bytes / 1000000) # return in MB
 }

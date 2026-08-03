@@ -27,16 +27,16 @@ removeOffscreenGaze <-
            displayDimensionY_mm,
            offscreenValidityRange_va = 5,
            ...) {
-    #get participant's median distance from screen
-    medZ = median(data[[distanceZ]], na.rm = TRUE)
+    # get participant's median distance from screen
+    medZ <- median(data[[distanceZ]], na.rm = TRUE)
 
-    #get new acceptable boundaries
+    # get new acceptable boundaries
     display.vax <-
       round(calculateVisualAngle(displayResolutionX_px, medZ, displayResolutionX_px, displayDimensionX_mm), 2) + offscreenValidityRange_va
     display.vay <-
       round(calculateVisualAngle(displayResolutionY_px, medZ, displayResolutionY_px, displayDimensionY_mm), 2) + offscreenValidityRange_va
 
-    #set acceptable boundaries in pixel space
+    # set acceptable boundaries in pixel space
     resx.max <-
       convertVisualAngToPixels(display.vax, medZ, displayResolutionX_px, displayDimensionX_mm)
     resx.min <-
@@ -46,7 +46,7 @@ removeOffscreenGaze <-
     resy.min <-
       convertVisualAngToPixels(-display.vay, medZ, displayResolutionY_px, displayDimensionY_mm)
 
-    #get list to label datapoints as on or offscreen, based on acceptable boundaries
+    # get list to label datapoints as on or offscreen, based on acceptable boundaries
     invalid_offscreen <-
       detectOffscreenGaze(
         data,
@@ -58,26 +58,26 @@ removeOffscreenGaze <-
         minDisplayResolutionY_px = resy.min
       )
 
-    #mark as NA
-    #Get columns to be overwritten if flagged as offscreen
+    # mark as NA
+    # Get columns to be overwritten if flagged as offscreen
     replace_cols <- c(gazeX, gazeY, overwrite)
     replace_rows <- which(invalid_offscreen == "offscreen")
 
-    #replace all offscreen columns with NA
+    # replace all offscreen columns with NA
     for (rc in replace_cols) {
-      if (is.na(rc)){
+      if (is.na(rc)) {
         next()
       }
       data[replace_rows, rc] <- NA
     }
 
-    #for these out-of-range gazepoints, update offscreen label to whether or not (1 / 0) gp is excluded as binary
-    invalid_offscreen <-ifelse(invalid_offscreen == "offscreen", "offscreen.exclusionary", invalid_offscreen)
+    # for these out-of-range gazepoints, update offscreen label to whether or not (1 / 0) gp is excluded as binary
+    invalid_offscreen <- ifelse(invalid_offscreen == "offscreen", "offscreen.exclusionary", invalid_offscreen)
 
-    #add new column for offscreen label
-    if (grepl("Left", gazeX, ignore.case = TRUE)){
+    # add new column for offscreen label
+    if (grepl("Left", gazeX, ignore.case = TRUE)) {
       data$gazeLeft.offscreen <- invalid_offscreen
-    } else if (grepl("Right", gazeX, ignore.case = TRUE)){
+    } else if (grepl("Right", gazeX, ignore.case = TRUE)) {
       data$gazeRight.offscreen <- invalid_offscreen
     } else {
       data$gaze.offscreen <- invalid_offscreen

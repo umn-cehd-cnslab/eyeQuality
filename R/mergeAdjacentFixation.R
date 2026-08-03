@@ -26,7 +26,7 @@ mergeAdjacentFixations <-
            fixationLength,
            mergeDistance_va = 0.5,
            mergeTimeGap_ms = 75) {
-    #list2env(findFixationIndices(data.raw.df$class), envir = globalenv())
+    # list2env(findFixationIndices(data.raw.df$class), envir = globalenv())
 
     fix_x <-
       fix_y <-
@@ -60,17 +60,21 @@ mergeAdjacentFixations <-
         }
 
         # starting point exists
-        #if(length(grep("TRUE",!is.na(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]])))>0){
+        # if(length(grep("TRUE",!is.na(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]])))>0){
 
         # initial proposed fixation identify median x,y coordinate
         fix_x[ifix] <-
           data$class.adj.xva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
-          median(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]], na.rm =
-                   TRUE)
+          median(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]],
+            na.rm =
+              TRUE
+          )
         fix_y[ifix] <-
           data$class.adj.yva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
-          median(gazeY[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]], na.rm =
-                   TRUE)
+          median(gazeY[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]],
+            na.rm =
+              TRUE
+          )
 
         # assess entire length of proposed new fixation
         dur <-
@@ -85,16 +89,20 @@ mergeAdjacentFixations <-
           if (!is.na(end.change.index + 1)) {
             # next fixations identified
             fix_x[ifix + 1] <-
-              median(gazeX[fixationStart[rleFixIndex][ifix + 1]:fixationEnd[rleFixIndex][ifix + 1]], na.rm =
-                       TRUE)
+              median(gazeX[fixationStart[rleFixIndex][ifix + 1]:fixationEnd[rleFixIndex][ifix + 1]],
+                na.rm =
+                  TRUE
+              )
             fix_y[ifix + 1] <-
-              median(gazeY[fixationStart[rleFixIndex][ifix + 1]:fixationEnd[rleFixIndex][ifix + 1]], na.rm =
-                       TRUE)
+              median(gazeY[fixationStart[rleFixIndex][ifix + 1]:fixationEnd[rleFixIndex][ifix + 1]],
+                na.rm =
+                  TRUE
+              )
 
             # assess euclidean distance between this fixation and prior fixation
             fix_euc <-
-              sqrt((fix_x[ifix] - fix_x[ifix + 1]) ^ 2 + (fix_y[ifix] - fix_y[ifix +
-                                                                                1]) ^ 2)
+              sqrt((fix_x[ifix] - fix_x[ifix + 1])^2 + (fix_y[ifix] - fix_y[ifix +
+                1])^2)
             fix_euc_adj[ifix] <- fix_euc
 
             gap_dur <- length(end.change.index:start.change.index)
@@ -123,14 +131,13 @@ mergeAdjacentFixations <-
                   dur
                 data$class.adj.num[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
                   ifix
-                #print(data[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix + 1],c("class","class.adj","class.adj.euc","class.adj.gap.dur","class.adj.xva","class.adj.yva","class.adj.num")])
-                #print(paste("Too Long: ",gap_dur*3.3, " ms duration ,", fix_euc, "va distance between fixations"))
+                # print(data[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix + 1],c("class","class.adj","class.adj.euc","class.adj.gap.dur","class.adj.xva","class.adj.yva","class.adj.num")])
+                # print(paste("Too Long: ",gap_dur*3.3, " ms duration ,", fix_euc, "va distance between fixations"))
                 fixation_complete <- TRUE
               }
-
             }
             if (!is.na(fix_euc) &
-                fix_euc >= mergeDistance_va | (is.na(fix_euc))) {
+              fix_euc >= mergeDistance_va | (is.na(fix_euc))) {
               data$class.adj.xva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
                 fix_x[ifix]
               data$class.adj.yva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
@@ -164,8 +171,8 @@ mergeAdjacentFixations <-
             rle_sac_index <-
               which(rle(data$class.adj)$values == "saccade")
 
-            fixationEnd = cumsum(rle(data$class.adj)$lengths)
-            fixationStart = c(1, lag(fixationEnd)[-1] + 1)
+            fixationEnd <- cumsum(rle(data$class.adj)$lengths)
+            fixationStart <- c(1, lag(fixationEnd)[-1] + 1)
             fixationLength <- fixationEnd - fixationStart + 1
 
             # check if ran out of potential fixations to merge, if not back to top of while loop
@@ -185,12 +192,16 @@ mergeAdjacentFixations <-
 
               fix_x[ifix] <-
                 data$class.adj.xva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
-                median(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]], na.rm =
-                         TRUE)
+                median(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]],
+                  na.rm =
+                    TRUE
+                )
               fix_y[ifix] <-
                 data$class.adj.yva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
-                median(gazeY[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]], na.rm =
-                         TRUE)
+                median(gazeY[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]],
+                  na.rm =
+                    TRUE
+                )
 
               fixation_set_complete <- TRUE
               print("Done")
@@ -208,17 +219,15 @@ mergeAdjacentFixations <-
           rle_sac_index <-
             which(rle(data$class.adj)$values == "saccade")
 
-          fixationEnd = cumsum(rle(data$class.adj)$lengths)
-          fixationStart = c(1, lag(fixationEnd)[-1] + 1)
+          fixationEnd <- cumsum(rle(data$class.adj)$lengths)
+          fixationStart <- c(1, lag(fixationEnd)[-1] + 1)
           fixationLength <- fixationEnd - fixationStart + 1
 
           fixation_complete <- TRUE
           fixation_b_complete <- TRUE
 
           ifix <- ifix - 1
-
         }
-
       }
 
       # primary backward fixation merge loop
@@ -226,26 +235,34 @@ mergeAdjacentFixations <-
       if (ifix >= 2) {
         while (fixation_b_complete == FALSE) {
           fix_xb <-
-            median(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]], na.rm =
-                     TRUE)
+            median(gazeX[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]],
+              na.rm =
+                TRUE
+            )
           fix_yb <-
-            median(gazeY[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]], na.rm =
-                     TRUE)
+            median(gazeY[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]],
+              na.rm =
+                TRUE
+            )
 
           # prev fixations identified
           fix_xa <-
-            median(gazeX[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix - 1]], na.rm =
-                     TRUE)
+            median(gazeX[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix - 1]],
+              na.rm =
+                TRUE
+            )
           fix_ya <-
-            median(gazeY[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix - 1]], na.rm =
-                     TRUE)
+            median(gazeY[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix - 1]],
+              na.rm =
+                TRUE
+            )
 
           # assess length of proposed fixation
           dur <-
             length(fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix])
 
           # assess euclidean distance between this fixation and prior fixation
-          fix_euc <- sqrt((fix_xb - fix_xa) ^ 2 + (fix_yb - fix_ya) ^ 2)
+          fix_euc <- sqrt((fix_xb - fix_xa)^2 + (fix_yb - fix_ya)^2)
 
           # assess temporal distance between this fixation and prior fixation
           start.change.index <- fixationEnd[rleFixIndex][ifix - 1] + 1
@@ -255,7 +272,7 @@ mergeAdjacentFixations <-
 
           # if two consecutive fixations are fairly close to eachother...
           if (!is.na(fix_euc) &
-              !is.na(mergeDistance_va) & fix_euc < mergeDistance_va) {
+            !is.na(mergeDistance_va) & fix_euc < mergeDistance_va) {
             # ... and if not too much time has transpired, then merge
             if (gap_dur * 3.3 < mergeTimeGap_ms) {
               data$class.adj[start.change.index:end.change.index] <- "fixation"
@@ -266,8 +283,8 @@ mergeAdjacentFixations <-
             }
           }
           if ((!is.na(fix_euc) &
-               !is.na(mergeDistance_va)) &
-              fix_euc >= mergeDistance_va | (is.na(fix_euc) | is.na(mergeDistance_va))) {
+            !is.na(mergeDistance_va)) &
+            fix_euc >= mergeDistance_va | (is.na(fix_euc) | is.na(mergeDistance_va))) {
             fixation_b_complete <- TRUE
           }
 
@@ -277,36 +294,34 @@ mergeAdjacentFixations <-
             rle_sac_index <-
               which(rle(data$class.adj)$values == "saccade")
 
-            fixationEnd = cumsum(rle(data$class.adj)$lengths)
-            fixationStart = c(1, lag(fixationEnd)[-1] + 1)
+            fixationEnd <- cumsum(rle(data$class.adj)$lengths)
+            fixationStart <- c(1, lag(fixationEnd)[-1] + 1)
             fixationLength <- fixationEnd - fixationStart + 1
 
             # check if ran out of potential fixations to merge, if not back to top of while loop
             if (ifix == 1) {
               ifix <- ifix - 1
               fixation_b_complete <- TRUE
-
             }
-
           }
 
           if (ifix > 1) {
             data$class.adj.xva[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix -
-                                                                                           1]] <- fix_xa
+              1]] <- fix_xa
             data$class.adj.yva[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix -
-                                                                                           1]] <- fix_ya
+              1]] <- fix_ya
             data$class.adj.xva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
               fix_xb
             data$class.adj.yva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
               fix_yb
             data$class.adj.euc[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix -
-                                                                                           1]] <- fix_euc
+              1]] <- fix_euc
             data$class.adj.gap.dur[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix -
-                                                                                               1]] <- gap_dur
+              1]] <- gap_dur
             data$class.adj.dur[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
               dur
             data$class.adj.num[fixationStart[rleFixIndex][ifix - 1]:fixationEnd[rleFixIndex][ifix -
-                                                                                           1]] <- ifix - 1
+              1]] <- ifix - 1
             data$class.adj.num[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
               ifix
           }
@@ -320,7 +335,6 @@ mergeAdjacentFixations <-
         fixation_set_complete <- TRUE
         print("Done merging fixations")
       }
-
     }
 
     return(data[, c(
@@ -332,5 +346,5 @@ mergeAdjacentFixations <-
       "class.adj.num",
       "class.adj.dur"
     )])
-    #return(data$class.adj)
+    # return(data$class.adj)
   }

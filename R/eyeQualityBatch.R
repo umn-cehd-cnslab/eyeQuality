@@ -25,31 +25,35 @@ eyeQualityBatch <-
     # options(error=traceback)
 
     if (is.null(batchName) ||
-        !is.character(batchName) ||
-        length(batchName) != 1 ||
-        is.na(batchName) ||
-        nchar(batchName) == 0) {
+      !is.character(batchName) ||
+      length(batchName) != 1 ||
+      is.na(batchName) ||
+      nchar(batchName) == 0) {
       stop("eyeQualityBatch: 'batchName' must be a non-empty character string")
     }
 
     if (!is.null(numberCores) &&
-        (!is.numeric(numberCores) ||
-         length(numberCores) != 1 ||
-         is.na(numberCores) ||
-         numberCores %% 1 != 0 ||
-         numberCores < 1)) {
+      (!is.numeric(numberCores) ||
+        length(numberCores) != 1 ||
+        is.na(numberCores) ||
+        numberCores %% 1 != 0 ||
+        numberCores < 1)) {
       stop("eyeQualityBatch: 'numberCores' must be a positive integer when supplied")
     }
 
     batch_run_summary <-
-      paste0(directoryBIDS,
-             paste0("/preprocessing_batch_summary_desc-", batchName, ".txt"))
+      paste0(
+        directoryBIDS,
+        paste0("/preprocessing_batch_summary_desc-", batchName, ".txt")
+      )
     # batch_run_out <- paste0(directoryBIDS, paste0("/preprocessing_batch_output_desc-", batchName, ".txt"))
     batch_run_debug <-
-      paste0(directoryBIDS,
-             paste0("/preprocessing_batch_debug_desc-", batchName, ".txt"))
+      paste0(
+        directoryBIDS,
+        paste0("/preprocessing_batch_debug_desc-", batchName, ".txt")
+      )
 
-    #save outputs to file at root of directoryBIDS
+    # save outputs to file at root of directoryBIDS
     # sinkToOutputFile(batch_run_summary)
 
     starttime <- getCurrentTime()
@@ -57,19 +61,25 @@ eyeQualityBatch <-
     tsv_files_to_batch_process <-
       listBidsFiles(directoryBIDS, ...)
 
-    print_or_save(stringr::str_glue("-----------------"),
-                  TRUE,
-                  batch_run_summary)
+    print_or_save(
+      stringr::str_glue("-----------------"),
+      TRUE,
+      batch_run_summary
+    )
 
     # print(paste0("starting batch run: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
-    print_or_save(paste0("starting batch run: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
-                  TRUE,
-                  batch_run_summary)
+    print_or_save(
+      paste0("starting batch run: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S")),
+      TRUE,
+      batch_run_summary
+    )
 
     # print(tsv_files_to_batch_process)
-    print_or_save(paste(tsv_files_to_batch_process, collapse = "\n"),
-                  TRUE,
-                  batch_run_summary)
+    print_or_save(
+      paste(tsv_files_to_batch_process, collapse = "\n"),
+      TRUE,
+      batch_run_summary
+    )
 
     # Create a cluster with multiple cores for parallel processing
     if (is.null(numberCores)) {
@@ -78,12 +88,13 @@ eyeQualityBatch <-
       # (b) number of files you need to process
       numcores <-
         ifelse(
-          #check if there are fewer files the possible number of cores
+          # check if there are fewer files the possible number of cores
           floor(detectCores() * 0.85) < length(tsv_files_to_batch_process),
-          ifelse(floor(detectCores() * 0.85) <= 0, #if 85% of cores <= 0, use 1 core
-                 1,
-                 floor(detectCores() * 0.85)),
-          #otherwise use 85% of available cores),
+          ifelse(floor(detectCores() * 0.85) <= 0, # if 85% of cores <= 0, use 1 core
+            1,
+            floor(detectCores() * 0.85)
+          ),
+          # otherwise use 85% of available cores),
           length(tsv_files_to_batch_process) #
         )
     } else {
@@ -95,21 +106,23 @@ eyeQualityBatch <-
       )
     }
     # print(stringr::str_glue("number of cores = {numcores}"))
-    print_or_save(stringr::str_glue("number of cores = {numcores}"),
-                  TRUE,
-                  batch_run_summary)
+    print_or_save(
+      stringr::str_glue("number of cores = {numcores}"),
+      TRUE,
+      batch_run_summary
+    )
 
     if (.Platform$OS.type == "windows") {
       # cl <- parallel::makeCluster(numcores, outfile = batch_run_debug)
       cl <- parallel::makeCluster(numcores, outfile = "")
     } else {
-      #should be "unix" on Linux or Mac
+      # should be "unix" on Linux or Mac
       cl <-
         parallel::makeCluster(numcores, outfile = "", type = "FORK")
     }
 
     # Parallelize the processing of TSV files
-    parallel::clusterExport(cl, "eyeQuality")  # Export the eyeQuality function to the cluster
+    parallel::clusterExport(cl, "eyeQuality") # Export the eyeQuality function to the cluster
     parallel::parLapply(
       cl,
       tsv_files_to_batch_process,
@@ -151,9 +164,11 @@ eyeQualityBatch <-
     )
 
     qcsummaryPattern <-
-      paste0("_desc-",
-             ifelse(is.null(batchName), NULL, paste0(batchName, "_")),
-             "preproc_qcsummary\\.tsv$")
+      paste0(
+        "_desc-",
+        ifelse(is.null(batchName), NULL, paste0(batchName, "_")),
+        "preproc_qcsummary\\.tsv$"
+      )
 
     completedfiles <-
       list.files(
@@ -172,18 +187,22 @@ eyeQualityBatch <-
       TRUE,
       batch_run_summary
     )
-    print_or_save(paste(completedfiles, collapse = "\n"),
-                  TRUE,
-                  batch_run_summary)
+    print_or_save(
+      paste(completedfiles, collapse = "\n"),
+      TRUE,
+      batch_run_summary
+    )
 
-    #compare list to batch process with the completed file list.
+    # compare list to batch process with the completed file list.
     failedfiles <-
-      tsv_files_to_batch_process[!grepl(gsub("\\|$", "", paste0(
-        fs::path_file(gsub(qcsummaryPattern, "", completedfiles)),
-        sep = "|",
-        collapse = ""
-      )),
-      tsv_files_to_batch_process)]
+      tsv_files_to_batch_process[!grepl(
+        gsub("\\|$", "", paste0(
+          fs::path_file(gsub(qcsummaryPattern, "", completedfiles)),
+          sep = "|",
+          collapse = ""
+        )),
+        tsv_files_to_batch_process
+      )]
 
 
     print_or_save(
@@ -193,13 +212,17 @@ eyeQualityBatch <-
       TRUE,
       batch_run_summary
     )
-    print_or_save(paste(failedfiles, collapse = "\n"),
-                  TRUE,
-                  batch_run_summary)
+    print_or_save(
+      paste(failedfiles, collapse = "\n"),
+      TRUE,
+      batch_run_summary
+    )
 
-    print_or_save(stringr::str_glue("--- BATCH PROCESSING SUMMARY:  "),
-                  TRUE,
-                  batch_run_summary)
+    print_or_save(
+      stringr::str_glue("--- BATCH PROCESSING SUMMARY:  "),
+      TRUE,
+      batch_run_summary
+    )
     # print(stringr::str_glue('"directory": "{directoryBIDS}", "data size (MB)": "{get_filesizes(tsv_files_to_batch_process)}", "n (ET Files)": "{length(tsv_files_to_batch_process)}", "n (preprocessed)": "{length(completedfiles)}", "n (failed preprocessing)": "{length(tsv_files_to_batch_process)-length(completedfiles)}", "run duration": "{getPipelineTiming(starttime, endtime)}",  "runtime (s)": "{calculateTimeDifference(starttime, endtime)}"'))
     print_or_save(
       stringr::str_glue(
@@ -213,5 +236,4 @@ eyeQualityBatch <-
 
     # sinkReset()
     # sink()
-
   }
