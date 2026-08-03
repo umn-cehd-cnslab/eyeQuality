@@ -9,6 +9,7 @@
 #' @export
 #'
 #' @importFrom readr read_tsv
+#' @importFrom readr read_lines
 #' @importFrom stringr str_glue
 #' @importFrom stringr str_extract
 #' @importFrom dplyr mutate
@@ -51,7 +52,41 @@ parsePreprocessingBatchSummary <-
                runDuration,
                runTime) %>%
         return()
-    } else if (info_to_extract == "failedfiles") {
+    } else if (info_to_extract %in% c("failedfiles", "successfulfiles")) {
+      lines <- read_lines(str_glue(batch_summary_file))
 
+      header_pattern <- if (info_to_extract == "successfulfiles") {
+        "^------ Successfully processed files \\(n = (\\d+)\\):"
+      } else {
+        "^------ Files that failed processing \\(n = (\\d+)\\):"
+      }
+
+      header_idx <- grep(header_pattern, lines)
+
+      if (length(header_idx) == 0) {
+        stop(
+          "parsePreprocessingBatchSummary: could not find a '",
+          info_to_extract,
+          "' section in '",
+          batch_summary_file,
+          "'"
+        )
+      }
+
+      header_idx <- header_idx[1]
+      n_files <- as.integer(str_extract(lines[header_idx], header_pattern, group = 1))
+
+      if (is.na(n_files) || n_files == 0) {
+        return(character(0))
+      }
+
+      lines[(header_idx + 1):(header_idx + n_files)] %>%
+        return()
+    } else {
+      stop(
+        "parsePreprocessingBatchSummary: unrecognized 'info_to_extract' value '",
+        info_to_extract,
+        "'"
+      )
     }
   }
