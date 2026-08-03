@@ -8,6 +8,3 @@ linters: linters_with_defaults(
     commented_code_linter = NULL,
     cyclocomp_linter = NULL
   )
-exclusions: list(
-    "tests/testthat.R"
-  )
