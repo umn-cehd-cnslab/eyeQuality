@@ -166,7 +166,7 @@ eyeQualityBatch <-
     qcsummaryPattern <-
       paste0(
         "_desc-",
-        ifelse(is.null(batchName), NULL, paste0(batchName, "_")),
+        if (is.null(batchName)) "" else paste0(batchName, "_"),
         "preproc_qcsummary\\.tsv$"
       )
 

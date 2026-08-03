@@ -21,9 +21,9 @@ getFileRunLogName <- function(filename, batchName = NULL) {
   directory <- path_dir(filename)
   log <-
     paste0(
-      basename,
+      base,
       "_desc-",
-      ifelse(is.null(batchName), NULL, paste0(batchName, "_")),
+      if (is.null(batchName)) "" else paste0(batchName, "_"),
       "preproc_runlog2",
       ".txt"
     )

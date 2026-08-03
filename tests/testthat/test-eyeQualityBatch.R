@@ -147,6 +147,23 @@ test_that("eyeQualityBatch errors on non-integer numberCores instead of failing 
   )
 })
 
+# P1-12 (second scope note, 2026-08-03): R/eyeQualityBatch.R:169 has the same
+# `if (is.null(batchName)) "" else paste0(batchName, "_")` NULL-safe pattern
+# used to build `qcsummaryPattern`. Unlike the other three P1-12 sites, this
+# one is not directly reachable with a live bug today: the guard tested above
+# ("eyeQualityBatch errors on NULL batchName instead of failing deep inside
+# parLapply()") stops execution at line ~27-32, before line 169 ever runs, so
+# batchName can never actually be NULL by the time this expression executes
+# through the normal eyeQualityBatch() call path. There is no way to reach
+# line 169 with batchName == NULL without bypassing that earlier validation
+# (e.g. by editing the guard out), so a test that calls eyeQualityBatch()
+# itself cannot exercise the fixed branch specifically -- it can only ever
+# hit the guard first. The fix is still correct defense-in-depth (protects
+# against a future refactor loosening or reordering the guard), and is
+# covered by the repo-wide grep regression test below
+# ("no ifelse(is.null(batchName)... pattern survives anywhere in R/"), which
+# would fail if this exact broken pattern were ever reintroduced here.
+
 test_that("eyeQualityBatch does not false-positive its batchName/numberCores guards on valid input", {
   skip_on_cran()
 

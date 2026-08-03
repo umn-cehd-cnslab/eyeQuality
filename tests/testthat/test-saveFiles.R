@@ -173,3 +173,112 @@ test_that("eyeQuality(saveData = TRUE) with no outputDir still writes to the ori
     fs::path(input_dir, "derivatives", "eyeQuality-v1", "sub-01_task-test_recording-eyetracking_physio_desc-p106default_preproc.tsv")
   )
 })
+
+## ---- P1-12 regression tests: batchName left at its NULL default ---------
+
+# saveFiles()'s four `_desc-` descriptor lines used to build the batch-label
+# infix with `ifelse(is.null(batchName), NULL, paste0(batchName, "_"))`.
+# base::ifelse() cannot return NULL for a branch, so this threw "replacement
+# has length zero" whenever batchName was left at its documented NULL
+# default -- i.e. the plainest, most default eyeQuality(saveData = TRUE) call
+# could never complete. This block confirms that call now succeeds, and that
+# the resulting filenames have no batch-label infix at all (e.g.
+# "..._desc-preproc.tsv", not "..._desc-NULL_preproc.tsv" or
+# "..._desc-_preproc.tsv").
+
+test_that("saveFiles() with batchName = NULL does not error and writes files without a batch-label infix", {
+  skip_on_cran()
+
+  input_dir <- tempfile("p112_unit_input_")
+  dir.create(input_dir)
+  on.exit(unlink(input_dir, recursive = TRUE), add = TRUE)
+
+  inputFile <- file.path(input_dir, "sub-01_task-test_physio.tsv")
+
+  minimal_data <- data.frame(x = 1:3, y = 4:6)
+  minimal_events <- data.frame(event = c("start", "end"))
+  minimal_timing <- list(step1 = 0.1, step2 = 0.2)
+  minimal_summary <- data.frame(metric = c("n_rows", "pct_valid"), value = c(3, 1))
+
+  expect_no_error(
+    saveFiles(
+      inputFile,
+      minimal_data,
+      minimal_events,
+      minimal_timing,
+      minimal_summary,
+      batchName = NULL
+    )
+  )
+
+  expected_preproc <- create_new_filename(inputFile, "_desc-preproc", ".tsv")
+  expected_events <- create_new_filename(inputFile, "_desc-events", ".tsv")
+  expected_runtimes <- create_new_filename(inputFile, "_desc-preproc_runtimes", ".tsv")
+  expected_qcsummary <- create_new_filename(inputFile, "_desc-preproc_qcsummary", ".tsv")
+
+  expect_true(file.exists(expected_preproc))
+  expect_true(file.exists(expected_events))
+  expect_true(file.exists(expected_runtimes))
+  expect_true(file.exists(expected_qcsummary))
+
+  # none of the written filenames should contain a batch-label infix
+  # (e.g. "_desc-NULL_" or a stray "_desc-_") anywhere in the basename
+  written <- basename(c(expected_preproc, expected_events, expected_runtimes, expected_qcsummary))
+  expect_false(any(grepl("_desc-NULL_", written)))
+  expect_false(any(grepl("_desc-_", written)))
+})
+
+test_that("eyeQuality(saveData = TRUE) with no batchName argument succeeds and writes output files without the batch-label infix", {
+  skip_on_cran()
+
+  input_dir <- tempfile("p112_e2e_input_")
+  dir.create(input_dir)
+  on.exit(unlink(input_dir, recursive = TRUE), add = TRUE)
+
+  fp <- write_saveFiles_fixture(input_dir)
+
+  expect_no_error(
+    eyeQuality(
+      fp,
+      displayDimensionX_mm = 594,
+      displayDimensionY_mm = 344,
+      saveData = TRUE
+    )
+  )
+  sinkReset()
+
+  preproc_out <- create_new_filename(fp, "_desc-preproc", ".tsv")
+
+  expect_true(file.exists(preproc_out))
+  expect_equal(
+    fs::path(preproc_out),
+    fs::path(
+      input_dir, "derivatives", "eyeQuality-v1",
+      "sub-01_task-test_recording-eyetracking_physio_desc-preproc.tsv"
+    )
+  )
+  # no batch-label infix should appear anywhere in the written filename
+  expect_false(grepl("_desc-NULL_", basename(preproc_out)))
+})
+
+test_that("no ifelse(is.null(batchName)... pattern survives anywhere in R/", {
+  # P1-12's acceptance criteria (2026-08-03 update) explicitly includes:
+  # `grep -rn "ifelse(is.null(batchName)" R/` returns no matches anywhere in
+  # the repo. This is a repo-wide guard against any of the four fixed sites
+  # (R/saveFiles.R x4, R/eyeQuality.R:68, R/eyeQualityBatch.R:169,
+  # R/getFileRunLogName.R:26) regressing back to the broken
+  # `ifelse(is.null(batchName), NULL, paste0(batchName, "_"))` pattern, and
+  # against the same broken pattern being reintroduced anywhere new.
+  pkg_root <- testthat::test_path("..", "..")
+  r_dir <- file.path(pkg_root, "R")
+  skip_if_not(dir.exists(r_dir), "R/ directory not found relative to test file")
+
+  r_files <- list.files(r_dir, pattern = "\\.[Rr]$", full.names = TRUE)
+  hits <- unlist(lapply(r_files, function(f) {
+    lines <- readLines(f, warn = FALSE)
+    matched <- grep("ifelse(is.null(batchName)", lines, fixed = TRUE, value = TRUE)
+    if (length(matched) > 0) paste0(basename(f), ": ", matched) else character(0)
+  }))
+
+  expect_length(hits, 0)
+})

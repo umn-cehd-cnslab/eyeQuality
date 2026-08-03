@@ -14,10 +14,10 @@
 
 # saveFiles <- function(inputFile, args, data, events, timing, summaryData, batchName = NULL) {
 saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = NULL, outputDir = NULL) {
-  eventdesc <- paste0("_desc-", ifelse(is.null(batchName), NULL, paste0(batchName, "_")), "events")
-  preprocdesc <- paste0("_desc-", ifelse(is.null(batchName), NULL, paste0(batchName, "_")), "preproc")
-  runtimesdesc <- paste0("_desc-", ifelse(is.null(batchName), NULL, paste0(batchName, "_")), "preproc_runtimes")
-  qcsummarydesc <- paste0("_desc-", ifelse(is.null(batchName), NULL, paste0(batchName, "_")), "preproc_qcsummary")
+  eventdesc <- paste0("_desc-", if (is.null(batchName)) "" else paste0(batchName, "_"), "events")
+  preprocdesc <- paste0("_desc-", if (is.null(batchName)) "" else paste0(batchName, "_"), "preproc")
+  runtimesdesc <- paste0("_desc-", if (is.null(batchName)) "" else paste0(batchName, "_"), "preproc_runtimes")
+  qcsummarydesc <- paste0("_desc-", if (is.null(batchName)) "" else paste0(batchName, "_"), "preproc_qcsummary")
 
   # save event data
   write.table(
