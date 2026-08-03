@@ -105,3 +105,79 @@ test_that("eyeQualityBatch passes caller-supplied displayDimensionX_mm/Y_mm thro
     data_custom$gazeX.preprocessed_va
   )))
 })
+
+# P1-02: eyeQualityBatch() must validate batchName/numberCores before ever
+# touching the filesystem, so a nonexistent directory is fine for the
+# error-path tests below - the guard checks run before listBidsFiles() or
+# any output file is written.
+
+test_that("eyeQualityBatch errors on NULL batchName instead of failing deep inside parLapply()", {
+  bogus_dir <- tempfile("p102_null_")
+
+  expect_error(
+    eyeQualityBatch(bogus_dir, batchName = NULL),
+    regexp = "batchName"
+  )
+})
+
+test_that("eyeQualityBatch errors on empty-string batchName instead of failing deep inside parLapply()", {
+  bogus_dir <- tempfile("p102_empty_")
+
+  expect_error(
+    eyeQualityBatch(bogus_dir, batchName = ""),
+    regexp = "batchName"
+  )
+})
+
+test_that("eyeQualityBatch errors on negative numberCores instead of failing deep inside parLapply()", {
+  bogus_dir <- tempfile("p102_negcores_")
+
+  expect_error(
+    eyeQualityBatch(bogus_dir, batchName = "x", numberCores = -1),
+    regexp = "numberCores"
+  )
+})
+
+test_that("eyeQualityBatch errors on non-integer numberCores instead of failing deep inside parLapply()", {
+  bogus_dir <- tempfile("p102_fractionalcores_")
+
+  expect_error(
+    eyeQualityBatch(bogus_dir, batchName = "x", numberCores = 2.5),
+    regexp = "numberCores"
+  )
+})
+
+test_that("eyeQualityBatch does not false-positive its batchName/numberCores guards on valid input", {
+  skip_on_cran()
+
+  # A valid batchName with an explicit, valid positive-integer numberCores,
+  # and a valid batchName with numberCores omitted (defaulting to NULL),
+  # should both sail past the new P1-02 guard checks and run the real
+  # pipeline to completion - reusing the P1-01 fixture is the cheapest way
+  # to prove that, since a successful run with an output file on disk is
+  # only possible if neither guard tripped.
+  dir_explicit_cores <- tempfile("p102_valid_explicit_")
+  dir_default_cores <- tempfile("p102_valid_default_")
+  dir.create(dir_explicit_cores)
+  dir.create(dir_default_cores)
+  on.exit(unlink(c(dir_explicit_cores, dir_default_cores), recursive = TRUE), add = TRUE)
+
+  fp_explicit <- write_p1_01_fixture(dir_explicit_cores)
+  fp_default <- write_p1_01_fixture(dir_default_cores)
+
+  expect_error(
+    eyeQualityBatch(dir_explicit_cores, batchName = "p102explicit", numberCores = 1),
+    NA
+  )
+
+  expect_error(
+    eyeQualityBatch(dir_default_cores, batchName = "p102default"),
+    NA
+  )
+
+  out_explicit <- create_new_filename(fp_explicit, "_desc-p102explicit_preproc", ".tsv")
+  out_default <- create_new_filename(fp_default, "_desc-p102default_preproc", ".tsv")
+
+  expect_true(file.exists(out_explicit))
+  expect_true(file.exists(out_default))
+})

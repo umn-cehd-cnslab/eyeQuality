@@ -24,6 +24,23 @@ eyeQualityBatch <-
            ...) {
     # options(error=traceback)
 
+    if (is.null(batchName) ||
+        !is.character(batchName) ||
+        length(batchName) != 1 ||
+        is.na(batchName) ||
+        nchar(batchName) == 0) {
+      stop("eyeQualityBatch: 'batchName' must be a non-empty character string")
+    }
+
+    if (!is.null(numberCores) &&
+        (!is.numeric(numberCores) ||
+         length(numberCores) != 1 ||
+         is.na(numberCores) ||
+         numberCores %% 1 != 0 ||
+         numberCores < 1)) {
+      stop("eyeQualityBatch: 'numberCores' must be a positive integer when supplied")
+    }
+
     batch_run_summary <-
       paste0(directoryBIDS,
              paste0("/preprocessing_batch_summary_desc-", batchName, ".txt"))
