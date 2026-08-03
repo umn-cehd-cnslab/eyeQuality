@@ -18,7 +18,7 @@ test_that("removeInvalidGaze errors on an unrecognized software value instead of
   )
 })
 
-test_that("removeInvalidGaze still marks invalid TobiiPro gaze points as NA", {
+test_that("removeInvalidGaze creates .valid columns for invalid TobiiPro gaze points, leaving raw columns untouched", {
   data <- data.frame(
     gazeLeftX = c(1, 2, 3, 4),
     gazeLeftY = c(1, 2, 3, 4),
@@ -28,11 +28,14 @@ test_that("removeInvalidGaze still marks invalid TobiiPro gaze points as NA", {
 
   result <- expect_error(removeInvalidGaze(data, "left", "TobiiPro"), NA)
 
-  expect_equal(result$gazeLeftX, c(1, NA, 3, 4))
-  expect_equal(result$gazeLeftY, c(1, NA, 3, 4))
+  expect_equal(result$gazeLeftX.valid, c(1, NA, 3, 4))
+  expect_equal(result$gazeLeftY.valid, c(1, NA, 3, 4))
+  #raw columns must be left untouched
+  expect_equal(result$gazeLeftX, c(1, 2, 3, 4))
+  expect_equal(result$gazeLeftY, c(1, 2, 3, 4))
 })
 
-test_that("removeInvalidGaze still marks out-of-threshold TobiiStudio gaze points as NA", {
+test_that("removeInvalidGaze creates .valid columns for out-of-threshold TobiiStudio gaze points, leaving raw columns untouched", {
   data <- data.frame(
     gazeLeftX = c(1, 2, 3, -9999),
     gazeLeftY = c(1, 2, 3, 4),
@@ -42,6 +45,9 @@ test_that("removeInvalidGaze still marks out-of-threshold TobiiStudio gaze point
 
   result <- expect_error(removeInvalidGaze(data, "left", "TobiiStudio"), NA)
 
-  expect_equal(result$gazeLeftX, c(1, NA, 3, NA))
-  expect_equal(result$gazeLeftY, c(1, NA, 3, 4))
+  expect_equal(result$gazeLeftX.valid, c(1, NA, 3, NA))
+  expect_equal(result$gazeLeftY.valid, c(1, NA, 3, 4))
+  #raw columns must be left untouched, including the -9999 sentinel value
+  expect_equal(result$gazeLeftX, c(1, 2, 3, -9999))
+  expect_equal(result$gazeLeftY, c(1, 2, 3, 4))
 })

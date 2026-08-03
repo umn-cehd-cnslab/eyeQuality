@@ -16,20 +16,20 @@ calculateOutputMetrics <- function(data) {
       total_final_rows = sum(ifelse(
         .data$gazeY.es.selection != "both_na", 1, 0
       )),
-      #total rows of missing data, raw
+      #total rows of missing data, raw (validity-masked)
       total_rows_raw_na_Left = sum(ifelse(is.na(
-        .data$gazeLeftX
+        .data$gazeLeftX.valid
       ), 1, 0)),
       total_rows_raw_na_Right = sum(ifelse(is.na(
-        .data$gazeRightX
+        .data$gazeRightX.valid
       ), 1, 0)),
       total_rows_raw_na_X = sum(ifelse(
-        is.na(.data$gazeLeftX) & is.na(.data$gazeRightX),
+        is.na(.data$gazeLeftX.valid) & is.na(.data$gazeRightX.valid),
         1,
         0
       )),
       total_rows_raw_na_Y = sum(ifelse(
-        is.na(.data$gazeLeftY) & is.na(.data$gazeRightY),
+        is.na(.data$gazeLeftY.valid) & is.na(.data$gazeRightY.valid),
         1,
         0
       )),
@@ -48,56 +48,56 @@ calculateOutputMetrics <- function(data) {
       #interpolated gaps filled
       total_rows_interpolated_LeftX = sum(
         ifelse(
-          .data$gazeLeftX %>% replace(is.na(.data), 0) != .data$gazeLeftX.int %>% replace(is.na(.data), 0),
+          .data$gazeLeftX.valid %>% replace(is.na(.data), 0) != .data$gazeLeftX.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightX = sum(
         ifelse(
-          .data$gazeRightX %>% replace(is.na(.data), 0) != .data$gazeRightX.int %>% replace(is.na(.data), 0),
+          .data$gazeRightX.valid %>% replace(is.na(.data), 0) != .data$gazeRightX.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftY = sum(
         ifelse(
-          .data$gazeLeftY %>% replace(is.na(.data), 0) != .data$gazeLeftY.int %>% replace(is.na(.data), 0),
+          .data$gazeLeftY.valid %>% replace(is.na(.data), 0) != .data$gazeLeftY.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightY = sum(
         ifelse(
-          .data$gazeRightY %>% replace(is.na(.data), 0) != .data$gazeRightY.int %>% replace(is.na(.data), 0),
+          .data$gazeRightY.valid %>% replace(is.na(.data), 0) != .data$gazeRightY.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftPupil = sum(
         ifelse(
-          .data$pupilLeft %>% replace(is.na(.data), 0) != .data$pupilLeft.int %>% replace(is.na(.data), 0),
+          .data$pupilLeft.valid %>% replace(is.na(.data), 0) != .data$pupilLeft.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightPupil = sum(
         ifelse(
-          .data$pupilRight %>% replace(is.na(.data), 0) != .data$pupilRight.int %>% replace(is.na(.data), 0),
+          .data$pupilRight.valid %>% replace(is.na(.data), 0) != .data$pupilRight.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftDistZ = sum(
         ifelse(
-          .data$distanceLeftZ %>% replace(is.na(.data), 0) != .data$distanceLeftZ.int %>% replace(is.na(.data), 0),
+          .data$distanceLeftZ.valid %>% replace(is.na(.data), 0) != .data$distanceLeftZ.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightDistZ = sum(
         ifelse(
-          .data$distanceRightZ %>% replace(is.na(.data), 0) != .data$distanceRightZ.int %>% replace(is.na(.data), 0),
+          .data$distanceRightZ.valid %>% replace(is.na(.data), 0) != .data$distanceRightZ.int %>% replace(is.na(.data), 0),
           1,
           0
         )

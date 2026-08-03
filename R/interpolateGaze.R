@@ -28,8 +28,10 @@ interpolateGaze <-
       )
     )
 
-    #Create new names for cols
-    newCols <- paste0(columnsToInterpolate, ".int")
+    #Create new names for cols, stripping a trailing ".valid" so downstream
+    #column names are unchanged (e.g. "gazeLeftX.valid" -> "gazeLeftX.int",
+    #not "gazeLeftX.valid.int")
+    newCols <- paste0(sub("\\.valid$", "", columnsToInterpolate), ".int")
 
     #na.approx replaces NAs by interpolation
     for (int in 1:length(columnsToInterpolate)) {

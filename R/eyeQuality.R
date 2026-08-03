@@ -255,10 +255,10 @@ eyeQuality <- function(filepath,
   data <-
     removeOffscreenGaze(
       data,
-      gazeX = "gazeLeftX",
-      gazeY = "gazeLeftY",
-      distanceZ = "distanceLeftZ",
-      overwrite = c("pupilLeft"),
+      gazeX = "gazeLeftX.valid",
+      gazeY = "gazeLeftY.valid",
+      distanceZ = "distanceLeftZ.valid",
+      overwrite = c("pupilLeft.valid"),
       displayResolutionX_px,
       displayResolutionY_px,
       displayDimensionX_mm,
@@ -268,10 +268,10 @@ eyeQuality <- function(filepath,
   data <-
     removeOffscreenGaze(
       data,
-      gazeX = "gazeRightX",
-      gazeY = "gazeRightY",
-      distanceZ = "distanceRightZ",
-      overwrite = c("pupilRight"),
+      gazeX = "gazeRightX.valid",
+      gazeY = "gazeRightY.valid",
+      distanceZ = "distanceRightZ.valid",
+      overwrite = c("pupilRight.valid"),
       displayResolutionX_px,
       displayResolutionY_px,
       displayDimensionX_mm,
@@ -290,14 +290,14 @@ eyeQuality <- function(filepath,
   #interpolation
   columnsToInterpolate <-
     c(
-      "gazeLeftX",
-      "gazeLeftY",
-      "gazeRightX",
-      "gazeRightY",
-      "distanceLeftZ",
-      "distanceRightZ",
-      "pupilLeft",
-      "pupilRight"
+      "gazeLeftX.valid",
+      "gazeLeftY.valid",
+      "gazeRightX.valid",
+      "gazeRightY.valid",
+      "distanceLeftZ.valid",
+      "distanceRightZ.valid",
+      "pupilLeft.valid",
+      "pupilRight.valid"
     )
   data <- interpolateGaze(data, recordingFrequency_hz, columnsToInterpolate, ...)
   runtime_interpolateGaze <- getCurrentTime()
@@ -575,7 +575,8 @@ eyeQuality <- function(filepath,
   if (!includeIntermediates){
     #remove temporary eye selection calculation columns
     tempCols <- c(colnames(data)[grepl("\\.temp$", colnames(data), ignore.case = TRUE)],
-                  colnames(data)[grepl("\\.es.selection$", colnames(data), ignore.case = TRUE)])
+                  colnames(data)[grepl("\\.es.selection$", colnames(data), ignore.case = TRUE)],
+                  colnames(data)[grepl("\\.valid$", colnames(data), ignore.case = TRUE)])
     for (t in tempCols) {
       data[[t]] <- NULL
     }
