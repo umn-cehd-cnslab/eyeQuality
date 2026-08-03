@@ -16,14 +16,14 @@ extractEventRows <- function(data, software, ...) {
     eventData <- data %>%
       dplyr::filter(.data$Sensor != "Eye Tracker" |
                       is.na(.data$Sensor))
-  }
-
-  else if (software == "TobiiStudio") {
+  } else if (software == "TobiiStudio") {
     gazeStreamData <- data %>%
       dplyr::filter(.data$eyeTrackerTimestamp != -9999)
     eventData <- data %>%
       dplyr::filter(.data$eyeTrackerTimestamp == -9999 |
                       is.na(.data$eyeTrackerTimestamp))
+  } else {
+    stop("extractEventRows: unrecognized software value '", software, "'")
   }
   return(list(gazeStreamData, eventData))
 }
