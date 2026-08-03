@@ -33,3 +33,12 @@ vignettes/*.pdf
 .Renviron
 # Mac Hidden Files
 .DS_Store
+
+# --- Local Claude Code tooling: not part of the published repo ---
+# Subagents, skills, hooks, and settings used to work through the
+# implementation plan. Kept local; distributed to collaborators
+# out-of-band, not via git, so the published repo/history stays silent
+# on tooling used during development.
+.claude/
+CLAUDE.md
+
