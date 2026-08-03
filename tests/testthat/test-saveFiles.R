@@ -261,6 +261,86 @@ test_that("eyeQuality(saveData = TRUE) with no batchName argument succeeds and w
   expect_false(grepl("_desc-NULL_", basename(preproc_out)))
 })
 
+## ---- P1-13 regression tests: create_new_filename() honoring newFileExtension ----
+
+# create_new_filename() used to set file_extension from the *input* file's own
+# extension via fs::path_ext(inputfile), then only override it with
+# newFileExtension when newFileExtension did NOT start with a dot:
+#   if (!grepl("^\\.", newFileExtension)) { file_extension <- paste0(".", newFileExtension) }
+# Every real call site passes a dot-prefixed value (".txt", ".tsv"), so the
+# override never fired and the input file's own extension was silently kept
+# -- most visibly, the run-log call in eyeQuality() requests ".txt" on a
+# ".tsv" input and got ".tsv" back instead. A second, latent bug: even when
+# the override DID fire (non-dot-prefixed newFileExtension), the old code
+# produced a leading-dot value ("." + "txt") that combined with
+# fs::path(ext = ...)'s own dot-prepending to build a double-dot filename
+# like "bar..txt". The fix normalizes unconditionally:
+# `file_extension <- sub("^\\.", "", newFileExtension)`.
+
+test_that("create_new_filename() overrides a dot-prefixed newFileExtension that differs from the input's own extension", {
+  base_dir <- tempfile("p113_dotprefixed_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  inputfile <- file.path(base_dir, "foo.tsv")
+
+  result <- create_new_filename(inputfile, "_desc-runlog", ".txt")
+
+  expect_true(grepl("\\.txt$", result))
+  expect_false(grepl("\\.tsv$", result))
+})
+
+test_that("create_new_filename() with a non-dot-prefixed newFileExtension does not produce a double-dot extension", {
+  base_dir <- tempfile("p113_nodot_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  inputfile <- file.path(base_dir, "foo.tsv")
+
+  result <- create_new_filename(inputfile, "_desc-x", "txt")
+
+  expect_true(grepl("\\.txt$", result))
+  expect_false(grepl("\\.\\.txt$", result))
+})
+
+test_that("create_new_filename() with newFileExtension omitted still preserves the input file's own extension", {
+  base_dir <- tempfile("p113_omitted_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  inputfile <- file.path(base_dir, "foo.tsv")
+
+  result <- create_new_filename(inputfile, "_desc-x")
+
+  expect_true(grepl("\\.tsv$", result))
+})
+
+test_that("eyeQuality(saveData = TRUE) writes its run log with a .txt extension, not the input file's .tsv extension", {
+  skip_on_cran()
+
+  input_dir <- tempfile("p113_e2e_input_")
+  dir.create(input_dir)
+  on.exit(unlink(input_dir, recursive = TRUE), add = TRUE)
+
+  fp <- write_saveFiles_fixture(input_dir)
+
+  eyeQuality(
+    fp,
+    displayDimensionX_mm = 594,
+    displayDimensionY_mm = 344,
+    saveData = TRUE,
+    batchName = "p113runlog"
+  )
+  sinkReset()
+
+  # Mirrors the run-log path construction in eyeQuality.R exactly.
+  runlog_txt <- create_new_filename(fp, "_desc-p113runlog_preproc_runlog", ".txt")
+  runlog_wrong_tsv <- create_new_filename(fp, "_desc-p113runlog_preproc_runlog", ".tsv")
+
+  expect_true(file.exists(runlog_txt))
+  expect_false(file.exists(runlog_wrong_tsv))
+})
+
 test_that("no ifelse(is.null(batchName)... pattern survives anywhere in R/", {
   # P1-12's acceptance criteria (2026-08-03 update) explicitly includes:
   # `grep -rn "ifelse(is.null(batchName)" R/` returns no matches anywhere in

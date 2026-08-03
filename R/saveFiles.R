@@ -74,9 +74,7 @@ create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, 
 
   # replace with newFileExtension if specified.
   if (!is.null(newFileExtension)) {
-    if (!grepl("^\\.", newFileExtension)) {
-      file_extension <- paste0(".", newFileExtension)
-    }
+    file_extension <- sub("^\\.", "", newFileExtension)
   }
 
   fs::dir_create(newdirectory) # create the derivatives directory, if it doesn't exist
