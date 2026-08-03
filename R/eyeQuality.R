@@ -78,9 +78,24 @@ eyeQuality <- function(filepath,
   } else
     (runtime_Log <- NULL)
 
+  argValueSummaries <- vapply(args, function(argValue) {
+    if (is.data.frame(argValue)) {
+      paste0("<data.frame: ", nrow(argValue), "x", ncol(argValue), ">")
+    } else if (is.list(argValue)) {
+      paste0("<list: length ", length(argValue), ">")
+    } else if (is.null(argValue)) {
+      "NULL"
+    } else if (is.atomic(argValue) && length(argValue) == 1) {
+      as.character(argValue)
+    } else if (is.atomic(argValue)) {
+      paste0("<", class(argValue)[1], ": length ", length(argValue), ">")
+    } else {
+      paste0("<", class(argValue)[1], ">")
+    }
+  }, character(1))
   argList <-
     paste0("eyeQuality(",
-           paste(stringr::str_glue("{names(args)} = {args}"), collapse = ", "),
+           paste(stringr::str_glue("{names(args)} = {argValueSummaries}"), collapse = ", "),
            ")")
   print(paste0("command run: \n", argList))
   # print_or_save(argList, saveData, runtime_Log)
