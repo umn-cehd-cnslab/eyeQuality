@@ -14,6 +14,7 @@
 #' @param timeStart optional Recording Timestamp of the first data point to include. Default NULL
 #' @param timeEnd optional Recording Timestamp of the last data point to include. Default NULL
 #' @param batchName optional string to append output files with a specific batch run label. Default NULL
+#' @param outputDir optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL
 #' @param ... additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.
 #'
 #' @importFrom readr read_delim
@@ -36,6 +37,7 @@ eyeQuality <- function(filepath,
                            timeStart = NULL,
                            timeEnd = NULL,
                            batchName = NULL,
+                           outputDir = NULL,
                            ...) {
   #Wrapper
   runtime_start <- getCurrentTime()
@@ -66,7 +68,8 @@ eyeQuality <- function(filepath,
                             ifelse(is.null(batchName), NULL, paste0(batchName, "_")),
                             "preproc_runlog"
                           ),
-                          ".txt")
+                          ".txt",
+                          outputDir = outputDir)
     #if we are saving the output, sink all cmd messages to file
     sinkToOutputFile(runtime_Log)
     #save initial function call to run log.
@@ -592,7 +595,8 @@ eyeQuality <- function(filepath,
               eventData,
               timingData,
               summaryMetrics,
-              batchName)
+              batchName,
+              outputDir)
     sinkReset()
   } else {
     return(data)

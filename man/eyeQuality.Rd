@@ -19,6 +19,7 @@ eyeQuality(
   timeStart = NULL,
   timeEnd = NULL,
   batchName = NULL,
+  outputDir = NULL,
   ...
 )
 }
@@ -50,6 +51,8 @@ eyeQuality(
 \item{timeEnd}{optional Recording Timestamp of the last data point to include. Default NULL}
 
 \item{batchName}{optional string to append output files with a specific batch run label. Default NULL}
+
+\item{outputDir}{optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
 
 \item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
 }

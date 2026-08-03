@@ -4,7 +4,12 @@
 \alias{create_new_filename}
 \title{create_new_filename: create new output filename from save directory and data file}
 \usage{
-create_new_filename(inputfile, appendname, newFileExtension = NULL)
+create_new_filename(
+  inputfile,
+  appendname,
+  newFileExtension = NULL,
+  outputDir = NULL
+)
 }
 \arguments{
 \item{inputfile}{name of input file}
@@ -12,6 +17,8 @@ create_new_filename(inputfile, appendname, newFileExtension = NULL)
 \item{appendname}{text to append before the file extension}
 
 \item{newFileExtension}{new file extension to use, if different from filename}
+
+\item{outputDir}{optional directory to write the output file to, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
 }
 \description{
 create_new_filename: create new output filename from save directory and data file
