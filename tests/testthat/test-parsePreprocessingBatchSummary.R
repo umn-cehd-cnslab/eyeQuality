@@ -105,6 +105,36 @@ test_that("parsePreprocessingBatchSummary returns character(0) for an empty fail
   expect_equal(result, character(0))
 })
 
+# Regression test for P1-15: R/parsePreprocessingBatchSummary.R:29 onward
+# previously subset the dplyr data pronoun positionally (`.data[[1]]`), which
+# errors under this project's installed rlang/dplyr versions ("Must subset
+# the data pronoun with a string, not the number 1."). It's now
+# `.data[["X1"]]`, the actual auto-assigned column name read_tsv() gives an
+# unnamed single-column file (col_names = FALSE).
+test_that("parsePreprocessingBatchSummary parses the summary line's fields for info_to_extract = 'summary'", {
+  dir <- tempfile("p107_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  successful <- c(
+    "/data/sub-01_task-test_recording-eyetracking_physio.tsv",
+    "/data/sub-02_task-test_recording-eyetracking_physio.tsv"
+  )
+  failed <- c("/data/sub-03_task-test_recording-eyetracking_physio.tsv")
+
+  f <- write_batch_summary_fixture(dir, successful = successful, failed = failed)
+
+  result <- parsePreprocessingBatchSummary(f, "summary")
+
+  expect_equal(result$directory, "/data/study")
+  expect_equal(result$datasize, 12.3)
+  expect_equal(result$nfiles, 3)
+  expect_equal(result$nPreprocessed, 2)
+  expect_equal(result$nFailed, 1)
+  expect_equal(result$runDuration, "0h 0m 5s")
+  expect_equal(result$runTime, 5)
+})
+
 test_that("parsePreprocessingBatchSummary errors on an unrecognized info_to_extract value", {
   dir <- tempfile("p107_")
   dir.create(dir)

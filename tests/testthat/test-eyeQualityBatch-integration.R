@@ -144,16 +144,10 @@ test_that("parsePreprocessingBatchSummary() round-trips a real eyeQualityBatch()
   summary_file <- file.path(fixture$dir, "preprocessing_batch_summary_desc-p209roundtrip.txt")
   expect_true(file.exists(summary_file))
 
-  # NOTE: this test intentionally does NOT exercise
-  # info_to_extract = "summary" (the function's own default value) here - see
-  # the dedicated test immediately below, which documents a pre-existing,
-  # always-reproducing bug in that branch discovered while writing this
-  # integration test (R/parsePreprocessingBatchSummary.R:29's
-  # `.data[[1]]` positional pronoun subsetting errors under the
-  # rlang/dplyr versions installed in this project's dev environment -
-  # rlang 1.1.1 / dplyr 1.1.2 - with "Must subset the data pronoun with a
-  # string, not the number 1."). That bug is unrelated to P2-09's fixture or
-  # eyeQualityBatch() itself and is out of scope to fix here.
+  # "summary" section is covered separately below (P1-15 fixed
+  # R/parsePreprocessingBatchSummary.R:29's `.data[[1]]` positional pronoun
+  # subsetting, which previously errored under this project's rlang/dplyr
+  # versions).
 
   # "successfulfiles" section - eyeQualityBatch() writes the *_qcsummary.tsv
   # output paths (not the raw input paths) into this section, so the
@@ -176,36 +170,21 @@ test_that("parsePreprocessingBatchSummary() round-trips a real eyeQualityBatch()
   expect_equal(failed_result, character(0))
 })
 
-test_that("parsePreprocessingBatchSummary(info_to_extract = 'summary') currently errors on a real eyeQualityBatch() run's summary file (pre-existing bug, not in P2-09's scope)", {
+test_that("parsePreprocessingBatchSummary(info_to_extract = 'summary') round-trips a real eyeQualityBatch() run's summary file", {
   skip_on_cran()
 
-  # info_to_extract = "summary" is parsePreprocessingBatchSummary()'s own
-  # default value, and is exactly the branch acceptance criterion 3 asks to
-  # round-trip - but as written, R/parsePreprocessingBatchSummary.R:29
-  # onward calls `.data[[1]]` (positional/integer subsetting of the dplyr
-  # data pronoun) inside a mutate(), which errors under the rlang/dplyr
-  # versions installed here regardless of what the input file contains: `!
-  # Must subset the data pronoun with a string, not the number 1.` This
-  # reproduces from any well-formed batch summary file, not just the one
-  # produced by this fixture - confirmed independently against a
-  # hand-written fixture matching write_batch_summary_fixture()'s format in
-  # test-parsePreprocessingBatchSummary.R. This test documents that current,
-  # broken behavior rather than asserting the (currently unreachable)
-  # correct round-trip; when the underlying `.data[[1]]` bug is fixed, this
-  # test should fail and be replaced with a real round-trip assertion
-  # (nfiles == 4, nPreprocessed == 4, nFailed == 0, directory == the batch
-  # directory, etc., mirroring the "successfulfiles"/"failedfiles" checks
-  # above).
   fixture <- copy_bids_sample_fixture()
   on.exit(unlink(fixture$dir, recursive = TRUE), add = TRUE)
 
-  eyeQualityBatch(fixture$dir, batchName = "p209summarybug", numberCores = 1)
+  eyeQualityBatch(fixture$dir, batchName = "p209summary", numberCores = 1)
 
-  summary_file <- file.path(fixture$dir, "preprocessing_batch_summary_desc-p209summarybug.txt")
+  summary_file <- file.path(fixture$dir, "preprocessing_batch_summary_desc-p209summary.txt")
   expect_true(file.exists(summary_file))
 
-  expect_error(
-    parsePreprocessingBatchSummary(summary_file, "summary"),
-    regexp = "subset the data pronoun"
-  )
+  summary_result <- parsePreprocessingBatchSummary(summary_file, "summary")
+
+  expect_equal(summary_result$nfiles, 4)
+  expect_equal(summary_result$nPreprocessed, 4)
+  expect_equal(summary_result$nFailed, 0)
+  expect_equal(summary_result$directory, fixture$dir)
 })
