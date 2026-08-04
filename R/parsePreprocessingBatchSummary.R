@@ -26,23 +26,23 @@ parsePreprocessingBatchSummary <-
       ) %>%
         tail(n = 1) %>%
         mutate(
-          directory = str_extract(.data[[1]], "directory: ([\\S]+),", group = 1),
+          directory = str_extract(.data[["X1"]], "directory: ([\\S]+),", group = 1),
           datasize = as.numeric(
-            str_extract(.data[[1]], "data size \\(MB\\): ([\\S]+),", group = 1)
+            str_extract(.data[["X1"]], "data size \\(MB\\): ([\\S]+),", group = 1)
           ),
           nfiles = as.numeric(str_extract(
-            .data[[1]], "n \\(ET Files\\): ([\\S]+),",
+            .data[["X1"]], "n \\(ET Files\\): ([\\S]+),",
             group = 1
           )),
           nPreprocessed = as.numeric(
-            str_extract(.data[[1]], "n \\(preprocessed\\): ([\\S]+),", group = 1)
+            str_extract(.data[["X1"]], "n \\(preprocessed\\): ([\\S]+),", group = 1)
           ),
           nFailed = as.numeric(
-            str_extract(.data[[1]], "n \\(failed preprocessing\\): ([\\S]+),", group = 1)
+            str_extract(.data[["X1"]], "n \\(failed preprocessing\\): ([\\S]+),", group = 1)
           ),
-          runDuration = str_extract(.data[[1]], "run duration: ([\\S\\s]+),", group = 1),
+          runDuration = str_extract(.data[["X1"]], "run duration: ([\\S\\s]+),", group = 1),
           runTime = as.numeric(str_extract(
-            .data[[1]], "runtime \\(s\\): ([\\S]+)$",
+            .data[["X1"]], "runtime \\(s\\): ([\\S]+)$",
             group = 1
           )),
         ) %>%
