@@ -15,7 +15,7 @@ setTimestamps <-
     if (setTimes) {
       data <- data %>%
         filter(.data$recordingTimestamp_ms >= timeStart &
-                 .data$recordingTimestamp_ms <= timeEnd)
+          .data$recordingTimestamp_ms <= timeEnd)
     }
     return(data)
   }

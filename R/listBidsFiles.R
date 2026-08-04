@@ -25,7 +25,8 @@ listBidsFiles <-
 
     # initialize list of files to append as we search directory
     files <- list()
-    directories_for_files = list()
+    directories_for_files <- list()
+    skipped_dirs <- character(0)
 
     # Next we find the list the directories to check.
     if (identical(subject_dirs, character(0))) {
@@ -54,8 +55,9 @@ listBidsFiles <-
             # pull subdirectories in subject_dir
             session_dirs <-
               list.dirs(subject_dir,
-                        full.names = TRUE,
-                        recursive = FALSE)
+                full.names = TRUE,
+                recursive = FALSE
+              )
             # loop through session directories to match
             for (session_dir in session_dirs) {
               # if the session_dir matches sessionPattern_regex
@@ -68,6 +70,7 @@ listBidsFiles <-
                     "Subdirectory name doesn't match sessionPattern_regex. Skipping {session_dir}"
                   )
                 )
+                skipped_dirs <- c(skipped_dirs, session_dir)
                 next
               }
             } # end for loop for session_dirs
@@ -79,6 +82,7 @@ listBidsFiles <-
               "Directory name doesn't match subjectPattern_regex. Skipping {subject_dir}"
             )
           )
+          skipped_dirs <- c(skipped_dirs, subject_dir)
           next
         }
       } # end for loop for subject_dirs
@@ -105,14 +109,20 @@ listBidsFiles <-
       }
     }
 
-    if (length(files) == 0 ) {
+    result <- unlist(files)
+    if (is.null(result)) {
+      result <- character(0)
+    }
+    attr(result, "skipped") <- skipped_dirs
+
+    if (length(files) == 0) {
       print("WARNING: No files found. If you expect to have data files in your directory, please check your directory structure.")
       print("Confirm subjectPattern_regex and session_Pattern_regex correctly find file(s) in your subject/session directories.")
       print("Otherwise specify a modalityPattern_regex with the naming convention for your eyetracking files.")
       print("If you have 'subject_dir/session_dir/additional_directory/data_files.tsv' structure, specify recursiveSearch = TRUE.")
 
-      return(unlist(files))
+      return(result)
     } else {
-      return(unlist(files))
+      return(result)
     }
   }

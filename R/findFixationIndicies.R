@@ -16,23 +16,23 @@ findFixationIndices <- function(entry.class) {
   rle_nofrag_index <-
     which(rle(!is.na(entry.class))$values == FALSE)
 
-  end.sac = cumsum(rle(entry.class)$lengths)
-  start.sac = c(1, lag(end.sac)[-1] + 1)
+  end.sac <- cumsum(rle(entry.class)$lengths)
+  start.sac <- c(1, lag(end.sac)[-1] + 1)
   lengths.sac <- end.sac - start.sac + 1
 
-  end.unc = cumsum(rle(entry.class)$lengths)
-  start.unc = c(1, lag(end.unc)[-1] + 1)
+  end.unc <- cumsum(rle(entry.class)$lengths)
+  start.unc <- c(1, lag(end.unc)[-1] + 1)
   lengths.unc <- end.unc - start.unc + 1
 
-  end.fix = cumsum(rle(entry.class)$lengths)
-  start.fix = c(1, lag(end.fix)[-1] + 1)
+  end.fix <- cumsum(rle(entry.class)$lengths)
+  start.fix <- c(1, lag(end.fix)[-1] + 1)
   lengths.fix <- end.fix - start.fix + 1
 
-  end.frag = cumsum(rle(!is.na(entry.class))$lengths)
-  start.frag = c(1, lag(end.frag)[-1] + 1)
+  end.frag <- cumsum(rle(!is.na(entry.class))$lengths)
+  start.frag <- c(1, lag(end.frag)[-1] + 1)
   lengths.frag <- end.frag - start.frag + 1
 
-  #print(data[start.fix[rle_fix_index][ifix]:end.fix[rle_fix_index][ifix],c("class","class.adj","class.adj.euc","class.adj.gap.dur","class.adj.xva","class.adj.yva","class.adj.num")])
+  # print(data[start.fix[rle_fix_index][ifix]:end.fix[rle_fix_index][ifix],c("class","class.adj","class.adj.euc","class.adj.gap.dur","class.adj.xva","class.adj.yva","class.adj.num")])
 
   index_summary <-
     list(
@@ -55,5 +55,4 @@ findFixationIndices <- function(entry.class) {
       "lengths.frag" = lengths.frag
     )
   return(index_summary)
-
 }

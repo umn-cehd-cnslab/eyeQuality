@@ -17,14 +17,16 @@ getFileRunLogName <- function(filename, batchName = NULL) {
   # sink(runlog, append = FALSE, type = "output")
   # base <- basename(path_ext_remove(x))
   base <-
-    basename(path_ext_remove(filename)) #CHECK: does this work?
+    basename(path_ext_remove(filename)) # CHECK: does this work?
   directory <- path_dir(filename)
   log <-
-    paste0(basename,
-           "_desc-",
-           ifelse(is.null(batchName), NULL, paste0(batchName, "_")),
-           "preproc_runlog2",
-           ".txt")
+    paste0(
+      base,
+      "_desc-",
+      if (is.null(batchName)) "" else paste0(batchName, "_"),
+      "preproc_runlog2",
+      ".txt"
+    )
   logpath <- path(directory, "derivatives", "eyeQuality-v1", log)
   return(logpath)
 }

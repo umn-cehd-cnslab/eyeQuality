@@ -25,49 +25,49 @@ renameColumns <- function(data, software) {
       #   gazeLeftY = .data$`"GazePointLeftY (ADCSpx)"`,
       #   gazeRightX = .data$`"GazePointRightX (ADCSpx)"`,
       #   gazeRightY = .data$`"GazePointRightY (ADCSpx)"`,
-    #   distanceLeftZ = .data$`"EyePosLeftZ (ADCSmm)"`,
-    #   distanceRightZ = .data$`"EyePosRightZ (ADCSmm)"`
-    #   pupilLeft = `"PupilLeft"`,
-    #   pupilRight = `"PupilRight"`,
-    #   validityLeft = `"ValidityLeft"`,
-    #   validityRight = `ValidityRight`
-    # )
-    # rename(
-    #   event = `"StudioEvent"`,
-    #   eventValue = `"StudioEventData"`,
-    #   recordingDuration_ms = "RecordingDuration",
-    #   # RecordingResolution = `RecordingResolution`, #Default column name for TobiiStudio
-    #   eyeTrackerTimestamp = `"EyetrackerTimestamp"`,
-    #   recordingTimestamp_ms = `"RecordingTimestamp"`,
-    #   gazeLeftX = `"GazePointLeftX (ADCSpx)"`,
-    #   gazeLeftY = `"GazePointLeftY (ADCSpx)"`,
-    #   gazeRightX = `"GazePointRightX (ADCSpx)"`,
-    #   gazeRightY = `"GazePointRightY (ADCSpx)"`,
-    #   distanceLeftZ = `"EyePosLeftZ (ADCSmm)"`,
-    #   distanceRightZ = `"EyePosRightZ (ADCSmm)"`
-    #   pupilLeft = `"PupilLeft"`,
-    #   pupilRight = `"PupilRight"`,
-    #   validityLeft = `"ValidityLeft"`,
-    #   validityRight = `"ValidityRight"`
-    # )
-    dplyr::rename(
-      event = "StudioEvent",
-      eventValue = "StudioEventData",
-      recordingDuration_ms = "RecordingDuration",
-      # RecordingResolution = `RecordingResolution`, #Default column name for TobiiStudio
-      eyeTrackerTimestamp = "EyeTrackerTimestamp",
-      recordingTimestamp_ms = "RecordingTimestamp",
-      gazeLeftX = "GazePointLeftX (ADCSpx)",
-      gazeLeftY = "GazePointLeftY (ADCSpx)",
-      gazeRightX = "GazePointRightX (ADCSpx)",
-      gazeRightY = "GazePointRightY (ADCSpx)",
-      distanceLeftZ = "EyePosLeftZ (ADCSmm)",
-      distanceRightZ = "EyePosRightZ (ADCSmm)",
-      pupilLeft = "PupilLeft",
-      pupilRight = "PupilRight",
-      validityLeft = "ValidityLeft",
-      validityRight = "ValidityRight"
-    )
+      #   distanceLeftZ = .data$`"EyePosLeftZ (ADCSmm)"`,
+      #   distanceRightZ = .data$`"EyePosRightZ (ADCSmm)"`
+      #   pupilLeft = `"PupilLeft"`,
+      #   pupilRight = `"PupilRight"`,
+      #   validityLeft = `"ValidityLeft"`,
+      #   validityRight = `ValidityRight`
+      # )
+      # rename(
+      #   event = `"StudioEvent"`,
+      #   eventValue = `"StudioEventData"`,
+      #   recordingDuration_ms = "RecordingDuration",
+      #   # RecordingResolution = `RecordingResolution`, #Default column name for TobiiStudio
+      #   eyeTrackerTimestamp = `"EyetrackerTimestamp"`,
+      #   recordingTimestamp_ms = `"RecordingTimestamp"`,
+      #   gazeLeftX = `"GazePointLeftX (ADCSpx)"`,
+      #   gazeLeftY = `"GazePointLeftY (ADCSpx)"`,
+      #   gazeRightX = `"GazePointRightX (ADCSpx)"`,
+      #   gazeRightY = `"GazePointRightY (ADCSpx)"`,
+      #   distanceLeftZ = `"EyePosLeftZ (ADCSmm)"`,
+      #   distanceRightZ = `"EyePosRightZ (ADCSmm)"`
+      #   pupilLeft = `"PupilLeft"`,
+      #   pupilRight = `"PupilRight"`,
+      #   validityLeft = `"ValidityLeft"`,
+      #   validityRight = `"ValidityRight"`
+      # )
+      dplyr::rename(
+        event = "StudioEvent",
+        eventValue = "StudioEventData",
+        recordingDuration_ms = "RecordingDuration",
+        # RecordingResolution = `RecordingResolution`, #Default column name for TobiiStudio
+        eyeTrackerTimestamp = "EyeTrackerTimestamp",
+        recordingTimestamp_ms = "RecordingTimestamp",
+        gazeLeftX = "GazePointLeftX (ADCSpx)",
+        gazeLeftY = "GazePointLeftY (ADCSpx)",
+        gazeRightX = "GazePointRightX (ADCSpx)",
+        gazeRightY = "GazePointRightY (ADCSpx)",
+        distanceLeftZ = "EyePosLeftZ (ADCSmm)",
+        distanceRightZ = "EyePosRightZ (ADCSmm)",
+        pupilLeft = "PupilLeft",
+        pupilRight = "PupilRight",
+        validityLeft = "ValidityLeft",
+        validityRight = "ValidityRight"
+      )
 
     # split RecordingResolution column into ResolutionWidth and ResolutionHeight
     data <-
@@ -77,8 +77,7 @@ renameColumns <- function(data, software) {
         sep = " x ",
         convert = TRUE
       )
-  }
-  else if (str_detect(software, "TobiiPro")) {
+  } else if (str_detect(software, "TobiiPro")) {
     data <- data %>%
       # dplyr::rename(
       #   event = `"Event"`,
@@ -91,52 +90,52 @@ renameColumns <- function(data, software) {
       #   gazeLeftX = .data$`Gaze point left X`,
       #   gazeLeftY = .data$`Gaze point left Y`,
       #   gazeRightX = .data$`Gaze point right X`,
-    #   gazeRightY = .data$`Gaze point right Y`,
-    #   distanceLeftZ = .data$`Eye position left Z (DACSmm)`,
-    #   distanceRightZ = .data$`Eye position right Z (DACSmm)`,
-    #   pupilLeft = .data$`Pupil diameter left`,
-    #   pupilRight = .data$`Pupil diameter right`,
-    #   validityLeft = .data$`Validity left`,
-    #   validityRight = .data$`Validity right`
-    # )
-    # rename(
-    #   event = `"Event"`,
-    #   eventValue = `"Event value"`,
-    #   recordingDuration_ms = `"Recording duration"`,
-    #   resolutionHeight = `"Recording resolution height"`,
-    #   resolutionWidth = `"Recording resolution width"`,
-    #   eyeTrackerTimestamp = `"Eyetracker timestamp"`,
-    #   recordingTimestamp_ms = `"Recording timestamp"`,
-    #   gazeLeftX = `"Gaze point left X"`,
-    #   gazeLeftY = `"Gaze point left Y"`,
-    #   gazeRightX = `"Gaze point right X"`,
-    #   gazeRightY = `"Gaze point right Y"`,
-    #   distanceLeftZ = `"Eye position left Z (DACSmm)"`,
-    #   distanceRightZ = `"Eye position right Z (DACSmm)"`,
-    #   pupilLeft = `"Pupil diameter left"`,
-    #   pupilRight = `"Pupil diameter right"`,
-    #   validityLeft = `"Validity left"`,
-    #   validityRight = `"Validity right"`
-    # )
-    rename(
-      `event` = "Event",
-      `eventValue` = "Event value",
-      `recordingDuration_ms` = "Recording duration",
-      `resolutionHeight` = "Recording resolution height",
-      `resolutionWidth` = "Recording resolution width",
-      `eyeTrackerTimestamp` = "Eyetracker timestamp",
-      `recordingTimestamp_ms` = "Recording timestamp",
-      `gazeLeftX` = "Gaze point left X",
-      `gazeLeftY` = "Gaze point left Y",
-      `gazeRightX` = "Gaze point right X",
-      `gazeRightY` = "Gaze point right Y",
-      `distanceLeftZ` = "Eye position left Z (DACSmm)",
-      `distanceRightZ` = "Eye position right Z (DACSmm)",
-      `pupilLeft` = "Pupil diameter left",
-      `pupilRight` = "Pupil diameter right",
-      `validityLeft` = "Validity left",
-      `validityRight` = "Validity right"
-    )
+      #   gazeRightY = .data$`Gaze point right Y`,
+      #   distanceLeftZ = .data$`Eye position left Z (DACSmm)`,
+      #   distanceRightZ = .data$`Eye position right Z (DACSmm)`,
+      #   pupilLeft = .data$`Pupil diameter left`,
+      #   pupilRight = .data$`Pupil diameter right`,
+      #   validityLeft = .data$`Validity left`,
+      #   validityRight = .data$`Validity right`
+      # )
+      # rename(
+      #   event = `"Event"`,
+      #   eventValue = `"Event value"`,
+      #   recordingDuration_ms = `"Recording duration"`,
+      #   resolutionHeight = `"Recording resolution height"`,
+      #   resolutionWidth = `"Recording resolution width"`,
+      #   eyeTrackerTimestamp = `"Eyetracker timestamp"`,
+      #   recordingTimestamp_ms = `"Recording timestamp"`,
+      #   gazeLeftX = `"Gaze point left X"`,
+      #   gazeLeftY = `"Gaze point left Y"`,
+      #   gazeRightX = `"Gaze point right X"`,
+      #   gazeRightY = `"Gaze point right Y"`,
+      #   distanceLeftZ = `"Eye position left Z (DACSmm)"`,
+      #   distanceRightZ = `"Eye position right Z (DACSmm)"`,
+      #   pupilLeft = `"Pupil diameter left"`,
+      #   pupilRight = `"Pupil diameter right"`,
+      #   validityLeft = `"Validity left"`,
+      #   validityRight = `"Validity right"`
+      # )
+      rename(
+        `event` = "Event",
+        `eventValue` = "Event value",
+        `recordingDuration_ms` = "Recording duration",
+        `resolutionHeight` = "Recording resolution height",
+        `resolutionWidth` = "Recording resolution width",
+        `eyeTrackerTimestamp` = "Eyetracker timestamp",
+        `recordingTimestamp_ms` = "Recording timestamp",
+        `gazeLeftX` = "Gaze point left X",
+        `gazeLeftY` = "Gaze point left Y",
+        `gazeRightX` = "Gaze point right X",
+        `gazeRightY` = "Gaze point right Y",
+        `distanceLeftZ` = "Eye position left Z (DACSmm)",
+        `distanceRightZ` = "Eye position right Z (DACSmm)",
+        `pupilLeft` = "Pupil diameter left",
+        `pupilRight` = "Pupil diameter right",
+        `validityLeft` = "Validity left",
+        `validityRight` = "Validity right"
+      )
   }
   return(data)
 }

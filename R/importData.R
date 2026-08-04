@@ -13,8 +13,8 @@
 #' @importFrom readr read_tsv
 #' @importFrom readxl read_excel
 #'
-importData  <- function(filepath, ...) {
-  #TODO:add checks for R.util::isFile(filepath)
+importData <- function(filepath, ...) {
+  # TODO:add checks for R.util::isFile(filepath)
   fileext <- file_ext(filepath)
   if (fileext == "csv") {
     importedtbl <- read_csv(filepath, ...)

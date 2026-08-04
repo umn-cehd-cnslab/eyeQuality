@@ -4,7 +4,15 @@
 \alias{saveFiles}
 \title{Save Files}
 \usage{
-saveFiles(inputFile, data, events, timing, summaryData, batchName = NULL)
+saveFiles(
+  inputFile,
+  data,
+  events,
+  timing,
+  summaryData,
+  batchName = NULL,
+  outputDir = NULL
+)
 }
 \arguments{
 \item{inputFile}{string filepath of the input file, to generate save file names}
@@ -18,6 +26,8 @@ saveFiles(inputFile, data, events, timing, summaryData, batchName = NULL)
 \item{summaryData}{data from the calcualteOutputMetrics function}
 
 \item{batchName}{batch name to insert into save files, useful for running batches with different parameters and/or for specific trials}
+
+\item{outputDir}{optional directory to write output files to, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
 }
 \description{
 Save Files

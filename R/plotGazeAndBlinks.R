@@ -11,10 +11,8 @@
 #' @export
 #'
 plotGazeAndBlinks <- function(data, column, showFixations = FALSE) {
-
-
   ivt_ranges <- data %>% getSequenceGroupEndpoints("IVT.classification")
-  if(showFixations == FALSE) {
+  if (showFixations == FALSE) {
     ivt_ranges <- ivt_ranges %>% filter(.data$group == "missing")
   }
   blink_ranges <- data %>%
@@ -31,7 +29,8 @@ plotGazeAndBlinks <- function(data, column, showFixations = FALSE) {
         xmin = .data$start_recordingTimestamp_ms, xmax = .data$end_recordingTimestamp_ms,
         ymax = Inf,
         ymin = -Inf,
-        fill = as.factor(.data$group)),
+        fill = as.factor(.data$group)
+      ),
       alpha = 0.4
     ) +
     ggplot2::geom_rect(
@@ -44,12 +43,13 @@ plotGazeAndBlinks <- function(data, column, showFixations = FALSE) {
       ),
       alpha = 0.8
     ) +
-    ggplot2::geom_point(ggplot2::aes(x=.data$recordingTimestamp_ms, y=!!rlang::sym(column)), size=0.5, alpha = 0.8) +
-    ggplot2::geom_line(ggplot2::aes(x=.data$recordingTimestamp_ms, y=!!rlang::sym(column)), alpha = 0.5) +
+    ggplot2::geom_point(ggplot2::aes(x = .data$recordingTimestamp_ms, y = !!rlang::sym(column)), size = 0.5, alpha = 0.8) +
+    ggplot2::geom_line(ggplot2::aes(x = .data$recordingTimestamp_ms, y = !!rlang::sym(column)), alpha = 0.5) +
     ggplot2::scale_fill_manual(
       breaks = c("1", "missing", "unclassified", "fixation", "saccade", ""),
       labels = c("blink", "missing", "unclassified", "fixation", "saccade", ""),
-      values=c("goldenrod3", "lightgrey", "gray25", "forestgreen", "blue", "red")) +
+      values = c("goldenrod3", "lightgrey", "gray25", "forestgreen", "blue", "red")
+    ) +
     ggplot2::theme_bw() +
     ggplot2::labs(
       # title = "Gaze X (Smoothed)",
@@ -59,5 +59,4 @@ plotGazeAndBlinks <- function(data, column, showFixations = FALSE) {
     )
 
   return(plot)
-
 }

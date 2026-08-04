@@ -11,99 +11,99 @@ calculateOutputMetrics <- function(data) {
   summarize_row_data <- data %>%
     dplyr::group_by() %>%
     dplyr::summarise(
-      #denominators (number of rows)
+      # denominators (number of rows)
       total_rows = dplyr::n(),
       total_final_rows = sum(ifelse(
         .data$gazeY.es.selection != "both_na", 1, 0
       )),
-      #total rows of missing data, raw
+      # total rows of missing data, raw (validity-masked)
       total_rows_raw_na_Left = sum(ifelse(is.na(
-        .data$gazeLeftX
+        .data$gazeLeftX.valid
       ), 1, 0)),
       total_rows_raw_na_Right = sum(ifelse(is.na(
-        .data$gazeRightX
+        .data$gazeRightX.valid
       ), 1, 0)),
       total_rows_raw_na_X = sum(ifelse(
-        is.na(.data$gazeLeftX) & is.na(.data$gazeRightX),
+        is.na(.data$gazeLeftX.valid) & is.na(.data$gazeRightX.valid),
         1,
         0
       )),
       total_rows_raw_na_Y = sum(ifelse(
-        is.na(.data$gazeLeftY) & is.na(.data$gazeRightY),
+        is.na(.data$gazeLeftY.valid) & is.na(.data$gazeRightY.valid),
         1,
         0
       )),
       total_final_rows_na = sum(ifelse(
         .data$gazeY.es.selection == "both_na", 1, 0
       )),
-      #total number of blinks
+      # total number of blinks
       total_rows_blinks_Left = sum(ifelse(.data$pupilLeft.blink > 0, 1, 0)),
       total_rows_blinks_Right = sum(ifelse(.data$pupilRight.blink > 0, 1, 0)),
       total_rows_blinks_Both = sum(ifelse(.data$bothEyes.blink, 1, 0)),
-      #COMMENTED out since there is no data where X and Y points exist but pupil data doesn't exist.
+      # COMMENTED out since there is no data where X and Y points exist but pupil data doesn't exist.
       # total_rows_PupilData_no_gaze_X = sum(ifelse(is.na(gazeLeftX) & !is.na(pupilLeft), 1, 0)),
       # total_rows_PupilData_no_gaze_Y = sum(ifelse(is.na(gazeRightX) & !is.na(pupilRight), 1, 0)),
       # total_rows_no_PupilData_gaze_X = sum(ifelse(!is.na(gazeLeftX) & is.na(pupilLeft), 1, 0)),
       # total_rows_no_PupilData_gaze_Y = sum(ifelse(!is.na(gazeRightX) & is.na(pupilRight), 1, 0)),
-      #interpolated gaps filled
+      # interpolated gaps filled
       total_rows_interpolated_LeftX = sum(
         ifelse(
-          .data$gazeLeftX %>% replace(is.na(.data), 0) != .data$gazeLeftX.int %>% replace(is.na(.data), 0),
+          .data$gazeLeftX.valid %>% replace(is.na(.data), 0) != .data$gazeLeftX.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightX = sum(
         ifelse(
-          .data$gazeRightX %>% replace(is.na(.data), 0) != .data$gazeRightX.int %>% replace(is.na(.data), 0),
+          .data$gazeRightX.valid %>% replace(is.na(.data), 0) != .data$gazeRightX.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftY = sum(
         ifelse(
-          .data$gazeLeftY %>% replace(is.na(.data), 0) != .data$gazeLeftY.int %>% replace(is.na(.data), 0),
+          .data$gazeLeftY.valid %>% replace(is.na(.data), 0) != .data$gazeLeftY.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightY = sum(
         ifelse(
-          .data$gazeRightY %>% replace(is.na(.data), 0) != .data$gazeRightY.int %>% replace(is.na(.data), 0),
+          .data$gazeRightY.valid %>% replace(is.na(.data), 0) != .data$gazeRightY.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftPupil = sum(
         ifelse(
-          .data$pupilLeft %>% replace(is.na(.data), 0) != .data$pupilLeft.int %>% replace(is.na(.data), 0),
+          .data$pupilLeft.valid %>% replace(is.na(.data), 0) != .data$pupilLeft.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightPupil = sum(
         ifelse(
-          .data$pupilRight %>% replace(is.na(.data), 0) != .data$pupilRight.int %>% replace(is.na(.data), 0),
+          .data$pupilRight.valid %>% replace(is.na(.data), 0) != .data$pupilRight.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftDistZ = sum(
         ifelse(
-          .data$distanceLeftZ %>% replace(is.na(.data), 0) != .data$distanceLeftZ.int %>% replace(is.na(.data), 0),
+          .data$distanceLeftZ.valid %>% replace(is.na(.data), 0) != .data$distanceLeftZ.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightDistZ = sum(
         ifelse(
-          .data$distanceRightZ %>% replace(is.na(.data), 0) != .data$distanceRightZ.int %>% replace(is.na(.data), 0),
+          .data$distanceRightZ.valid %>% replace(is.na(.data), 0) != .data$distanceRightZ.int %>% replace(is.na(.data), 0),
           1,
           0
         )
       ),
       # #COMMENTED OUT LH - created variables are not used and .temp columns break in other eyeselect protocols
-      #eye select
+      # eye select
       # total_rows_eye_select_LeftX = sum(
       #   ifelse(
       #     .data$gazeLeftX.int %>% replace(is.na(.data), 0) != .data$gpLeft.X.temp %>% replace(is.na(.data), 0),
@@ -259,7 +259,7 @@ calculateOutputMetrics <- function(data) {
       sd_eye_select_pupil = sd(.data$pupil.eyeSelect, na.rm = TRUE),
       sd_eye_select_distZ = sd(.data$distanceZ.eyeSelect, na.rm = TRUE),
 
-      #smoothing
+      # smoothing
       total_rows_denoise_X = sum(
         ifelse(
           .data$gazeX.eyeSelect %>% replace(is.na(.data), 0) != .data$gazeX.smooth %>% replace(is.na(.data), 0),
@@ -317,7 +317,7 @@ calculateOutputMetrics <- function(data) {
       sd_denoise_pupil = sd(.data$pupil.smooth, na.rm = TRUE),
       sd_denoise_distZ = sd(.data$distanceZ.smooth, na.rm = TRUE),
 
-      #velocity smoothing
+      # velocity smoothing
       total_rows_smoothVA_X = sum(
         ifelse(
           .data$velocityX_va_ms %>% replace(is.na(.data), 0) != .data$velocityX.smooth_va_ms %>% replace(is.na(.data), 0),
@@ -355,7 +355,7 @@ calculateOutputMetrics <- function(data) {
       sd_smoothVA_X = sd(.data$velocityX.smooth_va_ms, na.rm = TRUE),
       sd_smoothVA_Y = sd(.data$velocityY.smooth_va_ms, na.rm = TRUE),
 
-      #gaze points within fixation/saccade
+      # gaze points within fixation/saccade
       total_rows_fixation = sum(ifelse(
         .data$IVT.classification == "fixation", 1, 0
       )),
@@ -504,7 +504,7 @@ calculateOutputMetrics <- function(data) {
       sd = sd(.data$duration, na.rm = TRUE)
     )
 
-  #setup output dataframe
+  # setup output dataframe
   summary_df_rows <- c(
     "missing_raw_data_LeftEye",
     "missing_raw_data_RightEye",
@@ -557,12 +557,14 @@ calculateOutputMetrics <- function(data) {
   rownames(summary_df) <- summary_df_rows
   colnames(summary_df) <- summary_df_columns
 
-  #save data to output dataframe
+  # save data to output dataframe
   summary_df[["missing_raw_data_LeftEye", "n"]] <-
     summarize_row_data$total_rows_raw_na_Left[1]
   summary_df[["missing_raw_data_LeftEye", "percent"]] <-
-    round(summarize_row_data$total_rows_raw_na_Left[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_raw_na_Left[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["missing_raw_data_LeftEye", "percent_numerator"]] <-
     summarize_row_data$total_rows_raw_na_Left[1]
   summary_df[["missing_raw_data_LeftEye", "percent_denominator"]] <-
@@ -571,8 +573,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["missing_raw_data_RightEye", "n"]] <-
     summarize_row_data$total_rows_raw_na_Right[1]
   summary_df[["missing_raw_data_RightEye", "percent"]] <-
-    round(summarize_row_data$total_rows_raw_na_Right[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_raw_na_Right[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["missing_raw_data_RightEye", "percent_numerator"]] <-
     summarize_row_data$total_rows_raw_na_Right[1]
   summary_df[["missing_raw_data_RightEye", "percent_denominator"]] <-
@@ -581,8 +585,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["missing_raw_data_BothEyes", "n"]] <-
     summarize_row_data$total_rows_raw_na_X[1]
   summary_df[["missing_raw_data_BothEyes", "percent"]] <-
-    round(summarize_row_data$total_rows_raw_na_X[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_raw_na_X[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["missing_raw_data_BothEyes", "percent_numerator"]] <-
     summarize_row_data$total_rows_raw_na_X[1]
   summary_df[["missing_raw_data_BothEyes", "percent_denominator"]] <-
@@ -591,10 +597,11 @@ calculateOutputMetrics <- function(data) {
   summary_df[["valid_raw_data", "n"]] <-
     summarize_row_data$total_rows[1] - summarize_row_data$total_rows_raw_na_X[1]
   summary_df[["valid_raw_data", "percent"]] <-
-    round((
-      summarize_row_data$total_rows[1] - summarize_row_data$total_rows_raw_na_X[1]
-    ) / summarize_row_data$total_rows[1],
-    4
+    round(
+      (
+        summarize_row_data$total_rows[1] - summarize_row_data$total_rows_raw_na_X[1]
+      ) / summarize_row_data$total_rows[1],
+      4
     )
   summary_df[["valid_raw_data", "percent_numerator"]] <-
     summarize_row_data$total_rows[1] - summarize_row_data$total_rows_raw_na_X[1]
@@ -604,8 +611,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["blinks_LeftEye", "n"]] <-
     summarize_row_data$total_rows_blinks_Left[1]
   summary_df[["blinks_LeftEye", "percent"]] <-
-    round(summarize_row_data$total_rows_blinks_Left[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_blinks_Left[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["blinks_LeftEye", "percent_numerator"]] <-
     summarize_row_data$total_rows_blinks_Left[1]
   summary_df[["blinks_LeftEye", "percent_denominator"]] <-
@@ -614,8 +623,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["blinks_RightEye", "n"]] <-
     summarize_row_data$total_rows_blinks_Right[1]
   summary_df[["blinks_RightEye", "percent"]] <-
-    round(summarize_row_data$total_rows_blinks_Right[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_blinks_Right[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["blinks_RightEye", "percent_numerator"]] <-
     summarize_row_data$total_rows_blinks_Right[1]
   summary_df[["blinks_RightEye", "percent_denominator"]] <-
@@ -624,8 +635,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["blinks_BothEyes", "n"]] <-
     summarize_row_data$total_rows_blinks_Both[1]
   summary_df[["blinks_BothEyes", "percent"]] <-
-    round(summarize_row_data$total_rows_blinks_Both[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_blinks_Both[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["blinks_BothEyes", "percent_numerator"]] <-
     summarize_row_data$total_rows_blinks_Both[1]
   summary_df[["blinks_BothEyes", "percent_denominator"]] <-
@@ -992,8 +1005,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["ivt_fixations", "n"]] <-
     summarize_row_data$total_rows_fixation[1]
   summary_df[["ivt_fixations", "percent"]] <-
-    round(summarize_row_data$total_rows_fixation[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_fixation[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["ivt_fixations", "percent_numerator"]] <-
     summarize_row_data$total_rows_fixation[1]
   summary_df[["ivt_fixations", "percent_denominator"]] <-
@@ -1015,8 +1030,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["ivt_saccades", "n"]] <-
     summarize_row_data$total_rows_saccade[1]
   summary_df[["ivt_saccades", "percent"]] <-
-    round(summarize_row_data$total_rows_saccade[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_saccade[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["ivt_saccades", "percent_numerator"]] <-
     summarize_row_data$total_rows_saccade[1]
   summary_df[["ivt_saccades", "percent_denominator"]] <-
@@ -1038,8 +1055,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["ivt_blinks", "n"]] <-
     summarize_row_data$total_rows_blink[1]
   summary_df[["ivt_blinks", "percent"]] <-
-    round(summarize_row_data$total_rows_blink[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_blink[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["ivt_blinks", "percent_numerator"]] <-
     summarize_row_data$total_rows_blink[1]
   summary_df[["ivt_blinks", "percent_denominator"]] <-
@@ -1060,8 +1079,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["ivt_missing", "n"]] <-
     summarize_row_data$total_rows_missing[1]
   summary_df[["ivt_missing", "percent"]] <-
-    round(summarize_row_data$total_rows_missing[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_missing[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["ivt_missing", "percent_numerator"]] <-
     summarize_row_data$total_rows_missing[1]
   summary_df[["ivt_missing", "percent_denominator"]] <-
@@ -1082,8 +1103,10 @@ calculateOutputMetrics <- function(data) {
   summary_df[["ivt_unclassified", "n"]] <-
     summarize_row_data$total_rows_unclassified[1]
   summary_df[["ivt_unclassified", "percent"]] <-
-    round(summarize_row_data$total_rows_unclassified[1] / summarize_row_data$total_rows[1],
-          4)
+    round(
+      summarize_row_data$total_rows_unclassified[1] / summarize_row_data$total_rows[1],
+      4
+    )
   summary_df[["ivt_unclassified", "percent_numerator"]] <-
     summarize_row_data$total_rows_unclassified[1]
   summary_df[["ivt_unclassified", "percent_denominator"]] <-

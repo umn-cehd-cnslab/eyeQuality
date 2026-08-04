@@ -22,7 +22,7 @@ smoothGaze <-
            smoothingWindow_ms = 20,
            smoothGaze_boolean = TRUE,
            ...) {
-    #update default smoothing window- not sure on value
+    # update default smoothing window- not sure on value
     if (smoothGaze_boolean) {
       sampling_dur <- 1000 / recordingFrequency_hz
       smooth_window <- floor(smoothingWindow_ms / sampling_dur)
@@ -41,21 +41,22 @@ smoothGaze <-
         smooth_window <- smooth_window + 1
       }
 
-      #create list for smooth column names
+      # create list for smooth column names
       smooth_cols <- columnsToSmooth
-      #add ".smooth" to column names, but remove ".eyeSelect" if present in column names
-      for (sc in 1:length(smooth_cols)){
+      # add ".smooth" to column names, but remove ".eyeSelect" if present in column names
+      for (sc in 1:length(smooth_cols)) {
         i_col <- smooth_cols[sc]
-        if (stringr::str_detect(i_col, ".eyeSelect")){
+        if (stringr::str_detect(i_col, ".eyeSelect")) {
           smooth_cols[sc] <- stringr::str_replace(i_col, ".eyeSelect", ".smooth")
-        } else
+        } else {
           smooth_cols[sc] <- paste0(i_col, ".smooth")
+        }
       }
 
-      #run smoothing on window for gaze, va, dist, pupils
+      # run smoothing on window for gaze, va, dist, pupils
       for (sm in 1:length(columnsToSmooth)) {
-        eCol <- columnsToSmooth[sm] #set interpolated column name
-        sCol <- smooth_cols[sm] #set smoothed column name
+        eCol <- columnsToSmooth[sm] # set interpolated column name
+        sCol <- smooth_cols[sm] # set smoothed column name
         data[sCol] <-
           append(append(rep(NA, trunc(
             smooth_window / 2
@@ -69,7 +70,7 @@ smoothGaze <-
             ),
             2
           )), rep(NA, trunc(smooth_window / 2)))
-        data[[sCol]][is.nan(data[[sCol]])] <- NA #set NaN to NA
+        data[[sCol]][is.nan(data[[sCol]])] <- NA # set NaN to NA
         data[[sCol]][!is.na(data[[sCol]]) & is.na(data[[eCol]])] <- NA
       }
       return(data)

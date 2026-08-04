@@ -20,8 +20,10 @@ getPipelineTiming <- function(start, stop) {
     diff > 3600 ~ sprintf(
       "%d hr %d min %0.3f sec",
       floor(as.numeric(stop - start, units = "hours")),
-      floor(as.numeric(stop - start, units = "mins")) - 60 * floor(as.numeric(stop - start, units =
-                                                                                "hours")),
+      floor(as.numeric(stop - start, units = "mins")) - 60 * floor(as.numeric(stop - start,
+        units =
+          "hours"
+      )),
       diff - 60 * floor(as.numeric(stop - start, units = "mins"))
     ),
     TRUE ~ sprintf("%0.5f sec", diff)

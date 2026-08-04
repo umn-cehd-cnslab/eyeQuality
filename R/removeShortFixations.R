@@ -50,5 +50,4 @@ removeShortFixations <-
       "class.adj.num",
       "class.adj.dur"
     )])
-
   }
