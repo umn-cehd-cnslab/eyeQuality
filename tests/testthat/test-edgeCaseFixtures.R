@@ -1,8 +1,14 @@
 # P2-04: Edge-case fixtures for classifyBlinks() boundaries, out-of-order
-# timestamps, empty/all-NA gaze data, and an unrecognized column schema. Each
-# fixture is paired with a test asserting the specific behavior it exists to
-# exercise, verified against the actual current pipeline behavior (not an
-# assumption) -- see individual test comments below for what was confirmed.
+# timestamps, empty/all-NA gaze data, unidentifiable start/end events, and an
+# unrecognized column schema. Each fixture is paired with a test asserting
+# the specific behavior it exists to exercise, verified against the actual
+# current pipeline behavior (not an assumption) -- see individual test
+# comments below for what was confirmed.
+#
+# P1-14 note: the (b)/(c)/(d) `eyeQuality aborts (via stop())` tests below
+# assert on conditionMessage(err) content directly, covering
+# R/eyeQuality.R's four diagnosticText call sites now that they call
+# stop(diagnosticText) instead of print(diagnosticText) + bare stop().
 
 # --- (a) blink boundary fixture -------------------------------------------
 #
@@ -98,12 +104,12 @@ test_that("classifyBlinks merges two sub-threshold gaps across a maxArtifactLeng
 # increasing.
 #
 # checkOrderedTimestamps() (R/checkTimestamps.R) itself just returns a
-# logical -- it does not error. eyeQuality() calls it and, on FALSE, prints a
-# message and calls a bare stop() (R/eyeQuality.R), which raises an error
-# with an *empty* message (the descriptive text only ever reaches print(),
-# never stop()). This is real current behavior, confirmed by running the
-# fixture through both checkOrderedTimestamps() directly and the full
-# eyeQuality() pipeline.
+# logical -- it does not error. eyeQuality() calls it and, on FALSE, prints
+# and stop()s with the same descriptive diagnosticText (R/eyeQuality.R,
+# post-P1-14 fix -- previously that text only ever reached print(), and the
+# raised condition's message was empty). Confirmed by running the fixture
+# through both checkOrderedTimestamps() directly and the full eyeQuality()
+# pipeline.
 
 test_that("checkOrderedTimestamps returns FALSE for the out-of-order timestamps fixture", {
   fp <- testthat::test_path("fixtures", "tobii_studio_out_of_order_timestamps.tsv")
@@ -131,9 +137,14 @@ test_that("eyeQuality aborts (via stop()) on the out-of-order timestamps fixture
   )
 
   expect_s3_class(err, "simpleError")
-  # current behavior: the descriptive message is only ever printed, never
-  # passed to stop(), so the raised condition's message is empty
-  expect_equal(conditionMessage(err), "")
+  expect_equal(
+    conditionMessage(err),
+    paste0(
+      "Data is not chronologically ordered based on timestamp. Pre-processing for file ",
+      fp,
+      " has been aborted."
+    )
+  )
 })
 
 # --- (c) empty / all-NA gaze fixture ----------------------------------------
@@ -145,8 +156,11 @@ test_that("eyeQuality aborts (via stop()) on the out-of-order timestamps fixture
 #
 # checkGazeDataExists() (R/checkGazeData.R) returns FALSE for both eyes in
 # this case. eyeQuality() checks this immediately after
-# standardizeColumnNames() and, like the timestamp check, aborts via a bare
-# stop() with an empty message once it prints its own descriptive text.
+# standardizeColumnNames() and, like the timestamp check, aborts via
+# stop(diagnosticText) carrying its own descriptive text (R/eyeQuality.R,
+# post-P1-14 fix). Note the source text itself has no space between "file"
+# and the filepath it concatenates -- that's the real, un-fixed message
+# content, asserted as-is below rather than "corrected" in the test.
 
 test_that("checkGazeDataExists returns FALSE for both eyes on the all-NA gaze fixture", {
   fp <- testthat::test_path("fixtures", "tobii_studio_all_na_gaze.tsv")
@@ -175,10 +189,60 @@ test_that("eyeQuality aborts (via stop()) on the all-NA gaze fixture", {
   )
 
   expect_s3_class(err, "simpleError")
-  expect_equal(conditionMessage(err), "")
+  expect_equal(
+    conditionMessage(err),
+    paste0(
+      "No valid gaze data exists. Preprocessing for file",
+      fp,
+      " has been aborted."
+    )
+  )
 })
 
-# --- (d) unrecognized column schema fixture --------------------------------
+# --- (d) unidentifiable start/end event timestamps -------------------------
+#
+# Reuses tests/testthat/fixtures/tobii_studio_sample.tsv (its StudioEvent
+# column is all-NA -- no events are present at all). Passing studioEvents
+# AND proEvents naming event labels that don't exist anywhere in the file
+# makes getEventTimes() return NA for both start and end times, so the
+# `length(taskTimes) == 2 && !anyNA(taskTimes) && taskTimes[[1]] <
+# taskTimes[[2]]` guard in eyeQuality() (R/eyeQuality.R) fails and it
+# stop()s with a descriptive diagnosticText (post-P1-14 fix; previously that
+# text only reached print(), and the raised condition's message was empty).
+# Note both studioEvents and proEvents must be supplied together for this
+# branch to run at all -- `!isempty(studioEvents) && !isempty(proEvents)` --
+# confirmed by direct execution against this fixture.
+
+test_that("eyeQuality aborts (via stop()) when named start/end events cannot be found", {
+  fp <- testthat::test_path("fixtures", "tobii_studio_sample.tsv")
+
+  err <- tryCatch(
+    {
+      eyeQuality(
+        fp,
+        displayDimensionX_mm = 594,
+        displayDimensionY_mm = 344,
+        studioEvents = c("TaskStart", "TaskEnd"),
+        proEvents = c("TaskStart", "TaskEnd"),
+        saveData = FALSE
+      )
+      NULL
+    },
+    error = function(e) e
+  )
+
+  expect_s3_class(err, "simpleError")
+  expect_equal(
+    conditionMessage(err),
+    paste0(
+      "Start or end timestamps could not be identified. Pre-processing for file ",
+      fp,
+      " aborted."
+    )
+  )
+})
+
+# --- (e) unrecognized column schema fixture --------------------------------
 #
 # tests/testthat/fixtures/unrecognized_schema.csv has plausible-looking
 # eye-tracking column names (Timestamp, LeftEyeX/Y, RightEyeX/Y,

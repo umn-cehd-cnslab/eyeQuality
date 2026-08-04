@@ -145,14 +145,13 @@ eyeQuality <- function(filepath,
   leftDataExists <- checkGazeDataExists(data, gazeColumn = "gazeLeftX", ...)
   rightDataExists <- checkGazeDataExists(data, gazeColumn = "gazeRightX", ...)
   if (!leftDataExists & !rightDataExists) {
-    print(
-      paste0(
-        "No valid gaze data exists. Preprocessing for file",
-        filepath,
-        " has been aborted."
-      )
+    diagnosticText <- paste0(
+      "No valid gaze data exists. Preprocessing for file",
+      filepath,
+      " has been aborted."
     )
-    stop()
+    print(diagnosticText)
+    stop(diagnosticText)
   }
 
   runtime_checkGazeDataExists <- getCurrentTime()
@@ -179,15 +178,14 @@ eyeQuality <- function(filepath,
   ordered <-
     checkOrderedTimestamps(data, timestamps = "recordingTimestamp_ms")
   if (!ordered) {
-    print(
-      paste0(
-        "Data is not chronologically ordered based on timestamp. Pre-processing for file ",
-        filepath,
-        " has been aborted."
-      )
+    diagnosticText <- paste0(
+      "Data is not chronologically ordered based on timestamp. Pre-processing for file ",
+      filepath,
+      " has been aborted."
     )
+    print(diagnosticText)
     # print_or_save(paste0("Data is not chronologically ordered based on timestamp. Pre-processing for file ", filepath, " has been aborted."), saveData, runtime_Log)
-    stop()
+    stop(diagnosticText)
   }
 
   # get specific time range to process
@@ -220,15 +218,14 @@ eyeQuality <- function(filepath,
     } else {
       # if event cannot be identified
       runtime_setTimestamps <- getCurrentTime()
-      print(
-        paste0(
-          "Start or end timestamps could not be identified. Pre-processing for file ",
-          filepath,
-          " aborted."
-        )
+      diagnosticText <- paste0(
+        "Start or end timestamps could not be identified. Pre-processing for file ",
+        filepath,
+        " aborted."
       )
+      print(diagnosticText)
       # print_or_save(paste0("Start or end timestamps could not be identified. Pre-processing for file ", filepath, " aborted."), saveData, runtime_Log)
-      stop()
+      stop(diagnosticText)
     }
   } else if (!isempty(timeStart) & !isempty(timeEnd)) {
     # set based on input time stamps
@@ -368,14 +365,13 @@ eyeQuality <- function(filepath,
   # Check that valid gaze data exists after selection
   dataExists <- checkGazeDataExists(data, gazeColumn = "gazeX.eyeSelect", ...)
   if (!dataExists) {
-    print(
-      paste0(
-        "No valid gaze data exists after eye selection. Preprocessing for file",
-        filepath,
-        " has been aborted."
-      )
+    diagnosticText <- paste0(
+      "No valid gaze data exists after eye selection. Preprocessing for file",
+      filepath,
+      " has been aborted."
     )
-    stop()
+    print(diagnosticText)
+    stop(diagnosticText)
   }
 
   runtime_checkGazeDataExists2 <- getCurrentTime()
