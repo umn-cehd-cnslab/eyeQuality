@@ -138,19 +138,21 @@
 #'   This is a pre-existing quirk of the current pipeline (arguably a
 #'   latent correctness gap — "unknown validity" arguably *should* mean
 #'   "don't trust this sample," not "assume it's fine") that P3-01 is
-#'   documenting as-is, not fixing. See the `confidence` column below for
-#'   how this quirk interacts with the new schema.
+#'   documenting as-is, not fixing. See the `confidenceLeft`/`confidenceRight`
+#'   columns below for how this quirk interacts with the new schema, and for
+#'   the resolved `NA`-validity mapping decision.
 #' - **Produced by:** adapter `standardize()` (renamed, but not
 #'   reinterpreted, from the device's native validity/eye-openness column).
 #' - **Consumed by:** adapter `normalize_validity()` only — this is
 #'   intentionally the sole consumer. Every downstream pipeline stage reads
-#'   the generic, cross-device `confidence` column instead (see below), so
-#'   that adding a future adapter with a wholly different validity
-#'   representation (e.g. a head-mounted tracker's continuous confidence
-#'   score) requires no changes outside that adapter's own
-#'   `normalize_validity()`.
+#'   the generic, cross-device `confidenceLeft`/`confidenceRight` columns
+#'   instead (see below), so that adding a future adapter with a wholly
+#'   different validity representation (e.g. a head-mounted tracker's
+#'   continuous confidence score) requires no changes outside that
+#'   adapter's own `normalize_validity()`.
 #'
-#' ## `confidence` (new — introduced by this schema, not present pre-Phase-3)
+#' ## `confidenceLeft` / `confidenceRight` (new — introduced by this schema,
+#' not present pre-Phase-3)
 #' - **Type:** numeric
 #' - **Units:** unitless, continuous scale, **`0`-`1`**, where `1` = highest
 #'   confidence / most valid, `0` = lowest confidence / definitely invalid.
@@ -159,6 +161,20 @@
 #'   direction so that "higher is better" holds universally across every
 #'   current and future adapter, rather than perpetuating a device-specific
 #'   convention into the generic pipeline.
+#' - **Split by eye, not a single combined column:** P3-06's implementation
+#'   emits `confidenceLeft`/`confidenceRight` rather than a single
+#'   `confidence` value, following every other per-eye pair already in this
+#'   schema (`gazeLeftX`/`gazeRightX`, `pupilLeft`/`pupilRight`,
+#'   `validityLeft`/`validityRight`, `distanceLeftZ`/`distanceRightZ`). A
+#'   single unsplit `confidence` column was underspecified from the start —
+#'   it left unstated whether/how a per-eye validity code should be combined
+#'   into one number (min? mean? which eye wins?) — and every current source
+#'   column this is derived from is already per-eye, so per-eye output is
+#'   the natural and consistent shape. Anything needing a single combined
+#'   confidence value (e.g. eye-selection logic, Phase 5+) can derive it
+#'   from `confidenceLeft`/`confidenceRight` at the point of use, the same
+#'   way `eyeSelection()` already derives single `gazeX`/`gazeY` from
+#'   `gazeLeftX`/`gazeRightX`.
 #' - **Design rationale (why a 0-1 continuous scale, not a re-exported
 #'   discrete code):** the two current Tobii sources use structurally
 #'   different validity representations (a 5-level ordinal code vs. a
@@ -173,61 +189,58 @@
 #'   losslessly (evenly-spaced buckets), any binary flag maps onto it
 #'   trivially (`0`/`1`), and any genuinely continuous confidence score
 #'   (Phase 5) needs no lossy transformation at all to populate it.
-#' - **Mapping used by the current Tobii adapters:**
+#' - **Mapping used by the current Tobii adapters** (applied independently
+#'   to each eye, `validityLeft -> confidenceLeft`, `validityRight ->
+#'   confidenceRight`):
 #'   - Tobii Studio (`validityLeft`/`validityRight` `0`-`4`):
-#'     `confidence <- 1 - (validity / 4)`, i.e. `0 -> 1.0`, `1 -> 0.75`,
-#'     `2 -> 0.5`, `3 -> 0.25`, `4 -> 0.0`. The existing
+#'     `confidence<Eye> <- 1 - (validity<Eye> / 4)`, i.e. `0 -> 1.0`,
+#'     `1 -> 0.75`, `2 -> 0.5`, `3 -> 0.25`, `4 -> 0.0`. The existing
 #'     `maxValidityThreshold` default of `2` (P3-02's `default_thresholds`)
-#'     therefore corresponds to a `confidence` cutoff of `0.5` on this
+#'     therefore corresponds to a `confidence<Eye>` cutoff of `0.5` on this
 #'     scale — masking (`.valid` column set to `NA`) still happens at
 #'     `validity > threshold`, matching current behavior exactly;
-#'     `confidence` is an additional, informational column, not (yet) the
-#'     thing masking is computed from, so this is zero behavior change for
-#'     P3-06.
+#'     `confidence<Eye>` is an additional, informational column, not (yet)
+#'     the thing masking is computed from, so this is zero behavior change
+#'     for P3-06. Implemented in `R/tobii-studio-adapter.R`'s
+#'     `.tobii_studio_confidence()`, called from `normalize_validity()`.
 #'   - Tobii Pro (`validityLeft`/`validityRight` `"Valid"`/`"Invalid"`):
-#'     `confidence <- ifelse(validity == "Valid", 1, 0)`. **`NA`-validity
-#'     mapping is an open decision for P3-06 — see below; this bullet
-#'     intentionally does not prescribe a value.**
+#'     `confidence<Eye> <- ifelse(validity<Eye> == "Valid", 1, 0)`.
+#'     Implemented in `R/tobii-pro-adapter.R`'s `.tobii_pro_confidence()`,
+#'     called from `normalize_validity()`.
 #'   - A future head-mounted/Pupil Labs-style adapter (Phase 5) is expected
-#'     to populate `confidence` directly from its own native, already-
+#'     to populate confidence directly from its own native, already-
 #'     continuous confidence/quality score, with no discretization step.
-#' - **NA semantics — OPEN DECISION for P3-06, flagged here rather than
-#'   resolved:** as documented above under `validityLeft`/`validityRight`,
-#'   the *current* `.valid`-masking behavior treats `NA` validity as
-#'   unmasked, i.e. as if it were valid. That masking behavior itself is
-#'   in-scope for Phase 3's zero-behavior-change gate and must not change.
-#'   The new `confidence` column, however, has no pre-Phase-3 behavior to
-#'   preserve, so P3-06 must choose one of two mappings for `NA` validity,
-#'   and the choice should be made explicitly, not defaulted into:
-#'   - **`confidence = 1`** — preserves the current masking quirk's
-#'     *effective* semantics (NA-validity samples are, today, treated as
-#'     valid/kept), so `confidence` stays consistent with what
-#'     `.valid`-masking actually does right now. Recommended if the goal is
-#'     strict internal consistency with existing (if arguably buggy)
-#'     pipeline behavior, since nothing downstream reads `confidence` yet
-#'     (see "Consumed by" below) and this keeps the two representations of
-#'     validity in agreement.
-#'   - **`confidence = 0`** — a deliberate correction: "no validity code
-#'     reported" is arguably better modeled as "unknown, therefore
-#'     low-confidence" than as "assume valid." This is *not* zero behavior
-#'     change relative to the masking quirk described above (which is
-#'     unaffected either way, since nothing currently derives masking from
-#'     `confidence`), but it does mean `confidence` and `.valid`-masking
-#'     would disagree on `NA`-validity rows going forward, which could
-#'     matter the moment something (e.g. a future `validityThreshold`-based
-#'     filter, P3-08) starts reading `confidence` for masking decisions.
-#'
-#'   This document does not pick between the two — P3-06 must record
-#'   whichever it implements (and, if `0` is chosen, call it out explicitly
-#'   as a deliberate, documented departure from the current pipeline's
-#'   NA-validity quirk, per the phase's exception-reporting requirement).
+#' - **NA semantics — RESOLVED (P3-06):** as documented above under
+#'   `validityLeft`/`validityRight`, the *current* `.valid`-masking behavior
+#'   treats `NA` validity as unmasked, i.e. as if it were valid. That
+#'   masking behavior itself was in-scope for Phase 3's zero-behavior-change
+#'   gate and did not change. For the new `confidenceLeft`/`confidenceRight`
+#'   columns, which have no pre-Phase-3 behavior to preserve, P3-06 chose:
+#'   - **`confidence<Eye> = 1` for `NA` validity**, for both adapters. This
+#'     preserves the existing masking quirk's *effective* semantics
+#'     (NA-validity samples are, today, treated as valid/kept), so
+#'     `confidence<Eye>` stays consistent with what `.valid`-masking
+#'     actually does right now, rather than introducing a second,
+#'     disagreeing notion of validity for the same input. Since nothing
+#'     downstream reads `confidence<Eye>` yet (see "Consumed by" below),
+#'     internal consistency with `.valid`-masking was judged the more
+#'     conservative choice for a Phase 3 refactor whose explicit goal is
+#'     zero behavior change; the rejected alternative (`confidence<Eye> = 0`,
+#'     treating unknown validity as low-confidence) would have introduced a
+#'     disagreement between `confidence<Eye>` and `.valid`-masking on
+#'     `NA`-validity rows with no compensating benefit today.
+#'   - Implemented identically on both adapters: `R/tobii-studio-adapter.R`'s
+#'     `.tobii_studio_confidence()` and `R/tobii-pro-adapter.R`'s
+#'     `.tobii_pro_confidence()`, both called from their respective
+#'     `normalize_validity()` (`.tobii_studio_norm_validity()` /
+#'     `.tobii_pro_normalize_validity()`).
 #' - **Produced by:** adapter `normalize_validity()`, alongside (not
 #'   instead of) the `.valid`-suffixed masked columns described below.
 #' - **Consumed by:** intended for QC reporting / `calculateOutputMetrics()`
 #'   and any future threshold-based filtering keyed on the
-#'   adapter-independent `validityThreshold` argument (P3-08). As of P3-01
-#'   this column is schema-only — no pipeline code reads or writes it yet;
-#'   wiring it in is P3-06's job.
+#'   adapter-independent `validityThreshold` argument (P3-08). As of P3-06
+#'   these columns are produced by both Tobii adapters but not yet read by
+#'   any downstream generic pipeline stage.
 #'
 #' # Derived / suffixed columns (not raw schema fields, but load-bearing)
 #'
