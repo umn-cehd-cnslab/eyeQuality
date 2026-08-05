@@ -5,13 +5,16 @@
 #' `if`/`else` branch: raw (pre-standardization) Tobii Studio exports carry a
 #' `"StudioVersionRec"` column that no other supported device produces.
 #'
-#' `standardize()`, `extract_events()`, and `normalize_validity()` are
-#' placeholder stubs as of P3-03 — they are ported from
-#' `standardizeColumnNames()`/`renameColumns()` (P3-04),
-#' `extractEventRows()` (P3-05), and `removeInvalidGaze()` (P3-06)
-#' respectively, not implemented here. Calling any of them before that work
-#' lands is an error by design, so a half-wired adapter fails loudly instead
-#' of silently returning wrong data.
+#' `standardize()` is ported unchanged (P3-04) from the pre-Phase-3
+#' `renameColumns()`'s `TobiiStudio` branch (`R/renameColumns.R`): renames
+#' the device-native columns onto the generic schema (`?eyeQuality-schema`)
+#' and splits `RecordingResolution` into `resolutionWidth`/`resolutionHeight`.
+#'
+#' `extract_events()` and `normalize_validity()` are placeholder stubs as of
+#' P3-04 — they are ported from `extractEventRows()` (P3-05) and
+#' `removeInvalidGaze()` (P3-06) respectively, not implemented here. Calling
+#' either before that work lands is an error by design, so a half-wired
+#' adapter fails loudly instead of silently returning wrong data.
 #'
 #' @name tobii_studio_adapter
 #' @keywords internal
@@ -22,7 +25,34 @@ NULL
 }
 
 .tobii_studio_standardize <- function(data) {
-  stop("tobii_studio_adapter$standardize() is not yet implemented -- see P3-04", call. = FALSE)
+  data <- data %>%
+    dplyr::rename(
+      event = "StudioEvent",
+      eventValue = "StudioEventData",
+      recordingDuration_ms = "RecordingDuration",
+      eyeTrackerTimestamp = "EyeTrackerTimestamp",
+      recordingTimestamp_ms = "RecordingTimestamp",
+      gazeLeftX = "GazePointLeftX (ADCSpx)",
+      gazeLeftY = "GazePointLeftY (ADCSpx)",
+      gazeRightX = "GazePointRightX (ADCSpx)",
+      gazeRightY = "GazePointRightY (ADCSpx)",
+      distanceLeftZ = "EyePosLeftZ (ADCSmm)",
+      distanceRightZ = "EyePosRightZ (ADCSmm)",
+      pupilLeft = "PupilLeft",
+      pupilRight = "PupilRight",
+      validityLeft = "ValidityLeft",
+      validityRight = "ValidityRight"
+    )
+
+  # split RecordingResolution column into resolutionWidth and resolutionHeight
+  data <- data %>% tidyr::separate(
+    .data$RecordingResolution,
+    c("resolutionWidth", "resolutionHeight"),
+    sep = " x ",
+    convert = TRUE
+  )
+
+  data
 }
 
 .tobii_studio_extract_events <- function(data) {

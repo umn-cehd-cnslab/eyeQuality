@@ -6,13 +6,15 @@
 #' `"Recording software version"` column that no other supported device
 #' produces.
 #'
-#' `standardize()`, `extract_events()`, and `normalize_validity()` are
-#' placeholder stubs as of P3-03 — they are ported from
-#' `standardizeColumnNames()`/`renameColumns()` (P3-04),
-#' `extractEventRows()` (P3-05), and `removeInvalidGaze()` (P3-06)
-#' respectively, not implemented here. Calling any of them before that work
-#' lands is an error by design, so a half-wired adapter fails loudly instead
-#' of silently returning wrong data.
+#' `standardize()` is ported unchanged (P3-04) from the pre-Phase-3
+#' `renameColumns()`'s `TobiiPro` branch (`R/renameColumns.R`): renames the
+#' device-native columns onto the generic schema (`?eyeQuality-schema`).
+#'
+#' `extract_events()` and `normalize_validity()` are placeholder stubs as of
+#' P3-04 — they are ported from `extractEventRows()` (P3-05) and
+#' `removeInvalidGaze()` (P3-06) respectively, not implemented here. Calling
+#' either before that work lands is an error by design, so a half-wired
+#' adapter fails loudly instead of silently returning wrong data.
 #'
 #' @name tobii_pro_adapter
 #' @keywords internal
@@ -23,7 +25,26 @@ NULL
 }
 
 .tobii_pro_standardize <- function(data) {
-  stop("tobii_pro_adapter$standardize() is not yet implemented -- see P3-04", call. = FALSE)
+  data %>%
+    dplyr::rename(
+      event = "Event",
+      eventValue = "Event value",
+      recordingDuration_ms = "Recording duration",
+      resolutionHeight = "Recording resolution height",
+      resolutionWidth = "Recording resolution width",
+      eyeTrackerTimestamp = "Eyetracker timestamp",
+      recordingTimestamp_ms = "Recording timestamp",
+      gazeLeftX = "Gaze point left X",
+      gazeLeftY = "Gaze point left Y",
+      gazeRightX = "Gaze point right X",
+      gazeRightY = "Gaze point right Y",
+      distanceLeftZ = "Eye position left Z (DACSmm)",
+      distanceRightZ = "Eye position right Z (DACSmm)",
+      pupilLeft = "Pupil diameter left",
+      pupilRight = "Pupil diameter right",
+      validityLeft = "Validity left",
+      validityRight = "Validity right"
+    )
 }
 
 .tobii_pro_extract_events <- function(data) {
