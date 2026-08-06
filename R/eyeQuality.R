@@ -6,7 +6,17 @@
 #' @param data instead of passing a filepath, you can pass a data frame with your loaded data. Default NULL
 #' @param eyeSelection_method string with possible values "Maximize", "Strict", "Left", or "Right". Default "Maximize"
 #' @param smoothGaze_boolean Boolean indicating if we should run smoothGaze script
-#' @param maxValidityThreshold a numeric (0, 1, 2, 3, or 4) describing what validity rating is considered acceptable - Only applicable if software = "TobiiStudio"
+#' @param validityThreshold optional numeric on the generic `confidence` (0-1)
+#'   scale (`1` = highest confidence, see `?eyeQuality-schema`) specifying the
+#'   minimum per-sample confidence to retain; passed through to the detected
+#'   adapter's `normalize_validity()`. Default `NULL`, meaning "use whatever
+#'   validity threshold the detected adapter considers its own default" (see
+#'   each adapter's `default_thresholds`, e.g. Tobii Studio's native `0`-`4`
+#'   validity-code threshold of `2`, equivalent to a `confidence` cutoff of
+#'   `0.5`; Tobii Pro's validity is a binary `"Valid"`/`"Invalid"` flag with
+#'   no threshold concept at all). Replaces the pre-Phase-3
+#'   `maxValidityThreshold` argument, which operated on Tobii Studio's
+#'   native `0`-`4` scale directly and had no meaning for Tobii Pro.
 #' @param saveData Boolean indicating if we should suppress output, and save data to files
 #' @param includeIntermediates Boolean indicating if column outputs from all intermediate steps of the preprocessing should be included. Default = FALSE
 #' @param studioEvents optional list of two values specifying the start and ending event labels for Tobii Studio files, c(startEventName, endEventName) . Default NULL
@@ -29,7 +39,7 @@ eyeQuality <- function(filepath,
                        data = NULL,
                        eyeSelection_method = "Maximize",
                        smoothGaze_boolean = TRUE,
-                       maxValidityThreshold = 2,
+                       validityThreshold = NULL,
                        saveData = FALSE,
                        includeIntermediates = FALSE,
                        studioEvents = NULL,
@@ -269,7 +279,29 @@ eyeQuality <- function(filepath,
   # alongside the .valid columns when includeIntermediates = FALSE, and kept
   # when includeIntermediates = TRUE, the same treatment as every other
   # pipeline-internal column added since P1-05.
-  data <- adapter$normalize_validity(data, threshold = maxValidityThreshold)
+  #
+  # validityThreshold (P3-08) is adapter-independent and expressed on the
+  # generic confidence (0-1) scale, 1 = highest confidence. normalize_validity()
+  # itself still takes `threshold` on each adapter's own device-native validity
+  # scale (?new_eyetracker_adapter) -- when the caller doesn't override
+  # anything, pass threshold = NULL straight through so each adapter falls
+  # back to its own default_thresholds, which is exactly the pre-P3-08
+  # default behavior (Tobii Studio's default_thresholds$validityThreshold is
+  # 2, matching the old maxValidityThreshold default exactly; Tobii Pro
+  # ignores threshold entirely either way). When the caller does supply
+  # validityThreshold, convert it onto the calling adapter's native scale --
+  # currently only Tobii Studio's normalize_validity() threshold has
+  # scale-specific meaning (native 0-4, confidence = 1 - validity/4, per
+  # .tobii_studio_confidence()/?eyeQuality-schema), so invert that mapping;
+  # Tobii Pro's normalize_validity() ignores `threshold` regardless of value.
+  nativeValidityThreshold <- if (is.null(validityThreshold)) {
+    NULL
+  } else if (software == "TobiiStudio") {
+    (1 - validityThreshold) * 4
+  } else {
+    validityThreshold
+  }
+  data <- adapter$normalize_validity(data, threshold = nativeValidityThreshold)
   runtime_removeInvalidGaze <- getCurrentTime()
   print(
     stringr::str_glue(
