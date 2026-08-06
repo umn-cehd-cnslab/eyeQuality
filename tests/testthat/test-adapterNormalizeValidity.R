@@ -1,86 +1,88 @@
-# P3-06 follow-up: regression coverage for the new adapter normalize_validity()
-# implementations (.tobii_studio_norm_validity() in R/tobii-studio-adapter.R,
-# .tobii_pro_normalize_validity() in R/tobii-pro-adapter.R), which were ported
-# unchanged from the pre-Phase-3 removeInvalidGaze() TobiiStudio/TobiiPro
-# branches (R/removeInvalidGaze.R), plus the brand-new confidenceLeft/
-# confidenceRight (0-1) columns that have no pre-Phase-3 equivalent to compare
-# against. Both the old path (removeInvalidGaze(), called once per eye) and
-# the new path (registered_adapters()[["TobiiStudio"/"TobiiPro"]]$
-# normalize_validity(), called once for both eyes) are still live in the
-# codebase as of P3-06 -- the actual eyeQuality() pipeline still calls
-# removeInvalidGaze() directly and isn't rewired to the adapter registry
-# until P3-07.
+# Regression coverage for the adapter normalize_validity() implementations
+# (.tobii_studio_norm_validity() in R/tobii-studio-adapter.R,
+# .tobii_pro_normalize_validity() in R/tobii-pro-adapter.R), which mask
+# invalid/out-of-threshold samples into new `.valid`-suffixed columns and
+# compute the new confidenceLeft/confidenceRight (0-1) columns
+# (?eyeQuality-schema).
 #
-# The two paths return different shapes by design: the old path only adds
-# .valid-suffixed columns, while the new path adds .valid-suffixed columns
-# *plus* confidenceLeft/confidenceRight. So the equivalence tests below
-# compare only the .valid-suffixed columns between the two paths, and the
-# confidence columns are tested separately against known/derived values
-# since there is no "old" to compare them against.
+# Originally (P3-06) the .valid-column masking tests below asserted the
+# adapter output was equivalent to the old standalone removeInvalidGaze()
+# path (called once per eye), which was still live in the eyeQuality()
+# pipeline at the time. P3-07 rewired the pipeline to call the adapter
+# registry directly, retiring that old path from live use, so those tests
+# now assert masking against literal expected values instead of re-deriving
+# them by calling the now-pipeline-dead removeInvalidGaze(). Fixture setup
+# below uses each adapter's own (live) standardize() method rather than the
+# old standardizeColumnNames() dispatcher.
 #
-# NOTE: this test file is deliberately temporary-shaped, mirroring
-# test-adapterStandardize.R and test-adapterExtractEvents.R. Once P3-07
-# removes the old removeInvalidGaze() code path, this old-vs-new comparison
-# will no longer make sense -- at that point these tests should be
-# simplified to assert the adapter normalize_validity() output against known
-# expected values directly, rather than against the (removed) old path.
+# The confidenceLeft/confidenceRight correctness tests never depended on the
+# old removeInvalidGaze() path (there is no pre-Phase-3 equivalent to compare
+# against) and are carried forward largely unchanged, aside from the same
+# standardize() setup swap.
 
-# --- Old-vs-new .valid-column equivalence ---------------------------------
+# --- .valid-column masking on realistic fixtures ---------------------------
+# The "sample" fixtures are uniformly valid (TobiiStudio: validityLeft/Right
+# = 0; TobiiPro: validityLeft/Right = "Valid") and contain no -9999 sentinel
+# values, so normalize_validity() should leave every `.valid` column
+# byte-identical to its raw source column. The "monocular" fixtures are
+# uniformly worst-validity on one eye only (TobiiStudio: validityRight = 4;
+# TobiiPro: validityRight = "Invalid"), so the right-eye `.valid` columns
+# should come back fully masked while the left-eye ones are untouched.
 
-test_that("TobiiStudio adapter normalize_validity() .valid columns match old removeInvalidGaze() path on the sample fixture (binocular-valid)", {
+test_that("TobiiStudio adapter normalize_validity() leaves .valid columns unmasked on the all-valid sample fixture", {
   fp <- testthat::test_path("fixtures", "tobii_studio_sample.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiStudio")
+  std_data <- tobii_studio_adapter$standardize(data)
 
-  old_result <- removeInvalidGaze(std_data, "left", "TobiiStudio")
-  old_result <- removeInvalidGaze(old_result, "right", "TobiiStudio")
-  new_result <- registered_adapters()[["TobiiStudio"]]$normalize_validity(std_data)
+  result <- tobii_studio_adapter$normalize_validity(std_data)
 
-  valid_cols <- names(old_result)[grepl("\\.valid$", names(old_result))]
-  expect_true(length(valid_cols) > 0)
-  expect_equal(old_result[valid_cols], new_result[valid_cols])
+  expect_equal(result$gazeLeftX.valid, std_data$gazeLeftX)
+  expect_equal(result$gazeRightX.valid, std_data$gazeRightX)
+  expect_equal(result$pupilLeft.valid, std_data$pupilLeft)
+  expect_equal(result$pupilRight.valid, std_data$pupilRight)
 })
 
-test_that("TobiiStudio adapter normalize_validity() .valid columns match old removeInvalidGaze() path on the monocular fixture (real masking)", {
+test_that("TobiiStudio adapter normalize_validity() fully masks the right eye and leaves the left eye untouched on the monocular fixture", {
   fp <- testthat::test_path("fixtures", "tobii_studio_monocular.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiStudio")
+  std_data <- tobii_studio_adapter$standardize(data)
 
-  old_result <- removeInvalidGaze(std_data, "left", "TobiiStudio")
-  old_result <- removeInvalidGaze(old_result, "right", "TobiiStudio")
-  new_result <- registered_adapters()[["TobiiStudio"]]$normalize_validity(std_data)
+  result <- tobii_studio_adapter$normalize_validity(std_data)
 
-  valid_cols <- names(old_result)[grepl("\\.valid$", names(old_result))]
-  expect_true(length(valid_cols) > 0)
-  expect_equal(old_result[valid_cols], new_result[valid_cols])
+  # fixture is uniformly validityLeft = 0 (best, <= default threshold 2)
+  expect_equal(result$gazeLeftX.valid, std_data$gazeLeftX)
+  expect_equal(result$gazeLeftY.valid, std_data$gazeLeftY)
+  # fixture is uniformly validityRight = 4 (worst, > default threshold 2)
+  expect_true(all(is.na(result$gazeRightX.valid)))
+  expect_true(all(is.na(result$gazeRightY.valid)))
 })
 
-test_that("TobiiPro adapter normalize_validity() .valid columns match old removeInvalidGaze() path on the sample fixture (binocular-valid)", {
+test_that("TobiiPro adapter normalize_validity() leaves .valid columns unmasked on the all-valid sample fixture", {
   fp <- testthat::test_path("fixtures", "tobii_pro_sample.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiPro")
+  std_data <- tobii_pro_adapter$standardize(data)
 
-  old_result <- removeInvalidGaze(std_data, "left", "TobiiPro")
-  old_result <- removeInvalidGaze(old_result, "right", "TobiiPro")
-  new_result <- registered_adapters()[["TobiiPro"]]$normalize_validity(std_data)
+  result <- tobii_pro_adapter$normalize_validity(std_data)
 
-  valid_cols <- names(old_result)[grepl("\\.valid$", names(old_result))]
-  expect_true(length(valid_cols) > 0)
-  expect_equal(old_result[valid_cols], new_result[valid_cols])
+  expect_equal(result$gazeLeftX.valid, std_data$gazeLeftX)
+  expect_equal(result$gazeRightX.valid, std_data$gazeRightX)
+  expect_equal(result$pupilLeft.valid, std_data$pupilLeft)
+  expect_equal(result$pupilRight.valid, std_data$pupilRight)
 })
 
-test_that("TobiiPro adapter normalize_validity() .valid columns match old removeInvalidGaze() path on the monocular fixture (real masking)", {
+test_that("TobiiPro adapter normalize_validity() fully masks the right eye and leaves the left eye untouched on the monocular fixture", {
   fp <- testthat::test_path("fixtures", "tobii_pro_monocular.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiPro")
+  std_data <- tobii_pro_adapter$standardize(data)
 
-  old_result <- removeInvalidGaze(std_data, "left", "TobiiPro")
-  old_result <- removeInvalidGaze(old_result, "right", "TobiiPro")
-  new_result <- registered_adapters()[["TobiiPro"]]$normalize_validity(std_data)
+  result <- tobii_pro_adapter$normalize_validity(std_data)
 
-  valid_cols <- names(old_result)[grepl("\\.valid$", names(old_result))]
-  expect_true(length(valid_cols) > 0)
-  expect_equal(old_result[valid_cols], new_result[valid_cols])
+  # fixture is uniformly validityLeft = "Valid"
+  expect_equal(result$gazeLeftX.valid, std_data$gazeLeftX)
+  expect_equal(result$gazeLeftY.valid, std_data$gazeLeftY)
+  # fixture is uniformly validityRight = "Invalid"
+  expect_true(all(is.na(result$gazeRightX.valid)))
+  expect_true(all(is.na(result$gazeRightY.valid)))
 })
 
 # --- confidenceLeft/confidenceRight correctness ----------------------------
@@ -90,7 +92,7 @@ test_that("TobiiPro adapter normalize_validity() .valid columns match old remove
 test_that("TobiiStudio adapter normalize_validity() sets confidence to 1 for both eyes when validity is best (0) on all-valid fixture", {
   fp <- testthat::test_path("fixtures", "tobii_studio_sample.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiStudio")
+  std_data <- tobii_studio_adapter$standardize(data)
 
   result <- tobii_studio_adapter$normalize_validity(std_data)
 
@@ -101,7 +103,7 @@ test_that("TobiiStudio adapter normalize_validity() sets confidence to 1 for bot
 test_that("TobiiStudio adapter normalize_validity() derives confidence from the native 0-4 validity scale on the monocular fixture", {
   fp <- testthat::test_path("fixtures", "tobii_studio_monocular.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiStudio")
+  std_data <- tobii_studio_adapter$standardize(data)
 
   result <- tobii_studio_adapter$normalize_validity(std_data)
 
@@ -113,7 +115,7 @@ test_that("TobiiStudio adapter normalize_validity() derives confidence from the 
 test_that("TobiiPro adapter normalize_validity() sets confidence to 1 for both eyes when validity is 'Valid' on all-valid fixture", {
   fp <- testthat::test_path("fixtures", "tobii_pro_sample.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiPro")
+  std_data <- tobii_pro_adapter$standardize(data)
 
   result <- tobii_pro_adapter$normalize_validity(std_data)
 
@@ -124,7 +126,7 @@ test_that("TobiiPro adapter normalize_validity() sets confidence to 1 for both e
 test_that("TobiiPro adapter normalize_validity() derives confidence from the native Valid/Invalid strings on the monocular fixture", {
   fp <- testthat::test_path("fixtures", "tobii_pro_monocular.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiPro")
+  std_data <- tobii_pro_adapter$standardize(data)
 
   result <- tobii_pro_adapter$normalize_validity(std_data)
 
@@ -206,7 +208,7 @@ test_that("TobiiStudio adapter normalize_validity() sets confidence to 1 at NA-v
 test_that("TobiiStudio adapter normalize_validity() threshold argument changes the masking outcome relative to the default", {
   fp <- testthat::test_path("fixtures", "tobii_studio_monocular.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiStudio")
+  std_data <- tobii_studio_adapter$standardize(data)
 
   # fixture is uniformly validityRight = 4
   default_result <- tobii_studio_adapter$normalize_validity(std_data)
@@ -222,7 +224,7 @@ test_that("TobiiStudio adapter normalize_validity() threshold argument changes t
 test_that("TobiiPro adapter normalize_validity() threshold argument is accepted but has no effect on the masking outcome", {
   fp <- testthat::test_path("fixtures", "tobii_pro_monocular.tsv")
   data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiPro")
+  std_data <- tobii_pro_adapter$standardize(data)
 
   default_result <- tobii_pro_adapter$normalize_validity(std_data)
   explicit_result <- tobii_pro_adapter$normalize_validity(std_data, threshold = 0.5)

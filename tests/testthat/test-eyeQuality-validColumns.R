@@ -156,3 +156,61 @@ test_that("eyeQuality() end-to-end pipeline recovers constant gaze position thro
   # actual pre-change snapshot to diff.
   expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
 })
+
+# Regression tests for P3-07: eyeQuality() was rewired to call
+# adapter$normalize_validity() (P3-06) instead of two per-eye
+# removeInvalidGaze() calls. normalize_validity() additionally computes new
+# confidenceLeft/confidenceRight columns (?eyeQuality-schema) that the old
+# removeInvalidGaze() path never produced, and removeIntermediateCols()
+# selects final output columns by *position* -- so without an explicit strip,
+# these new columns would silently leak into eyeQuality()'s default output
+# and shift every column after them. These columns get the same
+# includeIntermediates-gated treatment as the .valid columns above: stripped
+# by default (keeping default output byte-identical to pre-P3-07), retained
+# when includeIntermediates = TRUE so users who ask for pipeline-internal
+# state can actually see the new confidence values.
+
+test_that("eyeQuality() excludes confidenceLeft/confidenceRight from output with includeIntermediates = FALSE (default)", {
+  skip_on_cran()
+
+  dir <- tempfile("p307_confidence_default_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  fp <- write_p105_fixture(dir)
+
+  result <- eyeQuality(
+    fp,
+    displayDimensionX_mm = 594,
+    displayDimensionY_mm = 344,
+    saveData = FALSE
+  )
+
+  expect_false("confidenceLeft" %in% colnames(result))
+  expect_false("confidenceRight" %in% colnames(result))
+})
+
+test_that("eyeQuality() retains confidenceLeft/confidenceRight in output with includeIntermediates = TRUE", {
+  skip_on_cran()
+
+  dir <- tempfile("p307_confidence_intermediates_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  fp <- write_p105_fixture(dir)
+
+  result <- eyeQuality(
+    fp,
+    displayDimensionX_mm = 594,
+    displayDimensionY_mm = 344,
+    saveData = FALSE,
+    includeIntermediates = TRUE
+  )
+
+  expect_true("confidenceLeft" %in% colnames(result))
+  expect_true("confidenceRight" %in% colnames(result))
+  # fixture marks rows 100-101 "Invalid" on both eyes; confidence should be
+  # low (0) there and high (1) everywhere else, per P3-06's Tobii Pro mapping.
+  expect_equal(result$confidenceLeft[c(100, 101)], c(0, 0))
+  expect_equal(result$confidenceRight[c(100, 101)], c(0, 0))
+  expect_true(all(result$confidenceLeft[-c(100, 101)] == 1))
+  expect_true(all(result$confidenceRight[-c(100, 101)] == 1))
+})

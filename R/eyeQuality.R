@@ -121,7 +121,13 @@ eyeQuality <- function(filepath,
   # print_or_save(stringr::str_glue("--- 01. importData complete. (run duration: {getPipelineTiming(runtime_start, runtime_loadData)})"), saveData, runtime_Log)
 
   # detect software
+  # detectImportSourceType() (P3-03) already dispatches through the adapter
+  # registry and owns the "no adapter matched" error message; look up the
+  # matching adapter object here so the remaining pipeline steps below can
+  # call its standardize()/extract_events()/normalize_validity() methods
+  # directly instead of the old software-string-dispatching functions.
   software <- detectImportSourceType(data)
+  adapter <- registered_adapters()[[software]]
   runtime_detectImportSourceType <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -131,7 +137,7 @@ eyeQuality <- function(filepath,
   # print_or_save(stringr::str_glue("--- 02. detectImportSourceType returns software = {software}. (run duration: {getPipelineTiming(runtime_loadData, runtime_detectImportSourceType)})"), saveData, runtime_Log)
 
   # format data to standard columns across software
-  data <- standardizeColumnNames(data, software)
+  data <- adapter$standardize(data)
 
   runtime_standardizeColumnNames <- getCurrentTime()
   print(
@@ -162,9 +168,9 @@ eyeQuality <- function(filepath,
   )
 
   # save & remove event rows
-  data_list <- extractEventRows(data, software)
-  data <- data_list[[1]] # gazestream data
-  eventData <- data_list[[2]] # event data
+  data_list <- adapter$extract_events(data)
+  data <- data_list$gaze # gazestream data
+  eventData <- data_list$events # event data
 
   runtime_extractEventRows <- getCurrentTime()
   print(
@@ -256,8 +262,14 @@ eyeQuality <- function(filepath,
 
   # Mark invalid datapoints as NA
   ## check - create a function to mark event placeholders as NA?'
-  data <- removeInvalidGaze(data, whichEye = "left", software, maxValidityThreshold)
-  data <- removeInvalidGaze(data, whichEye = "right", software, maxValidityThreshold)
+  # normalize_validity() operates on both eyes in a single call (unlike the
+  # old per-eye removeInvalidGaze() calls it replaces) and additionally
+  # computes new confidenceLeft/confidenceRight columns (?eyeQuality-schema)
+  # that the pre-refactor pipeline never produced. These are stripped below
+  # alongside the .valid columns when includeIntermediates = FALSE, and kept
+  # when includeIntermediates = TRUE, the same treatment as every other
+  # pipeline-internal column added since P1-05.
+  data <- adapter$normalize_validity(data, threshold = maxValidityThreshold)
   runtime_removeInvalidGaze <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -635,7 +647,9 @@ eyeQuality <- function(filepath,
     tempCols <- c(
       colnames(data)[grepl("\\.temp$", colnames(data), ignore.case = TRUE)],
       colnames(data)[grepl("\\.es.selection$", colnames(data), ignore.case = TRUE)],
-      colnames(data)[grepl("\\.valid$", colnames(data), ignore.case = TRUE)]
+      colnames(data)[grepl("\\.valid$", colnames(data), ignore.case = TRUE)],
+      "confidenceLeft",
+      "confidenceRight"
     )
     for (t in tempCols) {
       data[[t]] <- NULL

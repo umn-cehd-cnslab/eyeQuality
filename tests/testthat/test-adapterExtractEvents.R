@@ -1,76 +1,74 @@
-# P3-05 follow-up: regression coverage for the new adapter extract_events()
-# implementations (.tobii_studio_extract_events() in
-# R/tobii-studio-adapter.R, .tobii_pro_extract_events() in
-# R/tobii-pro-adapter.R), which were ported unchanged from the pre-Phase-3
-# extractEventRows() TobiiStudio/TobiiPro branches (R/extractEventRows.R).
-# Both the old path (standardizeColumnNames() -> extractEventRows()) and the
-# new path (registered_adapters()[["TobiiStudio"/"TobiiPro"]]$extract_events())
-# are still live in the codebase as of P3-05 -- the actual eyeQuality()
-# pipeline still calls extractEventRows() directly and isn't rewired to the
-# adapter registry until P3-07.
+# Regression coverage for the adapter extract_events() implementations
+# (.tobii_studio_extract_events() in R/tobii-studio-adapter.R,
+# .tobii_pro_extract_events() in R/tobii-pro-adapter.R), which split
+# standardized data into gaze-stream rows vs. event rows.
 #
-# The two paths return different shapes by design: the old extractEventRows()
-# returns an unnamed positional list(gazeStreamData, eventData), while the
-# new extract_events() returns a named list(gaze = ..., events = ...), to
-# match the documented adapter interface contract (R/adapter-interface.R,
-# R/eyeQuality-schema.R). So these tests compare the underlying data
-# (old_result[[1]] vs new_result$gaze, etc.) rather than the raw lists --
-# a naive identical() on the two lists would fail on the name difference
-# alone, even though the actual split logic is unchanged.
-#
-# NOTE: this test file is deliberately temporary-shaped, mirroring
-# test-adapterStandardize.R. Once P3-07 removes the old
-# extractEventRows()/standardizeColumnNames() code path, this old-vs-new
-# comparison will no longer make sense -- at that point these tests should be
-# simplified to assert the adapter extract_events() output against known
-# expected values directly, rather than against the (removed) old path.
+# Originally (P3-05) these tests asserted the adapter output was equivalent
+# to the old standalone extractEventRows() path, which was still live in the
+# eyeQuality() pipeline at the time. P3-07 rewired the pipeline to call the
+# adapter registry directly, retiring that old path from live use, so these
+# tests now assert the adapter extract_events() output against literal
+# expected values on small hand-constructed data frames instead of
+# re-deriving expected values by calling the now-pipeline-dead
+# extractEventRows().
 
-test_that("TobiiStudio adapter extract_events() matches old extractEventRows() path on the sample fixture", {
-  fp <- testthat::test_path("fixtures", "tobii_studio_sample.tsv")
-  data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiStudio")
+test_that("TobiiStudio adapter extract_events() splits gaze rows from event rows using the eyeTrackerTimestamp sentinel", {
+  data <- data.frame(
+    eyeTrackerTimestamp = c(0, 17, -9999, NA),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
 
-  old_result <- extractEventRows(std_data, software = "TobiiStudio")
-  new_result <- registered_adapters()[["TobiiStudio"]]$extract_events(std_data)
+  result <- tobii_studio_adapter$extract_events(data)
 
-  expect_equal(old_result[[1]], new_result$gaze)
-  expect_equal(old_result[[2]], new_result$events)
+  expect_equal(nrow(result$gaze), 2)
+  expect_equal(nrow(result$events), 2)
+  expect_equal(result$gaze$eyeTrackerTimestamp, c(0, 17))
+  expect_equal(result$gaze$gazeLeftX, c(1, 2))
+  expect_equal(result$events$eyeTrackerTimestamp, c(-9999, NA))
+  expect_equal(result$events$gazeLeftX, c(3, 4))
 })
 
-test_that("TobiiStudio adapter extract_events() matches old extractEventRows() path on the monocular fixture", {
-  fp <- testthat::test_path("fixtures", "tobii_studio_monocular.tsv")
-  data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiStudio")
+test_that("TobiiStudio adapter extract_events() returns all rows as gaze when no sentinel/NA rows are present", {
+  data <- data.frame(
+    eyeTrackerTimestamp = c(0, 17, 34),
+    gazeLeftX = c(1, 2, 3),
+    stringsAsFactors = FALSE
+  )
 
-  old_result <- extractEventRows(std_data, software = "TobiiStudio")
-  new_result <- registered_adapters()[["TobiiStudio"]]$extract_events(std_data)
+  result <- tobii_studio_adapter$extract_events(data)
 
-  expect_equal(old_result[[1]], new_result$gaze)
-  expect_equal(old_result[[2]], new_result$events)
+  expect_equal(nrow(result$gaze), 3)
+  expect_equal(nrow(result$events), 0)
 })
 
-test_that("TobiiPro adapter extract_events() matches old extractEventRows() path on the sample fixture", {
-  fp <- testthat::test_path("fixtures", "tobii_pro_sample.tsv")
-  data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiPro")
+test_that("TobiiPro adapter extract_events() splits gaze rows from event rows using the Sensor column", {
+  data <- data.frame(
+    Sensor = c("Eye Tracker", "Eye Tracker", "Mouse", NA),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
 
-  old_result <- extractEventRows(std_data, software = "TobiiPro")
-  new_result <- registered_adapters()[["TobiiPro"]]$extract_events(std_data)
+  result <- tobii_pro_adapter$extract_events(data)
 
-  expect_equal(old_result[[1]], new_result$gaze)
-  expect_equal(old_result[[2]], new_result$events)
+  expect_equal(nrow(result$gaze), 2)
+  expect_equal(nrow(result$events), 2)
+  expect_equal(result$gaze$gazeLeftX, c(1, 2))
+  expect_equal(result$events$Sensor, c("Mouse", NA))
+  expect_equal(result$events$gazeLeftX, c(3, 4))
 })
 
-test_that("TobiiPro adapter extract_events() matches old extractEventRows() path on the monocular fixture", {
-  fp <- testthat::test_path("fixtures", "tobii_pro_monocular.tsv")
-  data <- importData(fp)
-  std_data <- standardizeColumnNames(data, "TobiiPro")
+test_that("TobiiPro adapter extract_events() returns all rows as gaze when Sensor is always 'Eye Tracker'", {
+  data <- data.frame(
+    Sensor = c("Eye Tracker", "Eye Tracker"),
+    gazeLeftX = c(1, 2),
+    stringsAsFactors = FALSE
+  )
 
-  old_result <- extractEventRows(std_data, software = "TobiiPro")
-  new_result <- registered_adapters()[["TobiiPro"]]$extract_events(std_data)
+  result <- tobii_pro_adapter$extract_events(data)
 
-  expect_equal(old_result[[1]], new_result$gaze)
-  expect_equal(old_result[[2]], new_result$events)
+  expect_equal(nrow(result$gaze), 2)
+  expect_equal(nrow(result$events), 0)
 })
 
 # --- Error-path coverage --------------------------------------------------
@@ -99,43 +97,4 @@ test_that("TobiiPro adapter extract_events() errors clearly when Sensor is missi
     tobii_pro_adapter$extract_events(data),
     regexp = "Sensor"
   )
-})
-
-# --- Synthetic data with actual event rows --------------------------------
-# All 4 Tobii fixtures happen to have zero event rows in both the old and
-# new paths, so the equivalence tests above don't exercise the branch that
-# actually separates gaze rows from event rows. These synthetic cases
-# (mirroring test-extractEventRows.R's own synthetic-data tests for the old
-# function) construct minimal standardized-shape data with a genuine mix of
-# gaze and event rows, and confirm the new adapter methods split them
-# identically to the old function.
-
-test_that("TobiiPro adapter extract_events() splits gaze vs event rows on synthetic data", {
-  data <- data.frame(
-    Sensor = c("Eye Tracker", "Eye Tracker", "Mouse", NA),
-    stringsAsFactors = FALSE
-  )
-
-  old_result <- extractEventRows(data, software = "TobiiPro")
-  new_result <- tobii_pro_adapter$extract_events(data)
-
-  expect_equal(nrow(new_result$gaze), 2)
-  expect_equal(nrow(new_result$events), 2)
-  expect_equal(old_result[[1]], new_result$gaze)
-  expect_equal(old_result[[2]], new_result$events)
-})
-
-test_that("TobiiStudio adapter extract_events() splits gaze vs event rows on synthetic data", {
-  data <- data.frame(
-    eyeTrackerTimestamp = c(0, 17, -9999, NA),
-    stringsAsFactors = FALSE
-  )
-
-  old_result <- extractEventRows(data, software = "TobiiStudio")
-  new_result <- tobii_studio_adapter$extract_events(data)
-
-  expect_equal(nrow(new_result$gaze), 2)
-  expect_equal(nrow(new_result$events), 2)
-  expect_equal(old_result[[1]], new_result$gaze)
-  expect_equal(old_result[[2]], new_result$events)
 })
