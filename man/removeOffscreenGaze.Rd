@@ -15,6 +15,7 @@ removeOffscreenGaze(
   displayDimensionX_mm,
   displayDimensionY_mm,
   offscreenValidityRange_va = 5,
+  verbose = FALSE,
   ...
 )
 }
@@ -38,6 +39,12 @@ removeOffscreenGaze(
 \item{displayDimensionY_mm}{Y Display dimension in mm}
 
 \item{offscreenValidityRange_va}{integer Degrees of Visual angle outside of screen which can be kept as valid. Default = 5 VA}
+
+\item{verbose}{optional Boolean. When \code{TRUE}, emits a P3-10 diagnostic
+("detected N samples with gaze coordinates outside display bounds")
+plus row ranges for any long contiguous run of offscreen samples.
+Default \code{FALSE}; purely additive, does not change which samples are
+marked offscreen.}
 
 \item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
 }

@@ -194,10 +194,10 @@
       smoothed_velocity_X                                    0.0       0.0        0
       smoothed_velocity_Y                                    0.0       0.0        0
       ivt_fixations                                       3349.0    3349.0       NA
-      ivt_saccades                                           Inf      -Inf       NA
-      ivt_unclassified                                       Inf      -Inf       NA
-      ivt_missing                                            Inf      -Inf       NA
-      ivt_blinks                                             Inf      -Inf       NA
+      ivt_saccades                                            NA        NA       NA
+      ivt_unclassified                                        NA        NA       NA
+      ivt_missing                                             NA        NA       NA
+      ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA
@@ -398,10 +398,10 @@
       smoothed_velocity_X                                    0.0       0.0        0
       smoothed_velocity_Y                                    0.0       0.0        0
       ivt_fixations                                       3349.0    3349.0       NA
-      ivt_saccades                                           Inf      -Inf       NA
-      ivt_unclassified                                       Inf      -Inf       NA
-      ivt_missing                                            Inf      -Inf       NA
-      ivt_blinks                                             Inf      -Inf       NA
+      ivt_saccades                                            NA        NA       NA
+      ivt_unclassified                                        NA        NA       NA
+      ivt_missing                                             NA        NA       NA
+      ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA
@@ -602,10 +602,10 @@
       smoothed_velocity_X                                    0.0       0.0        0
       smoothed_velocity_Y                                    0.0       0.0        0
       ivt_fixations                                       3349.0    3349.0       NA
-      ivt_saccades                                           Inf      -Inf       NA
-      ivt_unclassified                                       Inf      -Inf       NA
-      ivt_missing                                            Inf      -Inf       NA
-      ivt_blinks                                             Inf      -Inf       NA
+      ivt_saccades                                            NA        NA       NA
+      ivt_unclassified                                        NA        NA       NA
+      ivt_missing                                             NA        NA       NA
+      ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA
@@ -806,10 +806,10 @@
       smoothed_velocity_X                                    0.0       0.0        0
       smoothed_velocity_Y                                    0.0       0.0        0
       ivt_fixations                                       3349.0    3349.0       NA
-      ivt_saccades                                           Inf      -Inf       NA
-      ivt_unclassified                                       Inf      -Inf       NA
-      ivt_missing                                            Inf      -Inf       NA
-      ivt_blinks                                             Inf      -Inf       NA
+      ivt_saccades                                            NA        NA       NA
+      ivt_unclassified                                        NA        NA       NA
+      ivt_missing                                             NA        NA       NA
+      ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA

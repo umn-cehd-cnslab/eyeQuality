@@ -11,7 +11,7 @@ eyeQuality(
   data = NULL,
   eyeSelection_method = "Maximize",
   smoothGaze_boolean = TRUE,
-  maxValidityThreshold = 2,
+  validityThreshold = NULL,
   saveData = FALSE,
   includeIntermediates = FALSE,
   studioEvents = NULL,
@@ -20,6 +20,7 @@ eyeQuality(
   timeEnd = NULL,
   batchName = NULL,
   outputDir = NULL,
+  verbose = FALSE,
   ...
 )
 }
@@ -36,7 +37,17 @@ eyeQuality(
 
 \item{smoothGaze_boolean}{Boolean indicating if we should run smoothGaze script}
 
-\item{maxValidityThreshold}{a numeric (0, 1, 2, 3, or 4) describing what validity rating is considered acceptable - Only applicable if software = "TobiiStudio"}
+\item{validityThreshold}{optional numeric on the generic \code{confidence} (0-1)
+scale (\code{1} = highest confidence, see \code{?eyeQuality-schema}) specifying the
+minimum per-sample confidence to retain; passed through to the detected
+adapter's \code{normalize_validity()}. Default \code{NULL}, meaning "use whatever
+validity threshold the detected adapter considers its own default" (see
+each adapter's \code{default_thresholds}, e.g. Tobii Studio's native \code{0}-\code{4}
+validity-code threshold of \code{2}, equivalent to a \code{confidence} cutoff of
+\code{0.5}; Tobii Pro's validity is a binary \code{"Valid"}/\code{"Invalid"} flag with
+no threshold concept at all). Replaces the pre-Phase-3
+\code{maxValidityThreshold} argument, which operated on Tobii Studio's
+native \code{0}-\code{4} scale directly and had no meaning for Tobii Pro.}
 
 \item{saveData}{Boolean indicating if we should suppress output, and save data to files}
 
@@ -53,6 +64,19 @@ eyeQuality(
 \item{batchName}{optional string to append output files with a specific batch run label. Default NULL}
 
 \item{outputDir}{optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
+
+\item{verbose}{optional Boolean. When \code{TRUE}, emits additional structured,
+human-readable diagnostic messages during processing for
+data-quality-relevant events a user wouldn't necessarily think to check
+for themselves (e.g. a run of consecutive samples below the validity
+threshold, a schema column present but entirely \code{NA}, samples detected
+outside the display bounds). Purely additive console/log output; the
+returned data and every other side effect are identical regardless of
+this argument. Default \code{FALSE}, which reproduces the pre-P3-10 output
+exactly (no diagnostic lines emitted at all). Forwarded to the detected
+adapter's \code{standardize()}/\code{extract_events()}/\code{normalize_validity()} and
+to \code{classifyBlinks()}/\code{eyeSelection()}/\code{removeOffscreenGaze()}/
+\code{interpolateGaze()}.}
 
 \item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
 }

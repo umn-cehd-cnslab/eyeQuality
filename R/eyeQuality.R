@@ -6,7 +6,17 @@
 #' @param data instead of passing a filepath, you can pass a data frame with your loaded data. Default NULL
 #' @param eyeSelection_method string with possible values "Maximize", "Strict", "Left", or "Right". Default "Maximize"
 #' @param smoothGaze_boolean Boolean indicating if we should run smoothGaze script
-#' @param maxValidityThreshold a numeric (0, 1, 2, 3, or 4) describing what validity rating is considered acceptable - Only applicable if software = "TobiiStudio"
+#' @param validityThreshold optional numeric on the generic `confidence` (0-1)
+#'   scale (`1` = highest confidence, see `?eyeQuality-schema`) specifying the
+#'   minimum per-sample confidence to retain; passed through to the detected
+#'   adapter's `normalize_validity()`. Default `NULL`, meaning "use whatever
+#'   validity threshold the detected adapter considers its own default" (see
+#'   each adapter's `default_thresholds`, e.g. Tobii Studio's native `0`-`4`
+#'   validity-code threshold of `2`, equivalent to a `confidence` cutoff of
+#'   `0.5`; Tobii Pro's validity is a binary `"Valid"`/`"Invalid"` flag with
+#'   no threshold concept at all). Replaces the pre-Phase-3
+#'   `maxValidityThreshold` argument, which operated on Tobii Studio's
+#'   native `0`-`4` scale directly and had no meaning for Tobii Pro.
 #' @param saveData Boolean indicating if we should suppress output, and save data to files
 #' @param includeIntermediates Boolean indicating if column outputs from all intermediate steps of the preprocessing should be included. Default = FALSE
 #' @param studioEvents optional list of two values specifying the start and ending event labels for Tobii Studio files, c(startEventName, endEventName) . Default NULL
@@ -15,6 +25,18 @@
 #' @param timeEnd optional Recording Timestamp of the last data point to include. Default NULL
 #' @param batchName optional string to append output files with a specific batch run label. Default NULL
 #' @param outputDir optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL
+#' @param verbose optional Boolean. When `TRUE`, emits additional structured,
+#'   human-readable diagnostic messages during processing for
+#'   data-quality-relevant events a user wouldn't necessarily think to check
+#'   for themselves (e.g. a run of consecutive samples below the validity
+#'   threshold, a schema column present but entirely `NA`, samples detected
+#'   outside the display bounds). Purely additive console/log output; the
+#'   returned data and every other side effect are identical regardless of
+#'   this argument. Default `FALSE`, which reproduces the pre-P3-10 output
+#'   exactly (no diagnostic lines emitted at all). Forwarded to the detected
+#'   adapter's `standardize()`/`extract_events()`/`normalize_validity()` and
+#'   to `classifyBlinks()`/`eyeSelection()`/`removeOffscreenGaze()`/
+#'   `interpolateGaze()`.
 #' @param ... additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.
 #'
 #' @importFrom readr read_delim
@@ -29,7 +51,7 @@ eyeQuality <- function(filepath,
                        data = NULL,
                        eyeSelection_method = "Maximize",
                        smoothGaze_boolean = TRUE,
-                       maxValidityThreshold = 2,
+                       validityThreshold = NULL,
                        saveData = FALSE,
                        includeIntermediates = FALSE,
                        studioEvents = NULL,
@@ -38,6 +60,7 @@ eyeQuality <- function(filepath,
                        timeEnd = NULL,
                        batchName = NULL,
                        outputDir = NULL,
+                       verbose = FALSE,
                        ...) {
   # Wrapper
   runtime_start <- getCurrentTime()
@@ -121,7 +144,13 @@ eyeQuality <- function(filepath,
   # print_or_save(stringr::str_glue("--- 01. importData complete. (run duration: {getPipelineTiming(runtime_start, runtime_loadData)})"), saveData, runtime_Log)
 
   # detect software
+  # detectImportSourceType() (P3-03) already dispatches through the adapter
+  # registry and owns the "no adapter matched" error message; look up the
+  # matching adapter object here so the remaining pipeline steps below can
+  # call its standardize()/extract_events()/normalize_validity() methods
+  # directly instead of the old software-string-dispatching functions.
   software <- detectImportSourceType(data)
+  adapter <- registered_adapters()[[software]]
   runtime_detectImportSourceType <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -131,7 +160,7 @@ eyeQuality <- function(filepath,
   # print_or_save(stringr::str_glue("--- 02. detectImportSourceType returns software = {software}. (run duration: {getPipelineTiming(runtime_loadData, runtime_detectImportSourceType)})"), saveData, runtime_Log)
 
   # format data to standard columns across software
-  data <- standardizeColumnNames(data, software)
+  data <- adapter$standardize(data, verbose = verbose)
 
   runtime_standardizeColumnNames <- getCurrentTime()
   print(
@@ -162,9 +191,9 @@ eyeQuality <- function(filepath,
   )
 
   # save & remove event rows
-  data_list <- extractEventRows(data, software)
-  data <- data_list[[1]] # gazestream data
-  eventData <- data_list[[2]] # event data
+  data_list <- adapter$extract_events(data, verbose = verbose)
+  data <- data_list$gaze # gazestream data
+  eventData <- data_list$events # event data
 
   runtime_extractEventRows <- getCurrentTime()
   print(
@@ -256,8 +285,36 @@ eyeQuality <- function(filepath,
 
   # Mark invalid datapoints as NA
   ## check - create a function to mark event placeholders as NA?'
-  data <- removeInvalidGaze(data, whichEye = "left", software, maxValidityThreshold)
-  data <- removeInvalidGaze(data, whichEye = "right", software, maxValidityThreshold)
+  # normalize_validity() operates on both eyes in a single call (unlike the
+  # old per-eye removeInvalidGaze() calls it replaces) and additionally
+  # computes new confidenceLeft/confidenceRight columns (?eyeQuality-schema)
+  # that the pre-refactor pipeline never produced. These are stripped below
+  # alongside the .valid columns when includeIntermediates = FALSE, and kept
+  # when includeIntermediates = TRUE, the same treatment as every other
+  # pipeline-internal column added since P1-05.
+  #
+  # validityThreshold (P3-08) is adapter-independent and expressed on the
+  # generic confidence (0-1) scale, 1 = highest confidence. normalize_validity()
+  # itself still takes `threshold` on each adapter's own device-native validity
+  # scale (?new_eyetracker_adapter) -- when the caller doesn't override
+  # anything, pass threshold = NULL straight through so each adapter falls
+  # back to its own default_thresholds, which is exactly the pre-P3-08
+  # default behavior (Tobii Studio's default_thresholds$validityThreshold is
+  # 2, matching the old maxValidityThreshold default exactly; Tobii Pro
+  # ignores threshold entirely either way). When the caller does supply
+  # validityThreshold, convert it onto the calling adapter's native scale --
+  # currently only Tobii Studio's normalize_validity() threshold has
+  # scale-specific meaning (native 0-4, confidence = 1 - validity/4, per
+  # .tobii_studio_confidence()/?eyeQuality-schema), so invert that mapping;
+  # Tobii Pro's normalize_validity() ignores `threshold` regardless of value.
+  nativeValidityThreshold <- if (is.null(validityThreshold)) {
+    NULL
+  } else if (software == "TobiiStudio") {
+    (1 - validityThreshold) * 4
+  } else {
+    validityThreshold
+  }
+  data <- adapter$normalize_validity(data, threshold = nativeValidityThreshold, verbose = verbose)
   runtime_removeInvalidGaze <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -284,6 +341,7 @@ eyeQuality <- function(filepath,
       displayResolutionY_px,
       displayDimensionX_mm,
       displayDimensionY_mm,
+      verbose = verbose,
       ...
     )
   data <-
@@ -297,6 +355,7 @@ eyeQuality <- function(filepath,
       displayResolutionY_px,
       displayDimensionX_mm,
       displayDimensionY_mm,
+      verbose = verbose,
       ...
     )
 
@@ -320,7 +379,7 @@ eyeQuality <- function(filepath,
       "pupilLeft.valid",
       "pupilRight.valid"
     )
-  data <- interpolateGaze(data, recordingFrequency_hz, columnsToInterpolate, ...)
+  data <- interpolateGaze(data, recordingFrequency_hz, columnsToInterpolate, verbose = verbose, ...)
   runtime_interpolateGaze <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -335,6 +394,7 @@ eyeQuality <- function(filepath,
       pupilLeft = "pupilLeft.int",
       pupilRight = "pupilRight.int",
       recordingFrequency_hz,
+      verbose = verbose,
       ...
     )
   if (eyeSelection_method == "Maximize" || eyeSelection_method == "Strict") {
@@ -353,7 +413,7 @@ eyeQuality <- function(filepath,
   # print_or_save(stringr::str_glue("--- 09. classifyBlinks complete. (run duration: {getPipelineTiming(runtime_interpolateGaze, runtime_classifyBlinks)})"), saveData, runtime_Log)
 
   # eye selection
-  data <- eyeSelection(data, eyeSelection_method = eyeSelection_method, ...)
+  data <- eyeSelection(data, eyeSelection_method = eyeSelection_method, verbose = verbose, ...)
   runtime_eyeSelection <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -635,7 +695,9 @@ eyeQuality <- function(filepath,
     tempCols <- c(
       colnames(data)[grepl("\\.temp$", colnames(data), ignore.case = TRUE)],
       colnames(data)[grepl("\\.es.selection$", colnames(data), ignore.case = TRUE)],
-      colnames(data)[grepl("\\.valid$", colnames(data), ignore.case = TRUE)]
+      colnames(data)[grepl("\\.valid$", colnames(data), ignore.case = TRUE)],
+      "confidenceLeft",
+      "confidenceRight"
     )
     for (t in tempCols) {
       data[[t]] <- NULL

@@ -9,6 +9,7 @@ interpolateGaze(
   recordingFrequency_hz,
   columnsToInterpolate,
   maxGapLength_ms = 50,
+  verbose = FALSE,
   ...
 )
 }
@@ -20,6 +21,11 @@ interpolateGaze(
 \item{columnsToInterpolate}{list of column names to be interpolated}
 
 \item{maxGapLength_ms}{integer for max ms of gaps to interpolate over. Default value 50ms (pg. 119 Liz's dissertation)}
+
+\item{verbose}{optional Boolean. When \code{TRUE}, emits a P3-10 diagnostic per
+interpolated column reporting how many missing samples were filled and
+how many remain \code{NA} (gap too large or at the edge of the data).
+Default \code{FALSE}; purely additive, does not change interpolation.}
 
 \item{...}{additional passed parameters from parent function}
 }

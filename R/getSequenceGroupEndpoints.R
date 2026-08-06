@@ -13,7 +13,7 @@
 #'
 getSequenceGroupEndpoints <- function(data, group_column) {
   group_endpoints <- data %>%
-    dplyr::select(.data$recordingTimestamp_ms, !!rlang::sym(group_column)) %>%
+    dplyr::select(recordingTimestamp_ms, !!rlang::sym(group_column)) %>%
     dplyr::ungroup() %>%
     dplyr::mutate(
       "start_flag" = !!rlang::sym(group_column) != dplyr::lag(!!rlang::sym(group_column), n = 1),
@@ -37,10 +37,10 @@ getSequenceGroupEndpoints <- function(data, group_column) {
     ) %>%
     dplyr::mutate("duration" = .data$end_recordingTimestamp_ms - .data$start_recordingTimestamp_ms) %>%
     dplyr::select(
-      .data$group,
-      .data$start_recordingTimestamp_ms,
-      .data$end_recordingTimestamp_ms,
-      .data$duration
+      group,
+      start_recordingTimestamp_ms,
+      end_recordingTimestamp_ms,
+      duration
     ) %>%
     unique()
 

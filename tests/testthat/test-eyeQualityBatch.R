@@ -198,3 +198,114 @@ test_that("eyeQualityBatch does not false-positive its batchName/numberCores gua
   expect_true(file.exists(out_explicit))
   expect_true(file.exists(out_default))
 })
+
+# P3-10: eyeQualityBatch() gained a verbose = FALSE argument, forwarded
+# through to eyeQuality() for every file in the batch. eyeQualityBatch()
+# always calls eyeQuality(..., saveData = TRUE, ...) internally, which sinks
+# eyeQuality()'s console output (including any "[verbose]"-tagged diagnostic
+# lines) to a per-file run log at
+# "<inputDir>/derivatives/eyeQuality-v1/<basename>_desc-<batchName>_preproc_runlog.txt"
+# (R/getFileRunLogName.R's naming convention, minus its unused "2" suffix --
+# R/eyeQuality.R builds this path directly via create_new_filename()). Since
+# each file is actually processed inside a parallel cluster worker (a
+# separate process), reading that on-disk log back is the only reliable way
+# to confirm verbose really reached the per-file eyeQuality() call, as
+# opposed to capturing this test process's own stdout.
+write_p310_fixture_with_invalid_run <- function(dir, filename = "sub-01_task-test_recording-eyetracking_physio.tsv") {
+  n <- 200
+  dt_ms <- 17
+  ts <- seq(0, by = dt_ms, length.out = n)
+
+  validityLeft <- rep("Valid", n)
+  validityRight <- rep("Valid", n)
+  # 21 consecutive Invalid rows -- comfortably above
+  # .diagnose_consecutive_runs()'s default min_run_length (5), so a run-range
+  # verbose line is guaranteed to be emitted.
+  invalidRows <- 100:120
+  validityLeft[invalidRows] <- "Invalid"
+  validityRight[invalidRows] <- "Invalid"
+
+  d <- data.frame(
+    "Recording software version" = rep("1.90.0", n),
+    "Sensor" = rep("Eye Tracker", n),
+    "Event" = rep(NA_character_, n),
+    "Event value" = rep(NA_character_, n),
+    "Recording duration" = rep(NA_real_, n),
+    "Recording resolution height" = rep(1080, n),
+    "Recording resolution width" = rep(1920, n),
+    "Eyetracker timestamp" = ts,
+    "Recording timestamp" = ts,
+    "Gaze point left X" = rep(1400, n),
+    "Gaze point left Y" = rep(800, n),
+    "Gaze point right X" = rep(1400, n),
+    "Gaze point right Y" = rep(800, n),
+    "Eye position left Z (DACSmm)" = rep(600, n),
+    "Eye position right Z (DACSmm)" = rep(600, n),
+    "Pupil diameter left" = rep(3.5, n),
+    "Pupil diameter right" = rep(3.5, n),
+    "Validity left" = validityLeft,
+    "Validity right" = validityRight,
+    check.names = FALSE
+  )
+
+  filepath <- file.path(dir, filename)
+  readr::write_tsv(d, filepath)
+  filepath
+}
+
+p310_run_log_path <- function(fp, batchName) {
+  fs::path(
+    dirname(fp), "derivatives", "eyeQuality-v1",
+    paste0(fs::path_ext_remove(basename(fp)), "_desc-", batchName, "_preproc_runlog.txt")
+  )
+}
+
+test_that("eyeQualityBatch(verbose = TRUE) forwards verbose through to each file's eyeQuality() call, reaching the per-file run log", {
+  skip_on_cran()
+
+  dir <- tempfile("p310_batch_verbose_true_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  fp <- write_p310_fixture_with_invalid_run(dir)
+
+  eyeQualityBatch(
+    dir,
+    batchName = "p310verbosetrue",
+    numberCores = 1,
+    displayDimensionX_mm = 594,
+    displayDimensionY_mm = 344,
+    verbose = TRUE
+  )
+
+  logfile <- p310_run_log_path(fp, "p310verbosetrue")
+  expect_true(file.exists(logfile))
+
+  logLines <- readr::read_lines(logfile)
+  expect_true(any(grepl("\\[verbose\\]", logLines)))
+  expect_true(any(grepl(
+    "consecutive samples flagged for: left eye validity", logLines
+  )))
+})
+
+test_that("eyeQualityBatch(verbose = FALSE) (default) forwards FALSE through to each file's eyeQuality() call, with no diagnostics in the run log", {
+  skip_on_cran()
+
+  dir <- tempfile("p310_batch_verbose_false_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  fp <- write_p310_fixture_with_invalid_run(dir)
+
+  eyeQualityBatch(
+    dir,
+    batchName = "p310verbosefalse",
+    numberCores = 1,
+    displayDimensionX_mm = 594,
+    displayDimensionY_mm = 344
+  )
+
+  logfile <- p310_run_log_path(fp, "p310verbosefalse")
+  expect_true(file.exists(logfile))
+
+  logLines <- readr::read_lines(logfile)
+  expect_false(any(grepl("\\[verbose\\]", logLines)))
+})

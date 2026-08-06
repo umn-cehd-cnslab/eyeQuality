@@ -10,6 +10,11 @@
 #' @param pupilRight string column name for data containing right eye pupil data
 #' @param distanceLeftZ string column name for data containing left eye distance from screen in mm (Z distance)
 #' @param distanceRightZ string column name for data containing right eye distance from screen in mm  (Z distance)
+#' @param verbose optional Boolean. When `TRUE`, emits P3-10 diagnostics
+#'   about samples where gaze data was unavailable from one or both eyes
+#'   after eye selection (e.g. runs of samples with no usable gaze from
+#'   either eye). Default `FALSE`; purely additive, does not change eye
+#'   selection.
 #' @param ... additional passed parameters from parent function
 #'
 #' @importFrom dplyr mutate
@@ -30,6 +35,7 @@ eyeSelection <-
            pupilRight = "pupilRight.int",
            distanceLeftZ = "distanceLeftZ.int",
            distanceRightZ = "distanceRightZ.int",
+           verbose = FALSE,
            ...) {
     # hacky way to get rid of "no visible binding for global variable" note
     distanceZ.eyeSelect <- gazeX.eyeSelect <- gazeY.eyeSelect <- pupil.eyeSelect <- NULL
@@ -153,6 +159,11 @@ eyeSelection <-
             .data$distLeft.Z.temp, .data$distRight.Z.temp
           ), na.rm = TRUE)
         )
+      .diagnose_consecutive_runs(
+        data[["gazeX.es.selection"]] == "both_na",
+        "gaze data missing in both eyes after eye selection (Maximize)",
+        verbose
+      )
     }
 
     # Both Strict Option
@@ -245,6 +256,11 @@ eyeSelection <-
             !!rlang::sym(distanceLeftZ), !!rlang::sym(distanceRightZ)
           ), na.rm = FALSE)
         )
+      .diagnose_consecutive_runs(
+        data[["gazeX.es.selection"]] == "both_na",
+        "gaze data missing in both eyes after eye selection (Strict)",
+        verbose
+      )
     }
 
     # Single Eye Select Options
@@ -282,6 +298,11 @@ eyeSelection <-
           pupil.eyeSelect = (!!rlang::sym(pupilLeft)),
           distanceZ.eyeSelect = (!!rlang::sym(distanceLeftZ))
         )
+      .diagnose_consecutive_runs(
+        data[["gazeX.es.selection"]] == "left_na",
+        "left eye gaze missing (eyeSelection_method = \"Left\")",
+        verbose
+      )
     } else if (eyeSelection_method == "Right") {
       data[["gazeX.es.selection"]] <-
         case_when(
@@ -316,6 +337,11 @@ eyeSelection <-
           pupil.eyeSelect = (!!rlang::sym(pupilRight)),
           distanceZ.eyeSelect = (!!rlang::sym(distanceRightZ))
         )
+      .diagnose_consecutive_runs(
+        data[["gazeX.es.selection"]] == "right_na",
+        "right eye gaze missing (eyeSelection_method = \"Right\")",
+        verbose
+      )
     }
 
     return(data)
