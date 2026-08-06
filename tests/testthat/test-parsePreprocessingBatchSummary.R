@@ -14,13 +14,21 @@
 # Builds a preprocessing_batch_summary_desc-*.txt fixture matching
 # print_or_save()'s exact output format. `successful` and `failed` are
 # character vectors of filepaths (possibly empty) for the two sections.
+# `skipped` (P7-03) is the third such section - files eyeQualityBatch()
+# skipped because a matching qcsummary output already existed for the given
+# batchName/outputDir (resumability). Positioned, like in the real
+# eyeQualityBatch() output, before the "number of cores" line (the skip
+# check happens before cluster dispatch).
 write_batch_summary_fixture <- function(dir,
                                         successful = character(0),
                                         failed = character(0),
+                                        skipped = character(0),
                                         filename = "preprocessing_batch_summary_desc-test.txt") {
   lines <- c(
     "-----------------",
     "starting batch run: 2026-01-01 00:00:00",
+    paste0("------ Skipped files (already processed, resumability; n = ", length(skipped), "):  "),
+    paste(skipped, collapse = "\n"),
     "number of cores = 1",
     paste0("------ Successfully processed files (n = ", length(successful), "):  "),
     paste(successful, collapse = "\n"),
@@ -101,6 +109,45 @@ test_that("parsePreprocessingBatchSummary returns character(0) for an empty fail
   )
 
   result <- parsePreprocessingBatchSummary(f, "failedfiles")
+
+  expect_equal(result, character(0))
+})
+
+# P7-03: parsePreprocessingBatchSummary() gained a "skippedfiles"
+# info_to_extract branch alongside "failedfiles"/"successfulfiles", parsing
+# the new "------ Skipped files (already processed, resumability; n = ...)"
+# section eyeQualityBatch() writes for files it skipped because a matching
+# qcsummary output already existed (resumability).
+test_that("parsePreprocessingBatchSummary returns the skipped file list for info_to_extract = 'skippedfiles'", {
+  dir <- tempfile("p703_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  skipped <- c(
+    "/data/sub-01_task-test_recording-eyetracking_physio.tsv",
+    "/data/sub-02_task-test_recording-eyetracking_physio.tsv"
+  )
+  successful <- c("/data/sub-03_task-test_recording-eyetracking_physio.tsv")
+
+  f <- write_batch_summary_fixture(dir, successful = successful, skipped = skipped)
+
+  result <- parsePreprocessingBatchSummary(f, "skippedfiles")
+
+  expect_equal(result, skipped)
+})
+
+test_that("parsePreprocessingBatchSummary returns character(0) for an empty skippedfiles section (n = 0)", {
+  dir <- tempfile("p703_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  f <- write_batch_summary_fixture(
+    dir,
+    successful = c("/data/sub-01_task-test_recording-eyetracking_physio.tsv"),
+    skipped = character(0)
+  )
+
+  result <- parsePreprocessingBatchSummary(f, "skippedfiles")
 
   expect_equal(result, character(0))
 })

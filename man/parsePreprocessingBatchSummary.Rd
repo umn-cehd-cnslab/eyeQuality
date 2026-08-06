@@ -9,7 +9,7 @@ parsePreprocessingBatchSummary(batch_summary_file, info_to_extract = "summary")
 \arguments{
 \item{batch_summary_file}{filepath to preprocessing_batch_summary.tsv file}
 
-\item{info_to_extract}{string with value of "summary" | "failedfiles" | "successfulfiles"}
+\item{info_to_extract}{string with value of "summary" | "failedfiles" | "successfulfiles" | "skippedfiles"}
 }
 \value{
 data dataframe exported data from preprocessing_batch_summary

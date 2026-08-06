@@ -3,7 +3,7 @@
 #' parse preprocessing_batch_summary files
 #'
 #' @param batch_summary_file filepath to preprocessing_batch_summary.tsv file
-#' @param info_to_extract string with value of "summary" | "failedfiles" | "successfulfiles"
+#' @param info_to_extract string with value of "summary" | "failedfiles" | "successfulfiles" | "skippedfiles"
 #'
 #' @return data dataframe exported data from preprocessing_batch_summary
 #' @export
@@ -56,11 +56,16 @@ parsePreprocessingBatchSummary <-
           runTime
         ) %>%
         return()
-    } else if (info_to_extract %in% c("failedfiles", "successfulfiles")) {
+    } else if (info_to_extract %in% c("failedfiles", "successfulfiles", "skippedfiles")) {
       lines <- read_lines(str_glue(batch_summary_file))
 
       header_pattern <- if (info_to_extract == "successfulfiles") {
         "^------ Successfully processed files \\(n = (\\d+)\\):"
+      } else if (info_to_extract == "skippedfiles") {
+        # P7-03: files eyeQualityBatch() skipped this run because a matching
+        # qcsummary output already existed for the given batchName (and
+        # outputDir, if set) - i.e. resumability skips, not failures.
+        "^------ Skipped files \\(already processed, resumability; n = (\\d+)\\):"
       } else {
         "^------ Files that failed processing \\(n = (\\d+)\\):"
       }
@@ -77,7 +82,15 @@ parsePreprocessingBatchSummary <-
         )
       }
 
-      header_idx <- header_idx[1]
+      # eyeQualityBatch() appends to batch_run_summary (print_or_save(...,
+      # savedata = TRUE) always opens with append = TRUE) rather than
+      # overwriting it, so a summary file for a directory/batchName that has
+      # been run more than once - e.g. resuming a partially-completed batch,
+      # P7-03's resumability feature - can contain more than one occurrence
+      # of this section header, one per run. The most recent run's section is
+      # always the one that reflects current on-disk reality, so take the
+      # last match, not the first.
+      header_idx <- header_idx[length(header_idx)]
       n_files <- as.integer(str_extract(lines[header_idx], header_pattern, group = 1))
 
       if (is.na(n_files) || n_files == 0) {

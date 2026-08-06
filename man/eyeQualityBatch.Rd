@@ -12,6 +12,8 @@ eyeQualityBatch(
   displayDimensionX_mm = 594,
   displayDimensionY_mm = 344,
   verbose = FALSE,
+  outputDir = NULL,
+  force = FALSE,
   ...
 )
 }
@@ -31,6 +33,22 @@ every file in the batch. When \code{TRUE}, emits additional structured,
 human-readable data-quality diagnostics during processing for each
 file. Purely additive; does not change any file's processed output.
 Default \code{FALSE}.}
+
+\item{outputDir}{optional directory to write output files to, passed
+through to \code{eyeQuality()}/\code{saveFiles()} for every file in the batch and
+also used to locate each file's existing \code{qcsummary} output (if any) for
+the resumability check described under \code{force} below. Overrides the
+default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default \code{NULL}.}
+
+\item{force}{optional Boolean controlling resumability. \code{eyeQualityBatch()}
+checks, for every candidate file, whether a \code{qcsummary} output already
+exists for the given \code{batchName} (and \code{outputDir}, if set) before
+dispatching it for (re)processing. When \code{FALSE} (the default), files with
+an existing \code{qcsummary} output are skipped rather than reprocessed -
+useful for resuming an interrupted or partially-completed batch run
+without redoing already-finished work. When \code{TRUE}, every candidate file
+is (re)processed regardless of any existing output, matching this
+function's original (pre-resumability) behavior. Default \code{FALSE}.}
 
 \item{...}{additional parameters}
 }
