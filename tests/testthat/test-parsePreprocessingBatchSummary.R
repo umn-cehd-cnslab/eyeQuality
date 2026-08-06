@@ -19,11 +19,30 @@
 # batchName/outputDir (resumability). Positioned, like in the real
 # eyeQualityBatch() output, before the "number of cores" line (the skip
 # check happens before cluster dispatch).
+#
+# `failed_errors` (P7-04) is an optional character vector, parallel to
+# `failed`, of each failed file's error message - the real "Files that
+# failed processing" section now writes two lines per failed file (its
+# filepath, then an indented "  error: <message>" line) rather than one.
+# When `failed` is non-empty and `failed_errors` isn't supplied, a stub
+# per-file message is generated, so callers that only care about a nonzero
+# failed-file count (not the failedfiles section's error content) don't need
+# to pass one.
 write_batch_summary_fixture <- function(dir,
                                         successful = character(0),
                                         failed = character(0),
+                                        failed_errors = NULL,
                                         skipped = character(0),
                                         filename = "preprocessing_batch_summary_desc-test.txt") {
+  if (length(failed) > 0 && is.null(failed_errors)) {
+    failed_errors <- paste0("stub error for ", basename(failed))
+  }
+  failed_lines <- if (length(failed) == 0) {
+    character(0)
+  } else {
+    as.vector(rbind(failed, paste0("  error: ", failed_errors)))
+  }
+
   lines <- c(
     "-----------------",
     "starting batch run: 2026-01-01 00:00:00",
@@ -33,7 +52,7 @@ write_batch_summary_fixture <- function(dir,
     paste0("------ Successfully processed files (n = ", length(successful), "):  "),
     paste(successful, collapse = "\n"),
     paste0("------ Files that failed processing (n = ", length(failed), "):  "),
-    paste(failed, collapse = "\n"),
+    paste(failed_lines, collapse = "\n"),
     "--- BATCH PROCESSING SUMMARY:  ",
     '"directory": "/data/study", "data size (MB)": "12.3", "n (ET Files)": "3", "n (preprocessed)": "2", "n (failed preprocessing)": "1", "run duration": "0h 0m 5s",  "runtime (s)": "5"'
   )
@@ -63,7 +82,10 @@ test_that("parsePreprocessingBatchSummary returns the successful file list for i
   expect_equal(result, successful)
 })
 
-test_that("parsePreprocessingBatchSummary returns the failed file list for info_to_extract = 'failedfiles'", {
+# P7-04: "failedfiles" now returns a file/error tibble rather than a bare
+# character vector, so parsePreprocessingBatchSummary() can expose each
+# failed file's actual captured error message alongside its filepath.
+test_that("parsePreprocessingBatchSummary returns a file/error tibble with error detail for info_to_extract = 'failedfiles'", {
   dir <- tempfile("p107_")
   dir.create(dir)
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
@@ -73,12 +95,66 @@ test_that("parsePreprocessingBatchSummary returns the failed file list for info_
     "/data/sub-02_task-test_recording-eyetracking_physio.tsv"
   )
   failed <- c("/data/sub-03_task-test_recording-eyetracking_physio.tsv")
+  failed_errors <- c("object 'x' not found")
 
-  f <- write_batch_summary_fixture(dir, successful = successful, failed = failed)
+  f <- write_batch_summary_fixture(
+    dir,
+    successful = successful,
+    failed = failed,
+    failed_errors = failed_errors
+  )
 
   result <- parsePreprocessingBatchSummary(f, "failedfiles")
 
-  expect_equal(result, failed)
+  expect_s3_class(result, "data.frame")
+  expect_named(result, c("file", "error"))
+  expect_equal(result$file, failed)
+  expect_equal(result$error, failed_errors)
+})
+
+# P7-04: a caught error's conditionMessage() can itself contain embedded
+# newlines (e.g. a multi-sentence message, or one that embeds a nested
+# condition's text). eyeQualityBatch() runs every failed file's message
+# through R/eyeQualityBatch.R's sanitize_error_message_for_summary() (an
+# internal, @noRd function -- accessed here via ':::') before writing it,
+# specifically because parsePreprocessingBatchSummary()'s "failedfiles"
+# branch above parses that section as a fixed 2-lines-per-entry structure (a
+# filepath line, then one indented "  error: ..." line); an unsanitized
+# multi-line message would silently corrupt that structure by inserting
+# extra lines. This confirms both that the sanitizer actually collapses
+# embedded newlines/carriage-returns to a single space (rather than, say,
+# dropping them and running words together), and that the collapsed result
+# round-trips intact through the batch summary file and back out via
+# parsePreprocessingBatchSummary().
+test_that("a multi-line error message is collapsed to one line by sanitize_error_message_for_summary() and round-trips intact through the batch summary file", {
+  dir <- tempfile("p704_multiline_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  raw_message <- "Error in foo():\n  bad thing happened\r\n  additional detail on a third line"
+  sanitized <- eyeQuality:::sanitize_error_message_for_summary(raw_message)
+
+  expect_false(grepl("[\r\n]", sanitized))
+  expect_equal(
+    sanitized,
+    "Error in foo():   bad thing happened   additional detail on a third line"
+  )
+
+  failed <- c("/data/sub-01_task-test_recording-eyetracking_physio.tsv")
+
+  f <- write_batch_summary_fixture(
+    dir,
+    successful = character(0),
+    failed = failed,
+    failed_errors = sanitized
+  )
+
+  result <- parsePreprocessingBatchSummary(f, "failedfiles")
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$file, failed)
+  expect_equal(result$error, sanitized)
+  expect_false(grepl("[\r\n]", result$error))
 })
 
 test_that("parsePreprocessingBatchSummary returns character(0) for an empty successfulfiles section (n = 0)", {
@@ -97,7 +173,7 @@ test_that("parsePreprocessingBatchSummary returns character(0) for an empty succ
   expect_equal(result, character(0))
 })
 
-test_that("parsePreprocessingBatchSummary returns character(0) for an empty failedfiles section (n = 0)", {
+test_that("parsePreprocessingBatchSummary returns a zero-row file/error tibble for an empty failedfiles section (n = 0)", {
   dir <- tempfile("p107_")
   dir.create(dir)
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
@@ -110,7 +186,7 @@ test_that("parsePreprocessingBatchSummary returns character(0) for an empty fail
 
   result <- parsePreprocessingBatchSummary(f, "failedfiles")
 
-  expect_equal(result, character(0))
+  expect_equal(result, tibble::tibble(file = character(0), error = character(0)))
 })
 
 # P7-03: parsePreprocessingBatchSummary() gained a "skippedfiles"

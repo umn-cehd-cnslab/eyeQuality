@@ -165,9 +165,9 @@ test_that("parsePreprocessingBatchSummary() round-trips a real eyeQualityBatch()
   expect_setequal(normalizePath(successful_result), normalizePath(expected_qcsummary_files))
 
   # "failedfiles" section - every recording succeeded, so this should
-  # round-trip to an empty character vector
+  # round-trip to a zero-row file/error tibble (P7-04's return shape)
   failed_result <- parsePreprocessingBatchSummary(summary_file, "failedfiles")
-  expect_equal(failed_result, character(0))
+  expect_equal(failed_result, tibble::tibble(file = character(0), error = character(0)))
 })
 
 test_that("parsePreprocessingBatchSummary(info_to_extract = 'summary') round-trips a real eyeQualityBatch() run's summary file", {

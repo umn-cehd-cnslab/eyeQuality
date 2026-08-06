@@ -5,7 +5,14 @@
 #' @param batch_summary_file filepath to preprocessing_batch_summary.tsv file
 #' @param info_to_extract string with value of "summary" | "failedfiles" | "successfulfiles" | "skippedfiles"
 #'
-#' @return data dataframe exported data from preprocessing_batch_summary
+#' @return For `info_to_extract = "summary"`, a one-row dataframe of the batch
+#'   run's summary fields. For `"successfulfiles"`/`"skippedfiles"`, a
+#'   character vector of filepaths (`character(0)` if the section is empty).
+#'   For `"failedfiles"` (P7-04), a `file`/`error` tibble with one row per
+#'   failed file - `error` is that file's captured error message (or a
+#'   placeholder for a failed file with no error detail captured this run;
+#'   see `eyeQualityBatch()`'s "Failure detail" section) - or a zero-row
+#'   tibble with those same two columns if nothing failed.
 #' @export
 #'
 #' @importFrom readr read_tsv
@@ -14,6 +21,7 @@
 #' @importFrom stringr str_extract
 #' @importFrom dplyr mutate
 #' @importFrom rlang .data
+#' @importFrom tibble tibble
 #'
 #'
 parsePreprocessingBatchSummary <-
@@ -92,6 +100,34 @@ parsePreprocessingBatchSummary <-
       # last match, not the first.
       header_idx <- header_idx[length(header_idx)]
       n_files <- as.integer(str_extract(lines[header_idx], header_pattern, group = 1))
+
+      if (info_to_extract == "failedfiles") {
+        # P7-04: unlike successfulfiles/skippedfiles (one line per file),
+        # each failed file occupies two lines in the batch summary - its
+        # filepath, then an indented "  error: <message>" line directly
+        # beneath it (written by eyeQualityBatch()'s "Files that failed
+        # processing" section; see get_qcsummary_output_path() and the
+        # parLapply() worker in R/eyeQualityBatch.R for where that error
+        # detail is captured). n_files in the header still counts files, not
+        # lines, so the line range spans 2 * n_files lines. Returned as a
+        # data frame (file/error columns) rather than a bare character
+        # vector: a bare vector has nowhere to carry the second piece of
+        # per-file information (the error message) this branch now exposes.
+        if (is.na(n_files) || n_files == 0) {
+          return(tibble::tibble(file = character(0), error = character(0)))
+        }
+
+        entry_lines <- lines[(header_idx + 1):(header_idx + 2 * n_files)]
+        file_lines <- entry_lines[seq(1, length(entry_lines), by = 2)]
+        error_lines <- entry_lines[seq(2, length(entry_lines), by = 2)]
+
+        return(
+          tibble::tibble(
+            file = file_lines,
+            error = sub("^  error: ", "", error_lines)
+          )
+        )
+      }
 
       if (is.na(n_files) || n_files == 0) {
         return(character(0))
