@@ -4,10 +4,13 @@
 \alias{.tobii_pro_extract_events}
 \title{Split standardized Tobii Pro data into gaze-stream and event rows}
 \usage{
-.tobii_pro_extract_events(data)
+.tobii_pro_extract_events(data, verbose = FALSE)
 }
 \arguments{
 \item{data}{standardized data.frame (post \code{standardize()}).}
+
+\item{verbose}{logical(1). When \code{TRUE}, emits P3-10 diagnostics about the
+gaze/event split via \code{.emit_diagnostic()}. Default \code{FALSE}.}
 }
 \value{
 \code{list(gaze, events)} -- see \code{?eyeQuality-schema}.

@@ -4,12 +4,16 @@
 \alias{.tobii_pro_normalize_validity}
 \title{Normalize Tobii Pro validity into \code{.valid}-masked columns and \code{confidence}}
 \usage{
-.tobii_pro_normalize_validity(data, threshold = NULL)
+.tobii_pro_normalize_validity(data, threshold = NULL, verbose = FALSE)
 }
 \arguments{
 \item{data}{standardized data.frame (post \code{standardize()}).}
 
 \item{threshold}{accepted but unused (see description).}
+
+\item{verbose}{logical(1). When \code{TRUE}, forwards to
+\code{.tobii_pro_mask_eye()} for both eyes to emit P3-10 diagnostics.
+Default \code{FALSE}.}
 }
 \value{
 \code{data} with new \code{.valid}-suffixed masked columns and new

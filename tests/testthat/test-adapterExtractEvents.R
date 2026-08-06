@@ -71,6 +71,95 @@ test_that("TobiiPro adapter extract_events() returns all rows as gaze when Senso
   expect_equal(nrow(result$events), 0)
 })
 
+# --- P3-10 verbose diagnostics ----------------------------------------------
+# extract_events()'s verbose behavior: an unconditional gaze/event split
+# summary line, plus an extra warning when more than half the rows are
+# classified as events (a signal something is probably wrong with the
+# device-specific discriminator, not a normal recording).
+
+test_that("TobiiStudio adapter extract_events(verbose = TRUE) reports the gaze/event row split", {
+  data <- data.frame(
+    eyeTrackerTimestamp = c(0, 17, -9999, NA),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
+
+  expect_output(
+    tobii_studio_adapter$extract_events(data, verbose = TRUE),
+    "extract_events: 4 row\\(s\\) split into 2 gaze-stream row\\(s\\) and 2 event row\\(s\\)"
+  )
+})
+
+test_that("TobiiStudio adapter extract_events(verbose = TRUE) warns when more than half the rows are classified as events", {
+  data <- data.frame(
+    eyeTrackerTimestamp = c(0, -9999, -9999, -9999),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
+
+  expect_output(
+    tobii_studio_adapter$extract_events(data, verbose = TRUE),
+    "unusually high proportion of rows classified as events \\(75%\\)"
+  )
+})
+
+test_that("TobiiStudio adapter extract_events(verbose = TRUE) does not warn about event proportion when events are a normal minority", {
+  data <- data.frame(
+    eyeTrackerTimestamp = c(0, 17, 34, -9999),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
+  out <- capture.output(tobii_studio_adapter$extract_events(data, verbose = TRUE))
+
+  expect_false(any(grepl("unusually high proportion", out)))
+})
+
+test_that("TobiiStudio adapter extract_events(verbose = FALSE) (default) emits no diagnostics", {
+  data <- data.frame(
+    eyeTrackerTimestamp = c(0, -9999, -9999, -9999),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
+
+  expect_silent(tobii_studio_adapter$extract_events(data))
+})
+
+test_that("TobiiPro adapter extract_events(verbose = TRUE) reports the gaze/event row split", {
+  data <- data.frame(
+    Sensor = c("Eye Tracker", "Eye Tracker", "Mouse", NA),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
+
+  expect_output(
+    tobii_pro_adapter$extract_events(data, verbose = TRUE),
+    "extract_events: 4 row\\(s\\) split into 2 gaze-stream row\\(s\\) and 2 event row\\(s\\)"
+  )
+})
+
+test_that("TobiiPro adapter extract_events(verbose = TRUE) warns when more than half the rows are classified as events", {
+  data <- data.frame(
+    Sensor = c("Eye Tracker", "Mouse", "Mouse", "Mouse"),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
+
+  expect_output(
+    tobii_pro_adapter$extract_events(data, verbose = TRUE),
+    "unusually high proportion of rows classified as events \\(75%\\)"
+  )
+})
+
+test_that("TobiiPro adapter extract_events(verbose = FALSE) (default) emits no diagnostics", {
+  data <- data.frame(
+    Sensor = c("Eye Tracker", "Mouse", "Mouse", "Mouse"),
+    gazeLeftX = c(1, 2, 3, 4),
+    stringsAsFactors = FALSE
+  )
+
+  expect_silent(tobii_pro_adapter$extract_events(data))
+})
+
 # --- Error-path coverage --------------------------------------------------
 # Adapter-world analog of P1-03's extractEventRows() regression test
 # (test-extractEventRows.R's "errors immediately on an unrecognized software

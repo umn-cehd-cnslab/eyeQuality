@@ -4,12 +4,18 @@
 \alias{.tobii_pro_mask_eye}
 \title{Mask invalid samples for one eye (Tobii Pro)}
 \usage{
-.tobii_pro_mask_eye(data, whichEye)
+.tobii_pro_mask_eye(data, whichEye, verbose = FALSE)
 }
 \arguments{
 \item{data}{standardized data.frame (post \code{standardize()}).}
 
 \item{whichEye}{\code{"left"} or \code{"right"}.}
+
+\item{verbose}{logical(1). When \code{TRUE}, emits P3-10 diagnostics: runs of
+consecutive \code{"Invalid"} samples (via \code{.diagnose_consecutive_runs()})
+and a note about the documented \code{NA}-validity quirk (see
+\code{?eyeQuality-schema}'s \code{validityLeft}/\code{validityRight} entry) when it
+actually affects this eye's data. Default \code{FALSE}.}
 }
 \value{
 \code{data} with new \code{.valid}-suffixed columns for \code{whichEye}.

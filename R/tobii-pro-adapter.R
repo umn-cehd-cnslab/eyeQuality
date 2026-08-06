@@ -37,7 +37,21 @@ NULL
   "Recording software version" %in% names(data)
 }
 
-.tobii_pro_standardize <- function(data) {
+# Raw (pre-rename) Tobii Pro columns worth checking for the "present but
+# 100% NA" diagnostic (P3-10) -- the measurement columns a user would
+# actually want to know are empty, not every column on the raw export
+# (e.g. Event is legitimately all-NA on files with no logged events).
+.tobii_pro_raw_measurement_cols <- c(
+  "Gaze point left X", "Gaze point left Y",
+  "Gaze point right X", "Gaze point right Y",
+  "Eye position left Z (DACSmm)", "Eye position right Z (DACSmm)",
+  "Pupil diameter left", "Pupil diameter right",
+  "Validity left", "Validity right"
+)
+
+.tobii_pro_standardize <- function(data, verbose = FALSE) {
+  .diagnose_all_na_columns(data, .tobii_pro_raw_measurement_cols, verbose)
+
   data %>%
     dplyr::rename(
       event = "Event",
@@ -85,14 +99,35 @@ NULL
 #' rather than silently returning wrong data.
 #'
 #' @param data standardized data.frame (post `standardize()`).
+#' @param verbose logical(1). When `TRUE`, emits P3-10 diagnostics about the
+#'   gaze/event split via `.emit_diagnostic()`. Default `FALSE`.
 #' @return `list(gaze, events)` -- see `?eyeQuality-schema`.
 #' @keywords internal
-.tobii_pro_extract_events <- function(data) {
+.tobii_pro_extract_events <- function(data, verbose = FALSE) {
   gazeStreamData <- data %>%
     dplyr::filter(.data$Sensor == "Eye Tracker")
   eventData <- data %>%
     dplyr::filter(.data$Sensor != "Eye Tracker" |
       is.na(.data$Sensor))
+
+  .emit_diagnostic(
+    paste0(
+      "extract_events: ", nrow(data), " row(s) split into ", nrow(gazeStreamData),
+      " gaze-stream row(s) and ", nrow(eventData), " event row(s)"
+    ),
+    verbose
+  )
+  if (nrow(data) > 0 && nrow(eventData) / nrow(data) > 0.5) {
+    .emit_diagnostic(
+      paste0(
+        "unusually high proportion of rows classified as events (",
+        round(100 * nrow(eventData) / nrow(data), 1),
+        "%) -- check the Sensor column for unexpected values"
+      ),
+      verbose
+    )
+  }
+
   list(gaze = gazeStreamData, events = eventData)
 }
 
@@ -108,13 +143,38 @@ NULL
 #'
 #' @param data standardized data.frame (post `standardize()`).
 #' @param whichEye `"left"` or `"right"`.
+#' @param verbose logical(1). When `TRUE`, emits P3-10 diagnostics: runs of
+#'   consecutive `"Invalid"` samples (via `.diagnose_consecutive_runs()`)
+#'   and a note about the documented `NA`-validity quirk (see
+#'   `?eyeQuality-schema`'s `validityLeft`/`validityRight` entry) when it
+#'   actually affects this eye's data. Default `FALSE`.
 #' @return `data` with new `.valid`-suffixed columns for `whichEye`.
 #' @keywords internal
-.tobii_pro_mask_eye <- function(data, whichEye) {
+.tobii_pro_mask_eye <- function(data, whichEye, verbose = FALSE) {
   cols <- colnames(data)[grepl(whichEye, colnames(data), ignore.case = TRUE) &
     !grepl("valid", colnames(data))]
   validityCol <- colnames(data)[grepl(whichEye, colnames(data), ignore.case = TRUE) &
     grepl("valid", colnames(data))]
+  rawValidity <- data[[validityCol]]
+
+  maskFlag <- tidyr::replace_na(rawValidity == "Invalid", FALSE)
+  .diagnose_consecutive_runs(
+    maskFlag,
+    paste0(whichEye, " eye validity == \"Invalid\""),
+    verbose
+  )
+  naFlag <- is.na(rawValidity)
+  if (any(naFlag)) {
+    .emit_diagnostic(
+      paste0(
+        sum(naFlag), " sample(s) have NA validity for the ", whichEye,
+        " eye -- these are NOT masked (treated as valid) due to a documented ",
+        "quirk in NA-validity handling, see ?eyeQuality-schema"
+      ),
+      verbose
+    )
+  }
+
   for (i in cols) {
     newCol <- paste0(i, ".valid")
     replaceRows <- data[, validityCol] == "Invalid"
@@ -189,12 +249,15 @@ NULL
 #'
 #' @param data standardized data.frame (post `standardize()`).
 #' @param threshold accepted but unused (see description).
+#' @param verbose logical(1). When `TRUE`, forwards to
+#'   `.tobii_pro_mask_eye()` for both eyes to emit P3-10 diagnostics.
+#'   Default `FALSE`.
 #' @return `data` with new `.valid`-suffixed masked columns and new
 #'   `confidenceLeft`/`confidenceRight` columns.
 #' @keywords internal
-.tobii_pro_normalize_validity <- function(data, threshold = NULL) {
-  data <- .tobii_pro_mask_eye(data, "left")
-  data <- .tobii_pro_mask_eye(data, "right")
+.tobii_pro_normalize_validity <- function(data, threshold = NULL, verbose = FALSE) {
+  data <- .tobii_pro_mask_eye(data, "left", verbose)
+  data <- .tobii_pro_mask_eye(data, "right", verbose)
   data <- .tobii_pro_confidence(data)
   data
 }

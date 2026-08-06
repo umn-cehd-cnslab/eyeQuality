@@ -12,28 +12,45 @@
 #' - `detect(data) -> logical` — does `data` match this adapter's raw
 #'   (pre-standardization) column layout? Called on newly-imported data,
 #'   before any renaming, to pick which adapter should handle a given file.
-#' - `standardize(data) -> data` — rename device-native columns onto the
-#'   generic schema (`?eyeQuality-schema`).
-#' - `extract_events(data) -> list(gaze, events)` — split standardized data
-#'   into a gaze-stream data frame and an event-stream data frame, using
-#'   whatever device-specific discriminator identifies event rows (e.g. a
-#'   sentinel timestamp value, a dedicated sensor/channel column).
-#' - `normalize_validity(data, threshold = NULL) -> data` — compute the
-#'   `.valid`-suffixed masked columns and the generic `confidence` (0-1)
-#'   column from the device-native `validityLeft`/`validityRight` columns.
-#'   `threshold` is on the device-native validity scale; when `NULL`, the
-#'   adapter's own `default_thresholds` value is used. Operates on both eyes
-#'   in a single call. NA-validity-to-confidence mapping is an implementation
-#'   decision left to each adapter's `normalize_validity()` body (see the
-#'   OPEN DECISION section in `R/eyeQuality-schema.R`); this interface only
-#'   specifies the function signature, not adapter-specific mapping logic.
+#' - `standardize(data, verbose = FALSE) -> data` — rename device-native
+#'   columns onto the generic schema (`?eyeQuality-schema`).
+#' - `extract_events(data, verbose = FALSE) -> list(gaze, events)` — split
+#'   standardized data into a gaze-stream data frame and an event-stream
+#'   data frame, using whatever device-specific discriminator identifies
+#'   event rows (e.g. a sentinel timestamp value, a dedicated sensor/channel
+#'   column).
+#' - `normalize_validity(data, threshold = NULL, verbose = FALSE) -> data` —
+#'   compute the `.valid`-suffixed masked columns and the generic
+#'   `confidence` (0-1) column from the device-native `validityLeft`/
+#'   `validityRight` columns. `threshold` is on the device-native validity
+#'   scale; when `NULL`, the adapter's own `default_thresholds` value is
+#'   used. Operates on both eyes in a single call. NA-validity-to-confidence
+#'   mapping is an implementation decision left to each adapter's
+#'   `normalize_validity()` body (see the OPEN DECISION section in
+#'   `R/eyeQuality-schema.R`); this interface only specifies the function
+#'   signature, not adapter-specific mapping logic.
+#'
+#' `standardize()`, `extract_events()`, and `normalize_validity()` each also
+#' accept an optional `verbose = FALSE` argument (P3-10): when `TRUE`, the
+#' method emits non-fatal, opt-in, format-specific data-quality diagnostics
+#' for the successful/non-aborting path (e.g. "column `PupilLeft` present
+#' but 100% NA", a run of consecutive samples below a validity threshold) via
+#' the shared `.emit_diagnostic()`/`.diagnose_consecutive_runs()`/
+#' `.diagnose_all_na_columns()` helpers defined below. `detect()` does not
+#' take `verbose` — it runs on raw, pre-rename data purely to answer "does
+#' this adapter match", and has no row-level content worth diagnosing before
+#' a matching adapter (and therefore a known column layout) has even been
+#' selected. This is purely additive to the interface: existing adapters
+#' that don't accept `verbose` continue to work for every call site that
+#' doesn't pass it; `eyeQuality()` (P3-10) always passes it explicitly to
+#' the three methods listed above.
 #'
 #' @param name character(1). Unique identifier for this adapter, used as the
 #'   registry key (e.g. `"TobiiStudio"`).
 #' @param detect function(data) -> logical.
-#' @param standardize function(data) -> data.
-#' @param extract_events function(data) -> list(gaze, events).
-#' @param normalize_validity function(data, threshold = NULL) -> data.
+#' @param standardize function(data, verbose = FALSE) -> data.
+#' @param extract_events function(data, verbose = FALSE) -> list(gaze, events).
+#' @param normalize_validity function(data, threshold = NULL, verbose = FALSE) -> data.
 #'   NA-validity-to-confidence mapping is an implementation decision left to
 #'   each adapter's `normalize_validity()` body (see the OPEN DECISION
 #'   section in `R/eyeQuality-schema.R`); this interface only specifies the
@@ -71,6 +88,123 @@ new_eyetracker_adapter <- function(name,
   class(adapter) <- "eyetracker_adapter"
   validate_adapter(adapter)
   adapter
+}
+
+#' Emit an opt-in verbose data-quality diagnostic message (P3-10)
+#'
+#' @description
+#' Common helper called by adapter methods (`standardize()`,
+#' `extract_events()`, `normalize_validity()`) and by device-agnostic
+#' pipeline stages (`classifyBlinks()`, `eyeSelection()`,
+#' `removeOffscreenGaze()`, `interpolateGaze()`) to report row/column-level,
+#' data-quality-relevant events an end user wouldn't necessarily think to
+#' check for themselves. A no-op unless `verbose` is `TRUE`, so call sites
+#' don't need to guard every call with their own `if (verbose)` check.
+#'
+#' Uses `print()` (not `message()`), matching the same reporting convention
+#' as `eyeQuality()`'s existing per-stage progress lines, so that when
+#' `eyeQuality(saveData = TRUE)` sinks console output to a run log
+#' (`sinkToOutputFile()`), diagnostics land in that same log rather than a
+#' separate, unsunk stream. This is an entirely separate, non-fatal, opt-in
+#' channel from P1-14's fix (which made existing hard-abort `stop()` calls
+#' always carry a message); nothing here changes error/abort behavior.
+#'
+#' @param text character(1). The diagnostic message to emit (without a
+#'   leading "verbose:"-style tag -- this function adds a consistent prefix).
+#' @param verbose logical(1). When not `TRUE`, this function is a no-op.
+#' @return `invisible(NULL)`.
+#' @keywords internal
+.emit_diagnostic <- function(text, verbose = FALSE) {
+  if (isTRUE(verbose)) {
+    print(paste0("[verbose] ", text))
+  }
+  invisible(NULL)
+}
+
+#' Diagnose contiguous runs of flagged samples (P3-10)
+#'
+#' @description
+#' Given a logical vector where `TRUE` marks a sample flagged for some
+#' data-quality reason (below a validity threshold, offscreen, missing in
+#' both eyes, etc.), reports both a total count and, for any contiguous run
+#' at least `min_run_length` samples long, a "rows `start`-`end`: `n`
+#' consecutive samples ..." line -- e.g. the plan's illustrative "rows
+#' 1402-1389: N consecutive samples with validity below threshold" (row
+#' order here is always ascending start-end, not the plan's example order).
+#' Short, scattered single/few-sample flags are summarized only in the total
+#' count, not individually, to keep verbose output genuinely diagnostic
+#' rather than a line-per-row flood.
+#'
+#' @param flag logical vector, same length as the data being diagnosed;
+#'   `NA` is treated as not-flagged (consistent with this package's existing
+#'   `NA`-passes-through validity-masking behavior, see `?eyeQuality-schema`).
+#' @param label character(1) description of what `flag == TRUE` means,
+#'   inserted into the emitted message (e.g. `"left eye validity below
+#'   threshold (2)"`).
+#' @param verbose logical(1). When not `TRUE`, this function is a no-op.
+#' @param min_run_length integer(1). Minimum contiguous run length to report
+#'   individually. Default `5`.
+#' @return `invisible(NULL)`.
+#' @keywords internal
+.diagnose_consecutive_runs <- function(flag, label, verbose, min_run_length = 5) {
+  if (!isTRUE(verbose)) {
+    return(invisible(NULL))
+  }
+  flag <- !is.na(flag) & flag
+  total <- sum(flag)
+  if (total == 0) {
+    return(invisible(NULL))
+  }
+
+  .emit_diagnostic(paste0(total, " sample(s) flagged for: ", label), verbose)
+
+  runs <- rle(flag)
+  ends <- cumsum(runs$lengths)
+  starts <- ends - runs$lengths + 1
+  long_runs <- which(runs$values & runs$lengths >= min_run_length)
+
+  for (i in long_runs) {
+    .emit_diagnostic(
+      paste0(
+        "rows ", starts[i], "-", ends[i], ": ", runs$lengths[i],
+        " consecutive samples flagged for: ", label
+      ),
+      verbose
+    )
+  }
+
+  invisible(NULL)
+}
+
+#' Diagnose schema columns present but entirely NA (P3-10)
+#'
+#' @description
+#' For each column name in `cols` that exists in `data`, reports (in
+#' verbose mode) when every value in that column is `NA` -- the "column
+#' `PupilLeft` present but 100% NA" case from the plan: the column made it
+#' through import (so it isn't simply missing/misnamed), but carries no
+#' usable data, which a user skimming only the final QC summary would not
+#' otherwise be pointed at directly.
+#'
+#' @param data data.frame to check.
+#' @param cols character vector of column names to check (only those
+#'   actually present in `data` are checked; this deliberately does not
+#'   flag columns that are missing entirely, since a required-but-absent
+#'   column is a separate, already-loud failure mode elsewhere in the
+#'   pipeline, not a silent-data-quality one).
+#' @param verbose logical(1). When not `TRUE`, this function is a no-op.
+#' @return `invisible(NULL)`.
+#' @keywords internal
+.diagnose_all_na_columns <- function(data, cols, verbose) {
+  if (!isTRUE(verbose)) {
+    return(invisible(NULL))
+  }
+  for (col in cols) {
+    if (col %in% names(data) && length(data[[col]]) > 0 && all(is.na(data[[col]]))) {
+      .emit_diagnostic(paste0("column '", col, "' present but 100% NA"), verbose)
+    }
+  }
+  invisible(NULL)
 }
 
 #' Validate that an object satisfies the eye tracker adapter contract

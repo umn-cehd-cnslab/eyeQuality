@@ -15,6 +15,7 @@ eyeSelection(
   pupilRight = "pupilRight.int",
   distanceLeftZ = "distanceLeftZ.int",
   distanceRightZ = "distanceRightZ.int",
+  verbose = FALSE,
   ...
 )
 }
@@ -38,6 +39,12 @@ eyeSelection(
 \item{distanceLeftZ}{string column name for data containing left eye distance from screen in mm (Z distance)}
 
 \item{distanceRightZ}{string column name for data containing right eye distance from screen in mm  (Z distance)}
+
+\item{verbose}{optional Boolean. When \code{TRUE}, emits P3-10 diagnostics
+about samples where gaze data was unavailable from one or both eyes
+after eye selection (e.g. runs of samples with no usable gaze from
+either eye). Default \code{FALSE}; purely additive, does not change eye
+selection.}
 
 \item{...}{additional passed parameters from parent function}
 }

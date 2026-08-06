@@ -4,7 +4,7 @@
 \alias{.tobii_studio_mask_eye}
 \title{Mask invalid/out-of-threshold samples for one eye (Tobii Studio)}
 \usage{
-.tobii_studio_mask_eye(data, whichEye, threshold)
+.tobii_studio_mask_eye(data, whichEye, threshold, verbose = FALSE)
 }
 \arguments{
 \item{data}{standardized data.frame (post \code{standardize()}).}
@@ -12,6 +12,12 @@
 \item{whichEye}{\code{"left"} or \code{"right"}.}
 
 \item{threshold}{numeric, on Tobii Studio's native \code{0}-\code{4} validity scale.}
+
+\item{verbose}{logical(1). When \code{TRUE}, emits P3-10 diagnostics: runs of
+consecutive below-threshold samples (via \code{.diagnose_consecutive_runs()})
+and a note about the documented \code{NA}-validity quirk (see
+\code{?eyeQuality-schema}'s \code{validityLeft}/\code{validityRight} entry) when it
+actually affects this eye's data. Default \code{FALSE}.}
 }
 \value{
 \code{data} with new \code{.valid}-suffixed columns for \code{whichEye}.

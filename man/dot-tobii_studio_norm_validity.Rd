@@ -5,7 +5,7 @@
 \title{Normalize Tobii Studio validity into \code{.valid}-masked columns and
 \code{confidence}}
 \usage{
-.tobii_studio_norm_validity(data, threshold = NULL)
+.tobii_studio_norm_validity(data, threshold = NULL, verbose = FALSE)
 }
 \arguments{
 \item{data}{standardized data.frame (post \code{standardize()}).}
@@ -14,6 +14,10 @@
 validity scale. When \code{NULL}, uses this adapter's
 \code{default_thresholds$validityThreshold} (\code{2}), matching the pre-Phase-3
 \code{removeInvalidGaze()} default.}
+
+\item{verbose}{logical(1). When \code{TRUE}, forwards to
+\code{.tobii_studio_mask_eye()} for both eyes to emit P3-10 diagnostics.
+Default \code{FALSE}.}
 }
 \value{
 \code{data} with new \code{.valid}-suffixed masked columns and new

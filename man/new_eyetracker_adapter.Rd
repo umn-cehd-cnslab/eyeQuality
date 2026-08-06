@@ -20,11 +20,11 @@ registry key (e.g. \code{"TobiiStudio"}).}
 
 \item{detect}{function(data) -> logical.}
 
-\item{standardize}{function(data) -> data.}
+\item{standardize}{function(data, verbose = FALSE) -> data.}
 
-\item{extract_events}{function(data) -> list(gaze, events).}
+\item{extract_events}{function(data, verbose = FALSE) -> list(gaze, events).}
 
-\item{normalize_validity}{function(data, threshold = NULL) -> data.
+\item{normalize_validity}{function(data, threshold = NULL, verbose = FALSE) -> data.
 NA-validity-to-confidence mapping is an implementation decision left to
 each adapter's \code{normalize_validity()} body (see the OPEN DECISION
 section in \code{R/eyeQuality-schema.R}); this interface only specifies the
@@ -59,20 +59,37 @@ The five functions are:
 \item \code{detect(data) -> logical} — does \code{data} match this adapter's raw
 (pre-standardization) column layout? Called on newly-imported data,
 before any renaming, to pick which adapter should handle a given file.
-\item \code{standardize(data) -> data} — rename device-native columns onto the
-generic schema (\code{?eyeQuality-schema}).
-\item \code{extract_events(data) -> list(gaze, events)} — split standardized data
-into a gaze-stream data frame and an event-stream data frame, using
-whatever device-specific discriminator identifies event rows (e.g. a
-sentinel timestamp value, a dedicated sensor/channel column).
-\item \code{normalize_validity(data, threshold = NULL) -> data} — compute the
-\code{.valid}-suffixed masked columns and the generic \code{confidence} (0-1)
-column from the device-native \code{validityLeft}/\code{validityRight} columns.
-\code{threshold} is on the device-native validity scale; when \code{NULL}, the
-adapter's own \code{default_thresholds} value is used. Operates on both eyes
-in a single call. NA-validity-to-confidence mapping is an implementation
-decision left to each adapter's \code{normalize_validity()} body (see the
-OPEN DECISION section in \code{R/eyeQuality-schema.R}); this interface only
-specifies the function signature, not adapter-specific mapping logic.
+\item \code{standardize(data, verbose = FALSE) -> data} — rename device-native
+columns onto the generic schema (\code{?eyeQuality-schema}).
+\item \code{extract_events(data, verbose = FALSE) -> list(gaze, events)} — split
+standardized data into a gaze-stream data frame and an event-stream
+data frame, using whatever device-specific discriminator identifies
+event rows (e.g. a sentinel timestamp value, a dedicated sensor/channel
+column).
+\item \code{normalize_validity(data, threshold = NULL, verbose = FALSE) -> data} —
+compute the \code{.valid}-suffixed masked columns and the generic
+\code{confidence} (0-1) column from the device-native \code{validityLeft}/
+\code{validityRight} columns. \code{threshold} is on the device-native validity
+scale; when \code{NULL}, the adapter's own \code{default_thresholds} value is
+used. Operates on both eyes in a single call. NA-validity-to-confidence
+mapping is an implementation decision left to each adapter's
+\code{normalize_validity()} body (see the OPEN DECISION section in
+\code{R/eyeQuality-schema.R}); this interface only specifies the function
+signature, not adapter-specific mapping logic.
 }
+
+\code{standardize()}, \code{extract_events()}, and \code{normalize_validity()} each also
+accept an optional \code{verbose = FALSE} argument (P3-10): when \code{TRUE}, the
+method emits non-fatal, opt-in, format-specific data-quality diagnostics
+for the successful/non-aborting path (e.g. "column \code{PupilLeft} present
+but 100\% NA", a run of consecutive samples below a validity threshold) via
+the shared \code{.emit_diagnostic()}/\code{.diagnose_consecutive_runs()}/
+\code{.diagnose_all_na_columns()} helpers defined below. \code{detect()} does not
+take \code{verbose} — it runs on raw, pre-rename data purely to answer "does
+this adapter match", and has no row-level content worth diagnosing before
+a matching adapter (and therefore a known column layout) has even been
+selected. This is purely additive to the interface: existing adapters
+that don't accept \code{verbose} continue to work for every call site that
+doesn't pass it; \code{eyeQuality()} (P3-10) always passes it explicitly to
+the three methods listed above.
 }

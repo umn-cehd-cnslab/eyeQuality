@@ -20,6 +20,7 @@ eyeQuality(
   timeEnd = NULL,
   batchName = NULL,
   outputDir = NULL,
+  verbose = FALSE,
   ...
 )
 }
@@ -63,6 +64,19 @@ native \code{0}-\code{4} scale directly and had no meaning for Tobii Pro.}
 \item{batchName}{optional string to append output files with a specific batch run label. Default NULL}
 
 \item{outputDir}{optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
+
+\item{verbose}{optional Boolean. When \code{TRUE}, emits additional structured,
+human-readable diagnostic messages during processing for
+data-quality-relevant events a user wouldn't necessarily think to check
+for themselves (e.g. a run of consecutive samples below the validity
+threshold, a schema column present but entirely \code{NA}, samples detected
+outside the display bounds). Purely additive console/log output; the
+returned data and every other side effect are identical regardless of
+this argument. Default \code{FALSE}, which reproduces the pre-P3-10 output
+exactly (no diagnostic lines emitted at all). Forwarded to the detected
+adapter's \code{standardize()}/\code{extract_events()}/\code{normalize_validity()} and
+to \code{classifyBlinks()}/\code{eyeSelection()}/\code{removeOffscreenGaze()}/
+\code{interpolateGaze()}.}
 
 \item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
 }

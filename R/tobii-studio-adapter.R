@@ -38,7 +38,21 @@ NULL
   "StudioVersionRec" %in% names(data)
 }
 
-.tobii_studio_standardize <- function(data) {
+# Raw (pre-rename) Tobii Studio columns worth checking for the "present but
+# 100% NA" diagnostic (P3-10) -- the measurement columns a user would
+# actually want to know are empty, not every column on the raw export
+# (e.g. StudioEvent is legitimately all-NA on files with no logged events).
+.tobii_studio_raw_measurement_cols <- c(
+  "GazePointLeftX (ADCSpx)", "GazePointLeftY (ADCSpx)",
+  "GazePointRightX (ADCSpx)", "GazePointRightY (ADCSpx)",
+  "EyePosLeftZ (ADCSmm)", "EyePosRightZ (ADCSmm)",
+  "PupilLeft", "PupilRight",
+  "ValidityLeft", "ValidityRight"
+)
+
+.tobii_studio_standardize <- function(data, verbose = FALSE) {
+  .diagnose_all_na_columns(data, .tobii_studio_raw_measurement_cols, verbose)
+
   data <- data %>%
     dplyr::rename(
       event = "StudioEvent",
@@ -94,14 +108,35 @@ NULL
 #' column, rather than silently returning wrong data.
 #'
 #' @param data standardized data.frame (post `standardize()`).
+#' @param verbose logical(1). When `TRUE`, emits P3-10 diagnostics about the
+#'   gaze/event split via `.emit_diagnostic()`. Default `FALSE`.
 #' @return `list(gaze, events)` -- see `?eyeQuality-schema`.
 #' @keywords internal
-.tobii_studio_extract_events <- function(data) {
+.tobii_studio_extract_events <- function(data, verbose = FALSE) {
   gazeStreamData <- data %>%
     dplyr::filter(.data$eyeTrackerTimestamp != -9999)
   eventData <- data %>%
     dplyr::filter(.data$eyeTrackerTimestamp == -9999 |
       is.na(.data$eyeTrackerTimestamp))
+
+  .emit_diagnostic(
+    paste0(
+      "extract_events: ", nrow(data), " row(s) split into ", nrow(gazeStreamData),
+      " gaze-stream row(s) and ", nrow(eventData), " event row(s)"
+    ),
+    verbose
+  )
+  if (nrow(data) > 0 && nrow(eventData) / nrow(data) > 0.5) {
+    .emit_diagnostic(
+      paste0(
+        "unusually high proportion of rows classified as events (",
+        round(100 * nrow(eventData) / nrow(data), 1),
+        "%) -- check for unexpected eyeTrackerTimestamp values"
+      ),
+      verbose
+    )
+  }
+
   list(gaze = gazeStreamData, events = eventData)
 }
 
@@ -119,14 +154,38 @@ NULL
 #' @param data standardized data.frame (post `standardize()`).
 #' @param whichEye `"left"` or `"right"`.
 #' @param threshold numeric, on Tobii Studio's native `0`-`4` validity scale.
+#' @param verbose logical(1). When `TRUE`, emits P3-10 diagnostics: runs of
+#'   consecutive below-threshold samples (via `.diagnose_consecutive_runs()`)
+#'   and a note about the documented `NA`-validity quirk (see
+#'   `?eyeQuality-schema`'s `validityLeft`/`validityRight` entry) when it
+#'   actually affects this eye's data. Default `FALSE`.
 #' @return `data` with new `.valid`-suffixed columns for `whichEye`.
 #' @keywords internal
-.tobii_studio_mask_eye <- function(data, whichEye, threshold) {
+.tobii_studio_mask_eye <- function(data, whichEye, threshold, verbose = FALSE) {
   cols <- colnames(data)[grepl(whichEye, colnames(data), ignore.case = TRUE) &
     !grepl("valid", colnames(data))]
   validityCol <- colnames(data)[grepl(whichEye, colnames(data), ignore.case = TRUE) &
     grepl("valid", colnames(data))]
   validityVals <- data[[validityCol]]
+
+  maskFlag <- !is.na(validityVals) & validityVals > threshold
+  .diagnose_consecutive_runs(
+    maskFlag,
+    paste0(whichEye, " eye validity below threshold (", threshold, ")"),
+    verbose
+  )
+  naFlag <- is.na(validityVals)
+  if (any(naFlag)) {
+    .emit_diagnostic(
+      paste0(
+        sum(naFlag), " sample(s) have NA validity for the ", whichEye,
+        " eye -- these are NOT masked (treated as valid) due to a documented ",
+        "quirk in NA-validity handling, see ?eyeQuality-schema"
+      ),
+      verbose
+    )
+  }
+
   for (i in cols) {
     newCol <- paste0(i, ".valid")
     data[[newCol]] <- data[[i]]
@@ -208,15 +267,18 @@ NULL
 #'   validity scale. When `NULL`, uses this adapter's
 #'   `default_thresholds$validityThreshold` (`2`), matching the pre-Phase-3
 #'   `removeInvalidGaze()` default.
+#' @param verbose logical(1). When `TRUE`, forwards to
+#'   `.tobii_studio_mask_eye()` for both eyes to emit P3-10 diagnostics.
+#'   Default `FALSE`.
 #' @return `data` with new `.valid`-suffixed masked columns and new
 #'   `confidenceLeft`/`confidenceRight` columns.
 #' @keywords internal
-.tobii_studio_norm_validity <- function(data, threshold = NULL) {
+.tobii_studio_norm_validity <- function(data, threshold = NULL, verbose = FALSE) {
   if (is.null(threshold)) {
     threshold <- tobii_studio_adapter$default_thresholds$validityThreshold
   }
-  data <- .tobii_studio_mask_eye(data, "left", threshold)
-  data <- .tobii_studio_mask_eye(data, "right", threshold)
+  data <- .tobii_studio_mask_eye(data, "left", threshold, verbose)
+  data <- .tobii_studio_mask_eye(data, "right", threshold, verbose)
   data <- .tobii_studio_confidence(data)
   data
 }

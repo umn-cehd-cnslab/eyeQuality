@@ -7,6 +7,11 @@
 #' @param maxArtifactLength_ms integer maximum length of valid data segment to be considered an artifact
 #' @param minBlinkLength_ms integer min value for missing that could be considered a blink
 #' @param maxBlinkLength_ms integer max value for missing that could be considered a blink
+#' @param verbose optional Boolean. When `TRUE`, emits P3-10 diagnostics:
+#'   candidate missing-data runs longer than `maxBlinkLength_ms` (not
+#'   classified as blinks -- possible tracking loss or extended eye closure
+#'   rather than a genuine blink) and a per-eye blink count summary. Default
+#'   `FALSE`; purely additive, does not change blink classification.
 #' @param ... additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.
 #'
 #' @importFrom forecast ma
@@ -42,6 +47,7 @@ classifyBlinks <- function(data,
                            maxArtifactLength_ms = 15,
                            minBlinkLength_ms = 100,
                            maxBlinkLength_ms = 400,
+                           verbose = FALSE,
                            ...) {
   # This adaptation to R was made with the supervision and encouragement of Dr William Paul Boyce.
   # For more information about this adaptation and for more R solutions, don't hesitate to contact him: paul.boyce@ntu.edu.sg
@@ -247,8 +253,25 @@ classifyBlinks <- function(data,
       }
       # initialize non_blink_index
       for (i in 1:(length(res) / 2)) {
-        if ((res[2 * i] - abs(res[2 * i - 1])) < blink_length_min |
-          (res[2 * i] - abs(res[2 * i - 1])) > blink_length_max) {
+        gapLength <- res[2 * i] - abs(res[2 * i - 1])
+        # P3-10: candidate gaps rejected for being too *long* (as opposed to
+        # too short, which is much more commonly just measurement noise) are
+        # the diagnostic-worthy case -- they may indicate tracking loss or an
+        # extended eye closure rather than a genuine blink. Reporting only,
+        # does not change which candidates get filtered below.
+        if (isTRUE(verbose) && gapLength > blink_length_max) {
+          .emit_diagnostic(
+            paste0(
+              "rows ~", abs(res[2 * i - 1]), "-", res[2 * i], ": candidate missing-data run (",
+              gapLength, " sample(s)) for ", pupil_type,
+              " exceeds maxBlinkLength_ms (", maxBlinkLength_ms,
+              "ms) -- not classified as a blink; possible tracking loss or extended eye closure"
+            ),
+            verbose
+          )
+        }
+        if (gapLength < blink_length_min |
+          gapLength > blink_length_max) {
           non_blink_index <- rbind(non_blink_index, 2 * i - 1, 2 * i)
         }
       }
@@ -274,6 +297,10 @@ classifyBlinks <- function(data,
         blinks_indices[i, 2] <- res[2 * i]
         blink_col[blinks_indices[i, 1]:blinks_indices[i, 2], 1] <- 1
       }
+      .emit_diagnostic(
+        paste0(nrow(blinks_indices), " blink(s) detected for ", pupil_type),
+        verbose
+      )
     }
     # } else if (sum(!is.na(res) == 0)){
     # blinks_indices = matrix(0,length(res)/2,2)

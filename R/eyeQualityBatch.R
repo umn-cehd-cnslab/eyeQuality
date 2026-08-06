@@ -6,6 +6,11 @@
 #' @param numberCores optional parameter to specify number of cores to use. If not specified, function will use 80\\% of available cores
 #' @param displayDimensionX_mm integer of display width in millimeters, passed through to `eyeQuality()` for every file in the batch. For example our 1920x1080 screen has a width of 594 mm
 #' @param displayDimensionY_mm integer of display height in millimeters, passed through to `eyeQuality()` for every file in the batch. For example our 1920x1080 screen has a height of 344 mm
+#' @param verbose optional Boolean, passed through to `eyeQuality()` for
+#'   every file in the batch. When `TRUE`, emits additional structured,
+#'   human-readable data-quality diagnostics during processing for each
+#'   file. Purely additive; does not change any file's processed output.
+#'   Default `FALSE`.
 #' @param ... additional parameters
 #'
 #' @importFrom readr read_delim
@@ -21,6 +26,7 @@ eyeQualityBatch <-
            numberCores = NULL,
            displayDimensionX_mm = 594,
            displayDimensionY_mm = 344,
+           verbose = FALSE,
            ...) {
     # options(error=traceback)
 
@@ -135,6 +141,7 @@ eyeQualityBatch <-
             displayDimensionY_mm = displayDimensionY_mm,
             saveData = TRUE,
             batchName = batchName,
+            verbose = verbose,
             ...
           ),
           # error = function(e)

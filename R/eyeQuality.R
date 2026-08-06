@@ -25,6 +25,18 @@
 #' @param timeEnd optional Recording Timestamp of the last data point to include. Default NULL
 #' @param batchName optional string to append output files with a specific batch run label. Default NULL
 #' @param outputDir optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL
+#' @param verbose optional Boolean. When `TRUE`, emits additional structured,
+#'   human-readable diagnostic messages during processing for
+#'   data-quality-relevant events a user wouldn't necessarily think to check
+#'   for themselves (e.g. a run of consecutive samples below the validity
+#'   threshold, a schema column present but entirely `NA`, samples detected
+#'   outside the display bounds). Purely additive console/log output; the
+#'   returned data and every other side effect are identical regardless of
+#'   this argument. Default `FALSE`, which reproduces the pre-P3-10 output
+#'   exactly (no diagnostic lines emitted at all). Forwarded to the detected
+#'   adapter's `standardize()`/`extract_events()`/`normalize_validity()` and
+#'   to `classifyBlinks()`/`eyeSelection()`/`removeOffscreenGaze()`/
+#'   `interpolateGaze()`.
 #' @param ... additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.
 #'
 #' @importFrom readr read_delim
@@ -48,6 +60,7 @@ eyeQuality <- function(filepath,
                        timeEnd = NULL,
                        batchName = NULL,
                        outputDir = NULL,
+                       verbose = FALSE,
                        ...) {
   # Wrapper
   runtime_start <- getCurrentTime()
@@ -147,7 +160,7 @@ eyeQuality <- function(filepath,
   # print_or_save(stringr::str_glue("--- 02. detectImportSourceType returns software = {software}. (run duration: {getPipelineTiming(runtime_loadData, runtime_detectImportSourceType)})"), saveData, runtime_Log)
 
   # format data to standard columns across software
-  data <- adapter$standardize(data)
+  data <- adapter$standardize(data, verbose = verbose)
 
   runtime_standardizeColumnNames <- getCurrentTime()
   print(
@@ -178,7 +191,7 @@ eyeQuality <- function(filepath,
   )
 
   # save & remove event rows
-  data_list <- adapter$extract_events(data)
+  data_list <- adapter$extract_events(data, verbose = verbose)
   data <- data_list$gaze # gazestream data
   eventData <- data_list$events # event data
 
@@ -301,7 +314,7 @@ eyeQuality <- function(filepath,
   } else {
     validityThreshold
   }
-  data <- adapter$normalize_validity(data, threshold = nativeValidityThreshold)
+  data <- adapter$normalize_validity(data, threshold = nativeValidityThreshold, verbose = verbose)
   runtime_removeInvalidGaze <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -328,6 +341,7 @@ eyeQuality <- function(filepath,
       displayResolutionY_px,
       displayDimensionX_mm,
       displayDimensionY_mm,
+      verbose = verbose,
       ...
     )
   data <-
@@ -341,6 +355,7 @@ eyeQuality <- function(filepath,
       displayResolutionY_px,
       displayDimensionX_mm,
       displayDimensionY_mm,
+      verbose = verbose,
       ...
     )
 
@@ -364,7 +379,7 @@ eyeQuality <- function(filepath,
       "pupilLeft.valid",
       "pupilRight.valid"
     )
-  data <- interpolateGaze(data, recordingFrequency_hz, columnsToInterpolate, ...)
+  data <- interpolateGaze(data, recordingFrequency_hz, columnsToInterpolate, verbose = verbose, ...)
   runtime_interpolateGaze <- getCurrentTime()
   print(
     stringr::str_glue(
@@ -379,6 +394,7 @@ eyeQuality <- function(filepath,
       pupilLeft = "pupilLeft.int",
       pupilRight = "pupilRight.int",
       recordingFrequency_hz,
+      verbose = verbose,
       ...
     )
   if (eyeSelection_method == "Maximize" || eyeSelection_method == "Strict") {
@@ -397,7 +413,7 @@ eyeQuality <- function(filepath,
   # print_or_save(stringr::str_glue("--- 09. classifyBlinks complete. (run duration: {getPipelineTiming(runtime_interpolateGaze, runtime_classifyBlinks)})"), saveData, runtime_Log)
 
   # eye selection
-  data <- eyeSelection(data, eyeSelection_method = eyeSelection_method, ...)
+  data <- eyeSelection(data, eyeSelection_method = eyeSelection_method, verbose = verbose, ...)
   runtime_eyeSelection <- getCurrentTime()
   print(
     stringr::str_glue(

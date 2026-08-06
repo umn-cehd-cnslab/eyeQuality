@@ -130,6 +130,119 @@ test_that("TobiiPro adapter standardize() renames raw columns onto the generic s
   expect_equal(result$validityRight, c("Valid", "Valid"))
 })
 
+# --- P3-10 verbose diagnostics ----------------------------------------------
+# standardize()'s only verbose behavior is the "column present but 100% NA"
+# check (.diagnose_all_na_columns()) against each adapter's raw measurement
+# column list, run before renaming.
+
+test_that("TobiiStudio adapter standardize(verbose = TRUE) reports a raw measurement column that is present but entirely NA", {
+  data <- data.frame(
+    StudioEvent = NA,
+    StudioEventData = NA,
+    RecordingDuration = 100,
+    RecordingResolution = "1920 x 1080",
+    EyeTrackerTimestamp = 0,
+    RecordingTimestamp = 0,
+    "GazePointLeftX (ADCSpx)" = 500,
+    "GazePointLeftY (ADCSpx)" = 300,
+    "GazePointRightX (ADCSpx)" = 505,
+    "GazePointRightY (ADCSpx)" = 305,
+    "EyePosLeftZ (ADCSmm)" = 600,
+    "EyePosRightZ (ADCSmm)" = 602,
+    PupilLeft = NA_real_,
+    PupilRight = 3.3,
+    ValidityLeft = 0,
+    ValidityRight = 0,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expect_output(
+    tobii_studio_adapter$standardize(data, verbose = TRUE),
+    "column 'PupilLeft' present but 100% NA"
+  )
+})
+
+test_that("TobiiStudio adapter standardize(verbose = FALSE) (default) emits no diagnostics even with an all-NA raw column", {
+  data <- data.frame(
+    StudioEvent = NA,
+    StudioEventData = NA,
+    RecordingDuration = 100,
+    RecordingResolution = "1920 x 1080",
+    EyeTrackerTimestamp = 0,
+    RecordingTimestamp = 0,
+    "GazePointLeftX (ADCSpx)" = 500,
+    "GazePointLeftY (ADCSpx)" = 300,
+    "GazePointRightX (ADCSpx)" = 505,
+    "GazePointRightY (ADCSpx)" = 305,
+    "EyePosLeftZ (ADCSmm)" = 600,
+    "EyePosRightZ (ADCSmm)" = 602,
+    PupilLeft = NA_real_,
+    PupilRight = 3.3,
+    ValidityLeft = 0,
+    ValidityRight = 0,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expect_silent(tobii_studio_adapter$standardize(data))
+})
+
+test_that("TobiiPro adapter standardize(verbose = TRUE) reports a raw measurement column that is present but entirely NA", {
+  data <- data.frame(
+    Event = NA,
+    "Event value" = NA,
+    "Recording duration" = 100,
+    "Recording resolution height" = 1080,
+    "Recording resolution width" = 1920,
+    "Eyetracker timestamp" = 0,
+    "Recording timestamp" = 0,
+    "Gaze point left X" = 500,
+    "Gaze point left Y" = 300,
+    "Gaze point right X" = 505,
+    "Gaze point right Y" = 305,
+    "Eye position left Z (DACSmm)" = 600,
+    "Eye position right Z (DACSmm)" = 602,
+    "Pupil diameter left" = NA_real_,
+    "Pupil diameter right" = 3.3,
+    "Validity left" = "Valid",
+    "Validity right" = "Valid",
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expect_output(
+    tobii_pro_adapter$standardize(data, verbose = TRUE),
+    "column 'Pupil diameter left' present but 100% NA"
+  )
+})
+
+test_that("TobiiPro adapter standardize(verbose = FALSE) (default) emits no diagnostics even with an all-NA raw column", {
+  data <- data.frame(
+    Event = NA,
+    "Event value" = NA,
+    "Recording duration" = 100,
+    "Recording resolution height" = 1080,
+    "Recording resolution width" = 1920,
+    "Eyetracker timestamp" = 0,
+    "Recording timestamp" = 0,
+    "Gaze point left X" = 500,
+    "Gaze point left Y" = 300,
+    "Gaze point right X" = 505,
+    "Gaze point right Y" = 305,
+    "Eye position left Z (DACSmm)" = 600,
+    "Eye position right Z (DACSmm)" = 602,
+    "Pupil diameter left" = NA_real_,
+    "Pupil diameter right" = 3.3,
+    "Validity left" = "Valid",
+    "Validity right" = "Valid",
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expect_silent(tobii_pro_adapter$standardize(data))
+})
+
 test_that("TobiiPro adapter standardize() does not alter row count or introduce/lose columns beyond renaming", {
   data <- data.frame(
     Event = NA,

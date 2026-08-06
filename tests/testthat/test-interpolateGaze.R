@@ -51,3 +51,61 @@ test_that("interpolateGaze respects a custom maxGapLength_ms threshold", {
 
   expect_equal(result$pupilLeft.int.int, c(1, NA, NA, NA, 5))
 })
+
+# --- P3-10 verbose diagnostics ----------------------------------------------
+
+test_that("interpolateGaze(verbose = TRUE) reports how many missing samples were filled and how many remain NA", {
+  # same fixture/thresholds as the first test above: 2 of 8 total missing
+  # samples get filled (the 2-NA gap), the other 6 (the 6-NA gap) remain NA.
+  data <- data.frame(
+    gazeLeftX.valid = c(1, NA, NA, 4, 5, NA, NA, NA, NA, NA, NA, 12)
+  )
+
+  out <- capture.output(
+    interpolateGaze(
+      data,
+      recordingFrequency_hz = 100,
+      columnsToInterpolate = "gazeLeftX.valid",
+      verbose = TRUE
+    )
+  )
+
+  expect_true(any(grepl(
+    "interpolateGaze: 'gazeLeftX.valid' -- filled 2 of 8 missing sample\\(s\\); 6 remain NA",
+    out
+  )))
+})
+
+test_that("interpolateGaze(verbose = TRUE) emits no fill-report line for a column with no missing samples", {
+  data <- data.frame(gazeLeftX.valid = c(1, 2, 3))
+
+  out <- capture.output(
+    interpolateGaze(
+      data,
+      recordingFrequency_hz = 100,
+      columnsToInterpolate = "gazeLeftX.valid",
+      verbose = TRUE
+    )
+  )
+
+  expect_false(any(grepl("interpolateGaze:", out)))
+})
+
+test_that("interpolateGaze(verbose = FALSE) (default) emits no [verbose]-tagged diagnostic lines", {
+  # interpolateGaze() has a pre-existing, non-verbose-gated progress print()
+  # call ("Filling in gaps of ...ms..."), so this checks specifically for the
+  # absence of the P3-10 "[verbose]" tag rather than full silence.
+  data <- data.frame(
+    gazeLeftX.valid = c(1, NA, NA, 4, 5, NA, NA, NA, NA, NA, NA, 12)
+  )
+
+  out <- capture.output(
+    interpolateGaze(
+      data,
+      recordingFrequency_hz = 100,
+      columnsToInterpolate = "gazeLeftX.valid"
+    )
+  )
+
+  expect_false(any(grepl("\\[verbose\\]", out)))
+})

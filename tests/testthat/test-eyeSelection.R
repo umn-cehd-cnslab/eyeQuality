@@ -73,3 +73,73 @@ test_that("eyeSelection Right always uses the right eye stream, regardless of th
     c("right_only", "right_only", "right_na")
   )
 })
+
+# --- P3-10 verbose diagnostics ----------------------------------------------
+# A 10-row fixture with a 7-row run of both-eyes-missing data (long enough to
+# clear .diagnose_consecutive_runs()'s default min_run_length = 5), used to
+# confirm eyeSelection() actually reports the consecutive-missing-data run
+# for each eyeSelection_method's own "no usable gaze" condition.
+
+longMissingData <- function() {
+  data.frame(
+    gazeLeftX.int = c(1:3, rep(NA, 7)),
+    gazeLeftY.int = c(1:3, rep(NA, 7)),
+    gazeRightX.int = c(1:3, rep(NA, 7)),
+    gazeRightY.int = c(1:3, rep(NA, 7)),
+    pupilLeft.int = c(1:3, rep(NA, 7)),
+    pupilRight.int = c(1:3, rep(NA, 7)),
+    distanceLeftZ.int = c(1:3, rep(NA, 7)),
+    distanceRightZ.int = c(1:3, rep(NA, 7))
+  )
+}
+
+test_that("eyeSelection Maximize (verbose = TRUE) reports the consecutive run of both-eyes-missing samples", {
+  out <- capture.output(eyeSelection(longMissingData(), eyeSelection_method = "Maximize", verbose = TRUE))
+
+  expect_true(any(grepl(
+    "rows 4-10: 7 consecutive samples flagged for: gaze data missing in both eyes after eye selection \\(Maximize\\)",
+    out
+  )))
+})
+
+test_that("eyeSelection Strict (verbose = TRUE) reports the consecutive run of both-eyes-missing samples", {
+  out <- capture.output(eyeSelection(longMissingData(), eyeSelection_method = "Strict", verbose = TRUE))
+
+  expect_true(any(grepl(
+    "rows 4-10: 7 consecutive samples flagged for: gaze data missing in both eyes after eye selection \\(Strict\\)",
+    out
+  )))
+})
+
+test_that("eyeSelection Left (verbose = TRUE) reports the consecutive run of missing left-eye samples", {
+  out <- capture.output(eyeSelection(longMissingData(), eyeSelection_method = "Left", verbose = TRUE))
+
+  # Note: the source label text embeds literal double quotes around "Left"
+  # (`eyeSelection_method = "Left"`), which print()'s own display quoting
+  # re-escapes with a literal backslash in the captured console text -- so
+  # this pattern intentionally stops short of the quoted word itself rather
+  # than trying to match that print()-escaping exactly.
+  expect_true(any(grepl(
+    "rows 4-10: 7 consecutive samples flagged for: left eye gaze missing \\(eyeSelection_method =",
+    out
+  )))
+})
+
+test_that("eyeSelection Right (verbose = TRUE) reports the consecutive run of missing right-eye samples", {
+  out <- capture.output(eyeSelection(longMissingData(), eyeSelection_method = "Right", verbose = TRUE))
+
+  expect_true(any(grepl(
+    "rows 4-10: 7 consecutive samples flagged for: right eye gaze missing \\(eyeSelection_method =",
+    out
+  )))
+})
+
+test_that("eyeSelection(verbose = FALSE) (default) emits no [verbose]-tagged diagnostic lines", {
+  # eyeSelection() has pre-existing, non-verbose-gated progress print() calls
+  # (e.g. "selecting eye based on maximized approach"), so this checks
+  # specifically for the absence of the P3-10 "[verbose]" tag rather than
+  # full silence.
+  out <- capture.output(eyeSelection(longMissingData(), eyeSelection_method = "Maximize"))
+
+  expect_false(any(grepl("\\[verbose\\]", out)))
+})

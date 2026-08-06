@@ -5,7 +5,15 @@
 \title{batch_preprocess is used to run the preprocessing function for a set of files in a BIDS like directory.
 This will process files in parallel, and compute total runtime to process.}
 \usage{
-eyeQualityBatch(directoryBIDS, batchName, numberCores = NULL, ...)
+eyeQualityBatch(
+  directoryBIDS,
+  batchName,
+  numberCores = NULL,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344,
+  verbose = FALSE,
+  ...
+)
 }
 \arguments{
 \item{directoryBIDS}{filepath to the BIDS directory of ET data to process}
@@ -13,6 +21,16 @@ eyeQualityBatch(directoryBIDS, batchName, numberCores = NULL, ...)
 \item{batchName}{string label for what to call the batch. This will be added to the output files}
 
 \item{numberCores}{optional parameter to specify number of cores to use. If not specified, function will use 80\\\% of available cores}
+
+\item{displayDimensionX_mm}{integer of display width in millimeters, passed through to \code{eyeQuality()} for every file in the batch. For example our 1920x1080 screen has a width of 594 mm}
+
+\item{displayDimensionY_mm}{integer of display height in millimeters, passed through to \code{eyeQuality()} for every file in the batch. For example our 1920x1080 screen has a height of 344 mm}
+
+\item{verbose}{optional Boolean, passed through to \code{eyeQuality()} for
+every file in the batch. When \code{TRUE}, emits additional structured,
+human-readable data-quality diagnostics during processing for each
+file. Purely additive; does not change any file's processed output.
+Default \code{FALSE}.}
 
 \item{...}{additional parameters}
 }

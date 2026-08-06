@@ -221,6 +221,103 @@ test_that("TobiiStudio adapter normalize_validity() threshold argument changes t
   expect_equal(loose_result$gazeRightX.valid, std_data$gazeRightX)
 })
 
+# --- P3-10 verbose diagnostics ----------------------------------------------
+# normalize_validity()'s verbose behavior (via .tobii_*_mask_eye()): a
+# consecutive-run diagnostic for masked/below-threshold samples per eye, plus
+# a separate note about the documented NA-validity-not-masked quirk when NA
+# validity is actually present for that eye.
+
+test_that("TobiiStudio adapter normalize_validity(verbose = TRUE) reports a long consecutive run of below-threshold validity on the monocular fixture", {
+  fp <- testthat::test_path("fixtures", "tobii_studio_monocular.tsv")
+  data <- importData(fp)
+  std_data <- tobii_studio_adapter$standardize(data)
+
+  out <- capture.output(tobii_studio_adapter$normalize_validity(std_data, verbose = TRUE))
+
+  expect_true(any(grepl(
+    "200 sample\\(s\\) flagged for: right eye validity below threshold \\(2\\)", out
+  )))
+  expect_true(any(grepl(
+    "rows 1-200: 200 consecutive samples flagged for: right eye validity below threshold \\(2\\)", out
+  )))
+  # left eye is uniformly valid (validity 0) -- nothing should be flagged there
+  expect_false(any(grepl("left eye validity below threshold", out)))
+})
+
+test_that("TobiiStudio adapter normalize_validity(verbose = TRUE) notes the NA-validity-not-masked quirk only when NA validity is actually present", {
+  data <- data.frame(
+    gazeLeftX = c(1, 2, 3, 4),
+    gazeLeftY = c(1, 2, 3, 4),
+    gazeRightX = c(1, 2, 3, 4),
+    gazeRightY = c(1, 2, 3, 4),
+    validityLeft = c(0, 0, 0, NA),
+    validityRight = c(0, 0, 0, 0)
+  )
+
+  out <- capture.output(tobii_studio_adapter$normalize_validity(data, verbose = TRUE))
+
+  expect_true(any(grepl(
+    "1 sample\\(s\\) have NA validity for the left eye -- these are NOT masked", out
+  )))
+  expect_false(any(grepl("NA validity for the right eye", out)))
+})
+
+test_that("TobiiStudio adapter normalize_validity(verbose = FALSE) (default) emits no diagnostics even on the monocular fixture", {
+  fp <- testthat::test_path("fixtures", "tobii_studio_monocular.tsv")
+  data <- importData(fp)
+  std_data <- tobii_studio_adapter$standardize(data)
+
+  expect_silent(tobii_studio_adapter$normalize_validity(std_data))
+})
+
+test_that("TobiiPro adapter normalize_validity(verbose = TRUE) reports a long consecutive run of 'Invalid' validity on the monocular fixture", {
+  fp <- testthat::test_path("fixtures", "tobii_pro_monocular.tsv")
+  data <- importData(fp)
+  std_data <- tobii_pro_adapter$standardize(data)
+
+  out <- capture.output(tobii_pro_adapter$normalize_validity(std_data, verbose = TRUE))
+
+  # Note: the source label text embeds literal double quotes around
+  # "Invalid" (`right eye validity == "Invalid"`), which print()'s own
+  # display quoting re-escapes with a literal backslash in the captured
+  # console text -- so these patterns intentionally stop short of the quoted
+  # word itself rather than trying to match that print()-escaping exactly.
+  expect_true(any(grepl(
+    "200 sample\\(s\\) flagged for: right eye validity ==", out
+  )))
+  expect_true(any(grepl(
+    "rows 1-200: 200 consecutive samples flagged for: right eye validity ==", out
+  )))
+  expect_false(any(grepl("left eye validity ==", out)))
+})
+
+test_that("TobiiPro adapter normalize_validity(verbose = TRUE) notes the NA-validity-not-masked quirk only when NA validity is actually present", {
+  data <- data.frame(
+    gazeLeftX = c(1, 2, 3, 4),
+    gazeLeftY = c(1, 2, 3, 4),
+    gazeRightX = c(1, 2, 3, 4),
+    gazeRightY = c(1, 2, 3, 4),
+    validityLeft = c("Valid", "Valid", "Valid", NA),
+    validityRight = c("Valid", "Valid", "Valid", "Valid"),
+    stringsAsFactors = FALSE
+  )
+
+  out <- capture.output(tobii_pro_adapter$normalize_validity(data, verbose = TRUE))
+
+  expect_true(any(grepl(
+    "1 sample\\(s\\) have NA validity for the left eye -- these are NOT masked", out
+  )))
+  expect_false(any(grepl("NA validity for the right eye", out)))
+})
+
+test_that("TobiiPro adapter normalize_validity(verbose = FALSE) (default) emits no diagnostics even on the monocular fixture", {
+  fp <- testthat::test_path("fixtures", "tobii_pro_monocular.tsv")
+  data <- importData(fp)
+  std_data <- tobii_pro_adapter$standardize(data)
+
+  expect_silent(tobii_pro_adapter$normalize_validity(std_data))
+})
+
 test_that("TobiiPro adapter normalize_validity() threshold argument is accepted but has no effect on the masking outcome", {
   fp <- testthat::test_path("fixtures", "tobii_pro_monocular.tsv")
   data <- importData(fp)

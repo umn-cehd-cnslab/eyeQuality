@@ -47,3 +47,76 @@ test_that("classifyBlinks does not flag a 600ms NA dropout (beyond maxBlinkLengt
   expect_true(all(result$pupilLeft.blink == 0))
   expect_true(all(result$bothEyes.blink == 0))
 })
+
+# --- P3-10 verbose diagnostics ----------------------------------------------
+
+test_that("classifyBlinks(verbose = TRUE) reports a per-eye blink count for a classified blink", {
+  n <- 60
+  baseline <- round(5 + sin(2 * pi * (1:n) / 20), 2)
+  pupil <- baseline
+  pupil[26:45] <- NA
+
+  data <- data.frame(pupilLeft.int = pupil, pupilRight.int = pupil)
+
+  out <- capture.output(
+    classifyBlinks(
+      data,
+      pupilLeft = "pupilLeft.int",
+      pupilRight = "pupilRight.int",
+      recordingFrequency_hz = 100,
+      verbose = TRUE
+    )
+  )
+
+  expect_true(any(grepl("1 blink\\(s\\) detected for pupilLeft.int", out)))
+  expect_true(any(grepl("1 blink\\(s\\) detected for pupilRight.int", out)))
+})
+
+test_that("classifyBlinks(verbose = TRUE) reports a rejected-as-too-long candidate gap that exceeds maxBlinkLength_ms", {
+  n <- 100
+  baseline <- round(5 + sin(2 * pi * (1:n) / 20), 2)
+  pupil <- baseline
+  pupil[26:85] <- NA # 600ms dropout, beyond the default 400ms max
+
+  data <- data.frame(pupilLeft.int = pupil, pupilRight.int = pupil)
+
+  out <- capture.output(
+    classifyBlinks(
+      data,
+      pupilLeft = "pupilLeft.int",
+      pupilRight = "pupilRight.int",
+      recordingFrequency_hz = 100,
+      verbose = TRUE
+    )
+  )
+
+  expect_true(any(grepl(
+    "exceeds maxBlinkLength_ms \\(400ms\\) -- not classified as a blink", out
+  )))
+  # a rejected-too-long candidate is diagnostic-worthy, but should not still
+  # get counted as a detected blink for either eye
+  expect_false(any(grepl("blink\\(s\\) detected for pupilLeft.int", out)))
+})
+
+test_that("classifyBlinks(verbose = FALSE) (default) emits no [verbose]-tagged diagnostic lines", {
+  # classifyBlinks() has pre-existing, non-verbose-gated progress print()
+  # calls (e.g. "Demarcating blinks for ..."), so this checks specifically
+  # for the absence of the P3-10 "[verbose]" tag rather than full silence.
+  n <- 60
+  baseline <- round(5 + sin(2 * pi * (1:n) / 20), 2)
+  pupil <- baseline
+  pupil[26:45] <- NA
+
+  data <- data.frame(pupilLeft.int = pupil, pupilRight.int = pupil)
+
+  out <- capture.output(
+    classifyBlinks(
+      data,
+      pupilLeft = "pupilLeft.int",
+      pupilRight = "pupilRight.int",
+      recordingFrequency_hz = 100
+    )
+  )
+
+  expect_false(any(grepl("\\[verbose\\]", out)))
+})
