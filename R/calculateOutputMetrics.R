@@ -1,3 +1,9 @@
+# Guard against base R's min()/max() returning +/-Inf with a warning when
+# every value in the group is NA (e.g. a recording with zero fixations,
+# saccades, or blinks leaves the target column entirely NA).
+safe_min <- function(x) if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)
+safe_max <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
+
 #' Calculate Output Metrics
 #'
 #' @param data dataframe
@@ -246,14 +252,14 @@ calculateOutputMetrics <- function(data) {
       mean_eye_select_Y = mean(.data$gazeY.eyeSelect, na.rm = TRUE),
       mean_eye_select_pupil = mean(.data$pupil.eyeSelect, na.rm = TRUE),
       mean_eye_select_distZ = mean(.data$distanceZ.eyeSelect, na.rm = TRUE),
-      min_eye_select_X = min(.data$gazeX.eyeSelect, na.rm = TRUE),
-      min_eye_select_Y = min(.data$gazeY.eyeSelect, na.rm = TRUE),
-      min_eye_select_pupil = min(.data$pupil.eyeSelect, na.rm = TRUE),
-      min_eye_select_distZ = min(.data$distanceZ.eyeSelect, na.rm = TRUE),
-      max_eye_select_X = max(.data$gazeX.eyeSelect, na.rm = TRUE),
-      max_eye_select_Y = max(.data$gazeY.eyeSelect, na.rm = TRUE),
-      max_eye_select_pupil = max(.data$pupil.eyeSelect, na.rm = TRUE),
-      max_eye_select_distZ = max(.data$distanceZ.eyeSelect, na.rm = TRUE),
+      min_eye_select_X = safe_min(.data$gazeX.eyeSelect),
+      min_eye_select_Y = safe_min(.data$gazeY.eyeSelect),
+      min_eye_select_pupil = safe_min(.data$pupil.eyeSelect),
+      min_eye_select_distZ = safe_min(.data$distanceZ.eyeSelect),
+      max_eye_select_X = safe_max(.data$gazeX.eyeSelect),
+      max_eye_select_Y = safe_max(.data$gazeY.eyeSelect),
+      max_eye_select_pupil = safe_max(.data$pupil.eyeSelect),
+      max_eye_select_distZ = safe_max(.data$distanceZ.eyeSelect),
       sd_eye_select_X = sd(.data$gazeX.eyeSelect, na.rm = TRUE),
       sd_eye_select_Y = sd(.data$gazeY.eyeSelect, na.rm = TRUE),
       sd_eye_select_pupil = sd(.data$pupil.eyeSelect, na.rm = TRUE),
@@ -304,14 +310,14 @@ calculateOutputMetrics <- function(data) {
       mean_denoise_Y = mean(.data$gazeY.smooth, na.rm = TRUE),
       mean_denoise_pupil = mean(.data$pupil.smooth, na.rm = TRUE),
       mean_denoise_distZ = mean(.data$distanceZ.smooth, na.rm = TRUE),
-      min_denoise_X = min(.data$gazeX.smooth, na.rm = TRUE),
-      min_denoise_Y = min(.data$gazeY.smooth, na.rm = TRUE),
-      min_denoise_pupil = min(.data$pupil.smooth, na.rm = TRUE),
-      min_denoise_distZ = min(.data$distanceZ.smooth, na.rm = TRUE),
-      max_denoise_X = max(.data$gazeX.smooth, na.rm = TRUE),
-      max_denoise_Y = max(.data$gazeY.smooth, na.rm = TRUE),
-      max_denoise_pupil = max(.data$pupil.smooth, na.rm = TRUE),
-      max_denoise_distZ = max(.data$distanceZ.smooth, na.rm = TRUE),
+      min_denoise_X = safe_min(.data$gazeX.smooth),
+      min_denoise_Y = safe_min(.data$gazeY.smooth),
+      min_denoise_pupil = safe_min(.data$pupil.smooth),
+      min_denoise_distZ = safe_min(.data$distanceZ.smooth),
+      max_denoise_X = safe_max(.data$gazeX.smooth),
+      max_denoise_Y = safe_max(.data$gazeY.smooth),
+      max_denoise_pupil = safe_max(.data$pupil.smooth),
+      max_denoise_distZ = safe_max(.data$distanceZ.smooth),
       sd_denoise_X = sd(.data$gazeX.smooth, na.rm = TRUE),
       sd_denoise_Y = sd(.data$gazeY.smooth, na.rm = TRUE),
       sd_denoise_pupil = sd(.data$pupil.smooth, na.rm = TRUE),
@@ -348,10 +354,10 @@ calculateOutputMetrics <- function(data) {
       median_smoothVA_Y = median(.data$velocityY.smooth_va_ms, na.rm = TRUE),
       mean_smoothVA_X = mean(.data$velocityX.smooth_va_ms, na.rm = TRUE),
       mean_smoothVA_Y = mean(.data$velocityY.smooth_va_ms, na.rm = TRUE),
-      min_smoothVA_X = min(.data$velocityX.smooth_va_ms, na.rm = TRUE),
-      min_smoothVA_Y = min(.data$velocityY.smooth_va_ms, na.rm = TRUE),
-      max_smoothVA_X = max(.data$velocityX.smooth_va_ms, na.rm = TRUE),
-      max_smoothVA_Y = max(.data$velocityY.smooth_va_ms, na.rm = TRUE),
+      min_smoothVA_X = safe_min(.data$velocityX.smooth_va_ms),
+      min_smoothVA_Y = safe_min(.data$velocityY.smooth_va_ms),
+      max_smoothVA_X = safe_max(.data$velocityX.smooth_va_ms),
+      max_smoothVA_Y = safe_max(.data$velocityY.smooth_va_ms),
       sd_smoothVA_X = sd(.data$velocityX.smooth_va_ms, na.rm = TRUE),
       sd_smoothVA_Y = sd(.data$velocityY.smooth_va_ms, na.rm = TRUE),
 
@@ -447,8 +453,8 @@ calculateOutputMetrics <- function(data) {
       count = n(),
       median = median(.data$duration, na.rm = TRUE),
       mean = mean(.data$duration, na.rm = TRUE),
-      min = min(.data$duration, na.rm = TRUE),
-      max = max(.data$duration, na.rm = TRUE),
+      min = safe_min(.data$duration),
+      max = safe_max(.data$duration),
       sd = sd(.data$duration, na.rm = TRUE)
     )
 
@@ -460,8 +466,8 @@ calculateOutputMetrics <- function(data) {
       count = n(),
       median = median(.data$duration, na.rm = TRUE),
       mean = mean(.data$duration, na.rm = TRUE),
-      min = min(.data$duration, na.rm = TRUE),
-      max = max(.data$duration, na.rm = TRUE),
+      min = safe_min(.data$duration),
+      max = safe_max(.data$duration),
       sd = sd(.data$duration, na.rm = TRUE)
     )
 
@@ -473,8 +479,8 @@ calculateOutputMetrics <- function(data) {
       count = n(),
       median = median(.data$duration, na.rm = TRUE),
       mean = mean(.data$duration, na.rm = TRUE),
-      min = min(.data$duration, na.rm = TRUE),
-      max = max(.data$duration, na.rm = TRUE),
+      min = safe_min(.data$duration),
+      max = safe_max(.data$duration),
       sd = sd(.data$duration, na.rm = TRUE)
     )
 
@@ -486,8 +492,8 @@ calculateOutputMetrics <- function(data) {
       count = n(),
       median = median(.data$duration, na.rm = TRUE),
       mean = mean(.data$duration, na.rm = TRUE),
-      min = min(.data$duration, na.rm = TRUE),
-      max = max(.data$duration, na.rm = TRUE),
+      min = safe_min(.data$duration),
+      max = safe_max(.data$duration),
       sd = sd(.data$duration, na.rm = TRUE)
     )
 
@@ -499,8 +505,8 @@ calculateOutputMetrics <- function(data) {
       count = n(),
       median = median(.data$duration, na.rm = TRUE),
       mean = mean(.data$duration, na.rm = TRUE),
-      min = min(.data$duration, na.rm = TRUE),
-      max = max(.data$duration, na.rm = TRUE),
+      min = safe_min(.data$duration),
+      max = safe_max(.data$duration),
       sd = sd(.data$duration, na.rm = TRUE)
     )
 
