@@ -1,53 +1,70 @@
 # Runs R CMD check on every push/PR across Windows, macOS, and Linux.
 # This is the backstop that catches regressions even if an agent or human
-# forgets to run tests locally before committing — see Implementation_Strategic_Plan.md
+# forgets to run tests locally before committing -- see Implementation_Strategic_Plan.md
 # Phase 7 (P7-05) and Phase 8 (P8-10/P8-11).
+#
+# NOTE: this workflow deliberately avoids third-party actions (r-lib/actions
+# and friends). It installs R itself via each runner's preinstalled native
+# package manager (apt on Linux, Homebrew on macOS, Chocolatey on Windows)
+# rather than a marketplace action, and installs R package dependencies from
+# CRAN directly. Keep it that way -- see repo notes on Actions allowlisting.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 name: R-CMD-check
 
 jobs:
   R-CMD-check:
-    runs-on: ${{ matrix.config.os }}
+    runs-on: ${{ matrix.os }}
 
-    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+    name: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - {os: windows-latest, r: 'release'}
-          - {os: macOS-latest,   r: 'release'}
-          - {os: ubuntu-latest,  r: 'devel', http-user-agent: 'release'}
-          - {os: ubuntu-latest,  r: 'release'}
-          - {os: ubuntu-latest,  r: 'oldrel-1'}
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      CRAN_MIRROR: https://cloud.r-project.org
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: r-lib/actions/setup-pandoc@v2
+      - name: Install R and system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            r-base r-base-dev pandoc build-essential gfortran \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libfontconfig1-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev
 
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ matrix.config.r }}
-          http-user-agent: ${{ matrix.config.http-user-agent }}
-          use-public-rspm: true
+      - name: Install R and pandoc (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install r pandoc
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::rcmdcheck
-          needs: check
+      - name: Install R and pandoc (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install r.project -y --no-progress
+          choco install pandoc -y --no-progress
+          $rDir = Get-ChildItem "C:\Program Files\R" -Directory | Select-Object -First 1
+          $rBin = Join-Path $rDir.FullName "bin\x64"
+          Add-Content -Path $env:GITHUB_PATH -Value $rBin
 
-      - uses: r-lib/actions/check-r-package@v2
-        with:
-          args: 'c("--no-manual", "--as-cran")'
-          upload-snapshots: true
-          build_args: 'c("--no-manual", "--compact-vignettes=gs+qpdf")'
+      - name: Confirm R is on PATH
+        run: Rscript -e 'cat(R.version.string, "\n")'
+
+      - name: Install R package dependencies
+        run: |
+          Rscript -e 'if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'remotes::install_deps(dependencies = TRUE, repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'install.packages("rcmdcheck", repos = Sys.getenv("CRAN_MIRROR"))'
+
+      - name: Build and check package
+        run: |
+          Rscript -e 'rcmdcheck::rcmdcheck(build_args = c("--no-manual", "--compact-vignettes=gs+qpdf"), args = c("--no-manual", "--as-cran"), error_on = "warning")'

@@ -1,13 +1,16 @@
 # Runs the full testthat suite + covr on every push/PR and fails the build if
 # tests fail. This is what actually enforces "future updates don't break
-# everything" — it doesn't rely on any agent or human remembering to run tests
-# locally. Pair with branch protection rules requiring this check to pass
-# before merge to main.
+# everything" -- it doesn't rely on any agent or human remembering to run
+# tests locally. Pair with branch protection rules requiring this check to
+# pass before merge to main.
+#
+# NOTE: this workflow deliberately avoids third-party actions for the R setup
+# steps (r-lib/actions and friends) -- see repo notes on Actions allowlisting.
+# It installs R via apt (the runner is always ubuntu-latest) and R package
+# dependencies from CRAN directly.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 name: test-coverage
 
@@ -15,19 +18,24 @@ jobs:
   test-coverage:
     runs-on: ubuntu-latest
     env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      CRAN_MIRROR: https://cloud.r-project.org
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          use-public-rspm: true
+      - name: Install R and system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            r-base r-base-dev pandoc build-essential gfortran \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libfontconfig1-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::covr, any::testthat
-          needs: coverage
+      - name: Install R package dependencies
+        run: |
+          Rscript -e 'if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'remotes::install_deps(dependencies = TRUE, repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'install.packages(c("covr", "testthat"), repos = Sys.getenv("CRAN_MIRROR"))'
 
       - name: Run testthat suite
         run: |
