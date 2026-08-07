@@ -31,6 +31,11 @@ jobs:
             libcurl4-openssl-dev libssl-dev libxml2-dev \
             libfontconfig1-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev
 
+      - name: Set up a user-writable R library
+        run: |
+          mkdir -p "$HOME/R/library"
+          echo "R_LIBS_USER=$HOME/R/library" >> "$GITHUB_ENV"
+
       - name: Install R package dependencies
         run: |
           Rscript -e 'if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos = Sys.getenv("CRAN_MIRROR"))'
