@@ -1,7 +1,7 @@
 #' Check that file contains any gaze data to be processed
 #'
 #' @param data a dataframe
-#' @param gazeCol column containing gaze data to assess
+#' @param gazeColumn column containing gaze data to assess
 #' @param ... additional passed parameters from parent function
 #'
 #' @return dataExists a Boolean indicating if any valid gaze data exists

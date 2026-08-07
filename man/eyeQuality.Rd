@@ -63,7 +63,7 @@ native \code{0}-\code{4} scale directly and had no meaning for Tobii Pro.}
 
 \item{batchName}{optional string to append output files with a specific batch run label. Default NULL}
 
-\item{outputDir}{optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
+\item{outputDir}{optional directory to write output files to when saveData = TRUE, overriding the default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default NULL}
 
 \item{verbose}{optional Boolean. When \code{TRUE}, emits additional structured,
 human-readable diagnostic messages during processing for

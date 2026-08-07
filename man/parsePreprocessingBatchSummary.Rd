@@ -9,10 +9,17 @@ parsePreprocessingBatchSummary(batch_summary_file, info_to_extract = "summary")
 \arguments{
 \item{batch_summary_file}{filepath to preprocessing_batch_summary.tsv file}
 
-\item{info_to_extract}{string with value of "summary" | "failedfiles" | "successfulfiles"}
+\item{info_to_extract}{string with value of "summary" | "failedfiles" | "successfulfiles" | "skippedfiles"}
 }
 \value{
-data dataframe exported data from preprocessing_batch_summary
+For \code{info_to_extract = "summary"}, a one-row dataframe of the batch
+run's summary fields. For \code{"successfulfiles"}/\code{"skippedfiles"}, a
+character vector of filepaths (\code{character(0)} if the section is empty).
+For \code{"failedfiles"} (P7-04), a \code{file}/\code{error} tibble with one row per
+failed file - \code{error} is that file's captured error message (or a
+placeholder for a failed file with no error detail captured this run;
+see \code{eyeQualityBatch()}'s "Failure detail" section) - or a zero-row
+tibble with those same two columns if nothing failed.
 }
 \description{
 parse preprocessing_batch_summary files

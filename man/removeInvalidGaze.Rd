@@ -17,7 +17,7 @@ removeInvalidGaze(data, whichEye, software, threshold = 2)
 \item{threshold}{ONLY for Tobii Studio datasets. A numeric, indicating acceptable threshold for valid data.}
 }
 \value{
-data with invalid points marked as NA in specified column
+data with new \code{.valid}-suffixed columns holding invalid points marked as NA; raw columns are left untouched
 }
 \description{
 removeInvalidGaze

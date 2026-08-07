@@ -20,8 +20,8 @@ calculateFrequency_hz
 calculate eye tracker temporal resolution (Hz)
 }
 \examples{
-exampledata <- data.frame("recordingTimestamp_ms" = seq(1,1000,2))
+exampledata <- data.frame("recordingTimestamp_ms" = seq(1, 1000, 2))
 calculateFrequency_hz(exampledata)
-calculateFrequency_hz(exampledata, 2:nrow(exampledata)) #excludes the first timepoint
+calculateFrequency_hz(exampledata, 2:nrow(exampledata)) # excludes the first timepoint
 
 }

@@ -16,15 +16,15 @@ smoothGaze(
 \arguments{
 \item{data}{dataframe}
 
+\item{recordingFrequency_hz}{recording Hz}
+
 \item{columnsToSmooth}{list of columns to smooth. Recommended to smooth gaze, pupil, and Z Dist columns}
 
+\item{smoothingWindow_ms}{An integer, length of smoothing window in ms. Default 20 ms (Liz's dissertation pg 121)}
+
+\item{smoothGaze_boolean}{Boolean}
+
 \item{...}{additional passed parameters from parent function}
-
-\item{recHz}{recording Hz}
-
-\item{smooth_window_ms}{An integer, length of smoothing window in ms. Default 20 ms (Liz's dissertation pg 121)}
-
-\item{noise_reduction}{Boolean}
 }
 \value{
 data with smoothed gazepoint, distance, and pupilolmetry

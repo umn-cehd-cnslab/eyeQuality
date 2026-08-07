@@ -38,7 +38,7 @@ visual-angle conversion, distance-based checks) is gated on this field.}
 \item{default_thresholds}{named list of adapter-scoped defaults consumed
 by this adapter's own functions (e.g. \code{list(validityThreshold = 2)} for
 Tobii Studio's \code{0}-\code{4} validity scale). Not on the generic \code{confidence}
-(0-1) scale — that is the adapter-independent \code{validityThreshold}
+(0-1) scale -- that is the adapter-independent \code{validityThreshold}
 argument planned for \code{eyeQuality()} (P3-08).}
 }
 \value{
@@ -48,7 +48,7 @@ A list of class \code{"eyetracker_adapter"} with elements \code{name},
 }
 \description{
 An eye tracker adapter is a plain named list of five functions plus two
-fields — deliberately S3-style (no S4/R6) to keep the dependency
+fields -- deliberately S3-style (no S4/R6) to keep the dependency
 footprint small. It is the unit that \code{register_eyetracker_adapter()}
 stores and \code{registered_adapters()} returns. See \code{?eyeQuality-schema} for
 the column contract every \code{standardize()}, \code{extract_events()}, and
@@ -56,17 +56,17 @@ the column contract every \code{standardize()}, \code{extract_events()}, and
 
 The five functions are:
 \itemize{
-\item \code{detect(data) -> logical} — does \code{data} match this adapter's raw
+\item \code{detect(data) -> logical} -- does \code{data} match this adapter's raw
 (pre-standardization) column layout? Called on newly-imported data,
 before any renaming, to pick which adapter should handle a given file.
-\item \code{standardize(data, verbose = FALSE) -> data} — rename device-native
+\item \code{standardize(data, verbose = FALSE) -> data} -- rename device-native
 columns onto the generic schema (\code{?eyeQuality-schema}).
-\item \code{extract_events(data, verbose = FALSE) -> list(gaze, events)} — split
+\item \code{extract_events(data, verbose = FALSE) -> list(gaze, events)} -- split
 standardized data into a gaze-stream data frame and an event-stream
 data frame, using whatever device-specific discriminator identifies
 event rows (e.g. a sentinel timestamp value, a dedicated sensor/channel
 column).
-\item \code{normalize_validity(data, threshold = NULL, verbose = FALSE) -> data} —
+\item \code{normalize_validity(data, threshold = NULL, verbose = FALSE) -> data} --
 compute the \code{.valid}-suffixed masked columns and the generic
 \code{confidence} (0-1) column from the device-native \code{validityLeft}/
 \code{validityRight} columns. \code{threshold} is on the device-native validity
@@ -85,7 +85,7 @@ for the successful/non-aborting path (e.g. "column \code{PupilLeft} present
 but 100\% NA", a run of consecutive samples below a validity threshold) via
 the shared \code{.emit_diagnostic()}/\code{.diagnose_consecutive_runs()}/
 \code{.diagnose_all_na_columns()} helpers defined below. \code{detect()} does not
-take \code{verbose} — it runs on raw, pre-rename data purely to answer "does
+take \code{verbose} -- it runs on raw, pre-rename data purely to answer "does
 this adapter match", and has no row-level content worth diagnosing before
 a matching adapter (and therefore a known column layout) has even been
 selected. This is purely additive to the interface: existing adapters

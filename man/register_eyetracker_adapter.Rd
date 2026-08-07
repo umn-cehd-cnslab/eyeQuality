@@ -17,7 +17,7 @@ being stored.}
 \description{
 Adds \code{adapter} to the package's internal adapter registry, keyed by
 \code{adapter$name}. Registering an adapter under a name that is already
-registered overwrites the previous entry (with a warning) — this is
+registered overwrites the previous entry (with a warning) -- this is
 deliberate, so re-sourcing an adapter file during development or
 re-registering a mock adapter in a test doesn't require restarting the
 session.

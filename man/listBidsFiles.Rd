@@ -10,19 +10,51 @@ listBidsFiles(
   sessionPattern_regex = "ses-[0-9]+",
   modalityPattern_regex = NULL,
   recursiveSearch = FALSE,
+  layout = c("bids", "glob"),
+  pathPattern = NULL,
+  excludePattern_regex = NULL,
   ...
 )
 }
 \arguments{
 \item{directory}{path for data file as .tsv}
 
-\item{subjectPattern_regex}{regex match pattern for subjects, or NULL if you are not using subject directories in 'directory' path}
+\item{subjectPattern_regex}{regex match pattern for subjects, or NULL if you are not using subject directories in 'directory' path. Only used when \code{layout = "bids"}.}
 
-\item{sessionPattern_regex}{regex match pattern for sessions, or NULL if you are not using session directories in 'subject_directory' paths}
+\item{sessionPattern_regex}{regex match pattern for sessions, or NULL if you are not using session directories in 'subject_directory' paths. Only used when \code{layout = "bids"}.}
 
-\item{modalityPattern_regex}{regex match pattern for specific modality, or NULL which will default to searching '.tsv' files}
+\item{modalityPattern_regex}{regex match pattern for specific modality, or NULL which will default to searching '.tsv' files. Applied against each candidate file's base name, in either \code{layout} mode.}
 
-\item{recursiveSearch}{boolean to search file directory recursively}
+\item{recursiveSearch}{boolean to search file directory recursively. Only used when \code{layout = "bids"}.}
+
+\item{layout}{one of \code{"bids"} (default) or \code{"glob"}. \code{"bids"} preserves the
+original fixed two-level \code{sub-XX/ses-XX/...} directory-matching behavior
+driven by \code{subjectPattern_regex}/\code{sessionPattern_regex}, and is
+unaffected by \code{pathPattern}/\code{excludePattern_regex} below. \code{"glob"} is a
+more general alternative for directory structures that don't fit a fixed
+two-level hierarchy: it matches files anywhere under \code{directory} using a
+glob-style \code{pathPattern} (arbitrary depth via \verb{**}), optionally dropping
+matches via \code{excludePattern_regex}. See Details.}
+
+\item{pathPattern}{glob-style pattern (using \code{/} as the path separator,
+regardless of OS) describing which files under \code{directory} to include.
+Required when \code{layout = "glob"}; ignored otherwise. \code{*} matches any
+characters within one path segment (not \code{/}), \verb{?} matches a single
+character within one segment, and \verb{**} matches zero or more path
+segments (i.e. arbitrary depth, including none). Matched against the
+file path relative to \code{directory}. Examples: \code{"*.tsv"} (files directly
+in \code{directory}), \code{"*/*.tsv"} (exactly one directory level deep, e.g. a
+flat per-participant layout with no session subfolder), \code{"*/*/*.tsv"}
+(exactly two levels deep), \code{"**/*.tsv"} (any depth).}
+
+\item{excludePattern_regex}{optional regex applied to each \code{pathPattern}
+match's path (relative to \code{directory}) to drop from the result. Only
+used when \code{layout = "glob"}. Excluded paths are reported via
+\code{attr(result, "skipped")} rather than silently dropped. Useful for
+layouts where a participant's derivative/processed output lives inside
+their own raw-data folder (e.g. \code{excludePattern_regex = "derivatives"})
+or where a centralized output directory happens to sit inside
+\code{directory} alongside per-participant raw folders.}
 
 \item{...}{additional parameters that may get passed from wrapper functions}
 }
@@ -31,4 +63,28 @@ list of raw ET data files to in BIDS-like directory
 }
 \description{
 listBidsFiles - get list of all ET like files.
+}
+\details{
+\code{listBidsFiles()} supports two \code{layout} modes, chosen to cover the
+directory structures this package's users have in practice:
+\itemize{
+\item \strong{BIDS-like} (\code{layout = "bids"}, the default): a fixed two-level
+\code{sub-XX/ses-XX/...} hierarchy, matched via \code{subjectPattern_regex}/
+\code{sessionPattern_regex}. This is the original behavior and is unchanged.
+\item \strong{Paired-in-place} (participant folders holding both raw and
+processed/derivative data together, rather than a separate
+\verb{derivatives/} subtree) and \strong{centralized-output} (all derivative
+files across every participant collected into one shared directory,
+separate from per-participant raw folders) layouts are both supported
+via \code{layout = "glob"}, since neither fits the fixed two-level
+subject/session assumption in general. For paired-in-place data, set
+\code{pathPattern} to match raw files at whatever depth they sit (e.g.
+\code{"*/*.tsv"} for one level, \code{"**/*.tsv"} for arbitrary depth) and use
+\code{excludePattern_regex} (e.g. \code{"derivatives"}) to skip each
+participant's own processed-output subfolder so it isn't re-ingested as
+raw data. For centralized-output data, point \code{directory} at the raw-data
+root and set \code{pathPattern} to the raw-file layout under it; if the
+shared output directory happens to live inside that same root,
+\code{excludePattern_regex} can exclude it by name.
+}
 }

@@ -1,14 +1,14 @@
 #' Apply IVT Classifier
 #'
 #' @param data a dataframe
-#' @param input_velocity string - variable column name containing velocity (in visual angles)
+#' @param velocity string - variable column name containing velocity (in visual angles)
 #' @param gazeX_va string - variable column name containing X gaze coordinates in visual angles
 #' @param gazeY_va string - variable column name containing Y gaze coordinates in visual angles
-#' @param recHz recording frequency in Hz
-#' @param IVT_thresh fixation classifier velocity threshold in VA/s. Default: 50 VA / s
-#' @param max_ang_adj_fix maximum distance (in VA) between two fixations to be merged. Default: 0/5 VA
-#' @param max_time_adj_fix maximum time lapsed (in ms) between two fixations to be merged. Default: 75 ms
-#' @param min_fix_dur threshold for minimum duration of a given fixation to be considered acceptable. Default: 60 ms
+#' @param recordingFrequency_hz recording frequency in Hz
+#' @param fixationVelocityThreshold fixation classifier velocity threshold in VA/s. Default: 50 VA / s
+#' @param maxAdjacentFixationAngle maximum distance (in VA) between two fixations to be merged. Default: 0/5 VA
+#' @param maxAdjacentFixationTime maximum time lapsed (in ms) between two fixations to be merged. Default: 75 ms
+#' @param minFixationDuration threshold for minimum duration of a given fixation to be considered acceptable. Default: 60 ms
 #' @param ... additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.
 #'
 #' @return outputs_dfs

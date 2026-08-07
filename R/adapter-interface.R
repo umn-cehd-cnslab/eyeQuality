@@ -2,24 +2,24 @@
 #'
 #' @description
 #' An eye tracker adapter is a plain named list of five functions plus two
-#' fields — deliberately S3-style (no S4/R6) to keep the dependency
+#' fields -- deliberately S3-style (no S4/R6) to keep the dependency
 #' footprint small. It is the unit that `register_eyetracker_adapter()`
 #' stores and `registered_adapters()` returns. See `?eyeQuality-schema` for
 #' the column contract every `standardize()`, `extract_events()`, and
 #' `normalize_validity()` implementation must satisfy.
 #'
 #' The five functions are:
-#' - `detect(data) -> logical` — does `data` match this adapter's raw
+#' - `detect(data) -> logical` -- does `data` match this adapter's raw
 #'   (pre-standardization) column layout? Called on newly-imported data,
 #'   before any renaming, to pick which adapter should handle a given file.
-#' - `standardize(data, verbose = FALSE) -> data` — rename device-native
+#' - `standardize(data, verbose = FALSE) -> data` -- rename device-native
 #'   columns onto the generic schema (`?eyeQuality-schema`).
-#' - `extract_events(data, verbose = FALSE) -> list(gaze, events)` — split
+#' - `extract_events(data, verbose = FALSE) -> list(gaze, events)` -- split
 #'   standardized data into a gaze-stream data frame and an event-stream
 #'   data frame, using whatever device-specific discriminator identifies
 #'   event rows (e.g. a sentinel timestamp value, a dedicated sensor/channel
 #'   column).
-#' - `normalize_validity(data, threshold = NULL, verbose = FALSE) -> data` —
+#' - `normalize_validity(data, threshold = NULL, verbose = FALSE) -> data` --
 #'   compute the `.valid`-suffixed masked columns and the generic
 #'   `confidence` (0-1) column from the device-native `validityLeft`/
 #'   `validityRight` columns. `threshold` is on the device-native validity
@@ -37,7 +37,7 @@
 #' but 100% NA", a run of consecutive samples below a validity threshold) via
 #' the shared `.emit_diagnostic()`/`.diagnose_consecutive_runs()`/
 #' `.diagnose_all_na_columns()` helpers defined below. `detect()` does not
-#' take `verbose` — it runs on raw, pre-rename data purely to answer "does
+#' take `verbose` -- it runs on raw, pre-rename data purely to answer "does
 #' this adapter match", and has no row-level content worth diagnosing before
 #' a matching adapter (and therefore a known column layout) has even been
 #' selected. This is purely additive to the interface: existing adapters
@@ -62,7 +62,7 @@
 #' @param default_thresholds named list of adapter-scoped defaults consumed
 #'   by this adapter's own functions (e.g. `list(validityThreshold = 2)` for
 #'   Tobii Studio's `0`-`4` validity scale). Not on the generic `confidence`
-#'   (0-1) scale — that is the adapter-independent `validityThreshold`
+#'   (0-1) scale -- that is the adapter-independent `validityThreshold`
 #'   argument planned for `eyeQuality()` (P3-08).
 #'
 #' @return A list of class `"eyetracker_adapter"` with elements `name`,
@@ -266,7 +266,7 @@ validate_adapter <- function(adapter) {
         paste0(
           "`geometry_type` must be one of: ",
           paste(shQuote(valid_geometry_types), collapse = ", "),
-          " — got: ", paste(deparse(adapter$geometry_type), collapse = "")
+          " -- got: ", paste(deparse(adapter$geometry_type), collapse = "")
         )
       )
     }
@@ -301,7 +301,7 @@ validate_adapter <- function(adapter) {
 #' @description
 #' Adds `adapter` to the package's internal adapter registry, keyed by
 #' `adapter$name`. Registering an adapter under a name that is already
-#' registered overwrites the previous entry (with a warning) — this is
+#' registered overwrites the previous entry (with a warning) -- this is
 #' deliberate, so re-sourcing an adapter file during development or
 #' re-registering a mock adapter in a test doesn't require restarting the
 #' session.
