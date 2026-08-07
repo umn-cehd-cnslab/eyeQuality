@@ -42,11 +42,21 @@ jobs:
           mkdir -p "$HOME/R/library"
           echo "R_LIBS_USER=$HOME/R/library" >> "$GITHUB_ENV"
 
+      - name: Point R at RSPM's binary packages
+        run: |
+          cat <<'RPROFILE' > "$HOME/.Rprofile"
+          options(HTTPUserAgent = sprintf(
+            "R/%s R (%s)",
+            getRversion(),
+            paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"])
+          ))
+          RPROFILE
+
       - name: Install R package dependencies
         run: |
-          Rscript -e 'options(pkgType = "binary"); if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos = Sys.getenv("CRAN_MIRROR"))'
-          Rscript -e 'options(pkgType = "binary"); remotes::install_deps(dependencies = TRUE, repos = Sys.getenv("CRAN_MIRROR"))'
-          Rscript -e 'options(pkgType = "binary"); install.packages(c("covr", "testthat"), repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'remotes::install_deps(dependencies = TRUE, repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'install.packages(c("covr", "testthat"), repos = Sys.getenv("CRAN_MIRROR"))'
 
       - name: Run testthat suite
         run: |
