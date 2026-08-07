@@ -7,7 +7,12 @@
 # NOTE: this workflow deliberately avoids third-party actions for the R setup
 # steps (r-lib/actions and friends) -- see repo notes on Actions allowlisting.
 # It installs R via apt (the runner is always ubuntu-latest) and R package
-# dependencies from CRAN directly.
+# dependencies from Posit Package Manager's Ubuntu binary CRAN mirror (a plain
+# repos URL, not a marketplace action) rather than CRAN's source-only mirror,
+# so dependencies install as precompiled binaries instead of being compiled
+# from source on every run -- CRAN's source mirror repeatedly hit packages
+# (e.g. Deriv) whose source doesn't compile against the runner's R/compiler
+# versions, which prebuilt binaries sidestep entirely.
 on:
   push:
   pull_request:
@@ -18,7 +23,7 @@ jobs:
   test-coverage:
     runs-on: ubuntu-latest
     env:
-      CRAN_MIRROR: https://cloud.r-project.org
+      CRAN_MIRROR: https://packagemanager.posit.co/cran/__linux__/noble/latest
 
     steps:
       - uses: actions/checkout@v4

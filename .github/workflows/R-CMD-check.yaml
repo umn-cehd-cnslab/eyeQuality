@@ -7,7 +7,11 @@
 # and friends). It installs R itself via each runner's preinstalled native
 # package manager (apt on Linux, Homebrew on macOS, Chocolatey on Windows)
 # rather than a marketplace action, and installs R package dependencies from
-# CRAN directly. Keep it that way -- see repo notes on Actions allowlisting.
+# CRAN directly (Posit Package Manager's Ubuntu binary mirror on Linux, so
+# dependencies install as precompiled binaries instead of being compiled from
+# source -- CRAN's source mirror repeatedly hit packages, e.g. Deriv, whose
+# source doesn't compile against the runner's R/compiler versions). Keep it
+# that way -- see repo notes on Actions allowlisting.
 on:
   push:
   pull_request:
@@ -41,6 +45,7 @@ jobs:
             libcurl4-openssl-dev libssl-dev libxml2-dev \
             libfontconfig1-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
             libuv1-dev
+          echo "CRAN_MIRROR=https://packagemanager.posit.co/cran/__linux__/noble/latest" >> "$GITHUB_ENV"
 
       - name: Install R and pandoc (macOS)
         if: runner.os == 'macOS'
