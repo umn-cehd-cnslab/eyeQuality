@@ -2,10 +2,10 @@
 #'
 #'
 #' @param data dataframe
-#' @param recHz recording Hz
+#' @param recordingFrequency_hz recording Hz
 #' @param columnsToSmooth list of columns to smooth. Recommended to smooth gaze, pupil, and Z Dist columns
-#' @param smooth_window_ms An integer, length of smoothing window in ms. Default 20 ms (Liz's dissertation pg 121)
-#' @param noise_reduction Boolean
+#' @param smoothingWindow_ms An integer, length of smoothing window in ms. Default 20 ms (Liz's dissertation pg 121)
+#' @param smoothGaze_boolean Boolean
 #' @param ... additional passed parameters from parent function
 #'
 #' @importFrom zoo rollapply

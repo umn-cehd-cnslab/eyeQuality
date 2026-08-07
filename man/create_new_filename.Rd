@@ -18,7 +18,7 @@ create_new_filename(
 
 \item{newFileExtension}{new file extension to use, if different from filename}
 
-\item{outputDir}{optional directory to write the output file to, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
+\item{outputDir}{optional directory to write the output file to, overriding the default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default NULL}
 }
 \description{
 create_new_filename: create new output filename from save directory and data file

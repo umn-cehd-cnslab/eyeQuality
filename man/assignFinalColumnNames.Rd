@@ -9,9 +9,9 @@ assignFinalColumnNames(data, smoothGaze_boolean, ...)
 \arguments{
 \item{data}{dataframe}
 
-\item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
+\item{smoothGaze_boolean}{Boolean indicating if noise reduction (smoothing) should be implemented on gaze data}
 
-\item{noise_reduction}{Boolean indicating if noise reduction should be implemented on gaze data}
+\item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
 }
 \value{
 data

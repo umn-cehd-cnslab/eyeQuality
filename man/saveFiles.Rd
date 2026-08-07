@@ -27,7 +27,7 @@ saveFiles(
 
 \item{batchName}{batch name to insert into save files, useful for running batches with different parameters and/or for specific trials}
 
-\item{outputDir}{optional directory to write output files to, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL}
+\item{outputDir}{optional directory to write output files to, overriding the default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default NULL}
 }
 \description{
 Save Files
