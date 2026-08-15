@@ -1,0 +1,287 @@
+---
+title: "Batch processing with eyeQuality"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Batch processing with eyeQuality}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(eyeQuality)
+```
+
+`vignette("getting-started")` walks through preprocessing a single recording
+with `eyeQuality()`. Most real projects have more than one recording, though
+-- one file per participant, or per participant per session -- and running
+`eyeQuality()` by hand for each one gets tedious fast. `eyeQualityBatch()`
+finds every raw recording under a directory tree, runs `eyeQuality()` on each
+of them (in parallel, across multiple cores), and writes the same set of
+output files `eyeQuality(saveData = TRUE)` would write for a single file,
+once per recording, plus one batch-level summary describing the whole run.
+
+## Building a small example dataset
+
+`eyeQualityBatch()` needs an actual directory of files to point at, so this
+vignette builds a small one from the same synthetic fixture
+`vignette("getting-started")` uses for a single file -- copied four times into
+a two-subject, two-session layout, entirely inside a temporary directory. This
+is only to give the examples below something real to run against; nothing
+here is specific to Tobii Studio exports, and the file names below follow a
+plain `sub-<id>_ses-<id>_..._physio.tsv` convention, not a requirement
+`eyeQualityBatch()` itself imposes.
+
+```{r}
+raw_file <- system.file("extdata", "tobii_studio_sample.tsv", package = "eyeQuality")
+
+batch_dir <- file.path(tempdir(), "eyeQuality-batch-demo")
+dir.create(batch_dir, showWarnings = FALSE)
+
+for (subject in c("sub-01", "sub-02")) {
+  for (session in c("ses-01", "ses-02")) {
+    session_dir <- file.path(batch_dir, subject, session)
+    dir.create(session_dir, recursive = TRUE, showWarnings = FALSE)
+    file.copy(
+      raw_file,
+      file.path(session_dir, paste0(subject, "_", session, "_task-test_recording-eyetracking_physio.tsv"))
+    )
+  }
+}
+
+list.files(batch_dir, recursive = TRUE)
+```
+
+## How eyeQualityBatch() finds files: listBidsFiles()
+
+Before dispatching any work, `eyeQualityBatch()` calls `listBidsFiles()` to
+build the list of raw files to process. `listBidsFiles()` supports two
+`layout` modes, matched to how eye-tracking datasets tend to actually be
+organized:
+
+- **`layout = "bids"`** (the default) -- a fixed two-level
+  `sub-<id>/ses-<id>/...` hierarchy, matched by regular expressions
+  (`subjectPattern_regex`/`sessionPattern_regex`, defaulting to
+  `"sub-[A-Z0-9]+"`/`"ses-[0-9]+"`). This is the layout the example directory
+  above already follows:
+
+  ```{r}
+  listBidsFiles(batch_dir)
+  ```
+
+  A directory that doesn't match the subject/session pattern is skipped
+  rather than silently descended into or erroring out the whole batch; every
+  skipped path is reported in `attr(result, "skipped")` so you can confirm
+  nothing was dropped by mistake.
+
+- **`layout = "glob"`** -- for directory structures that don't fit that fixed
+  two-level shape. Instead of subject/session regexes, you supply a
+  glob-style `pathPattern` (matched relative to `directory`, using `/`
+  regardless of OS): `*` matches any characters within one path segment,
+  `?` matches a single character within a segment, and `**` matches zero or
+  more whole segments -- so `"**/*.tsv"` finds `.tsv` files at any depth,
+  while `"*/*.tsv"` matches only files exactly one directory level down. An
+  optional `excludePattern_regex` drops matched paths back out of the result
+  (into `attr(result, "skipped")`, same as the `"bids"` skip reporting) --
+  useful when a participant's own processed-output subfolder would otherwise
+  be re-ingested as raw data:
+
+  ```{r}
+  listBidsFiles(
+    batch_dir,
+    layout = "glob",
+    pathPattern = "**/*.tsv",
+    excludePattern_regex = "derivatives"
+  )
+  ```
+
+  `layout = "glob"` covers two directory shapes that don't fit the BIDS-like
+  default: a **paired-in-place** layout, where each participant's folder
+  holds their raw file(s) and processed output together rather than in a
+  separate `derivatives/` subtree (set `pathPattern` to match the raw files
+  at whatever depth they sit, and `excludePattern_regex` to skip each
+  participant's own output subfolder), and a **centralized-output** layout,
+  where every participant's processed output lands in one shared directory
+  outside the per-participant raw folders (point `directory` at the raw-data
+  root and, if the shared output directory happens to live inside that same
+  root, exclude it by name).
+
+`eyeQualityBatch()` accepts the same arguments `listBidsFiles()` does
+(`layout`, `subjectPattern_regex`/`sessionPattern_regex`, `pathPattern`,
+`excludePattern_regex`, `modalityPattern_regex`, `recursiveSearch`) via its
+`...`, so any of the calls above work as-is inside an `eyeQualityBatch()`
+call too.
+
+## Running a batch
+
+`eyeQualityBatch()` needs a `directoryBIDS` (despite the name, this is just
+"the directory to search" -- it works with either `layout`) and a
+`batchName`, which gets stamped into every output filename so you can tell
+one run apart from another. Display dimensions and any other `eyeQuality()`
+argument are passed straight through and applied to every file in the batch:
+
+```{r, results = "hide", message = FALSE}
+eyeQualityBatch(
+  batch_dir,
+  batchName = "demo",
+  numberCores = 1,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344
+)
+```
+
+(`numberCores` defaults to roughly 85% of the machine's available cores,
+capped at one core per file; it's pinned to `1` above purely so this
+vignette's timing is predictable, not because that's a recommended setting.)
+
+Unlike `eyeQuality()`'s single-file progress log, `eyeQualityBatch()` doesn't
+print its run log to the console -- with multiple files potentially
+processing across several worker processes at once, an interleaved console
+stream wouldn't be very readable anyway. Instead, everything is written to a
+`preprocessing_batch_summary_desc-<batchName>.txt` file at the root of the
+directory you pointed it at:
+
+```{r}
+summary_file <- file.path(batch_dir, "preprocessing_batch_summary_desc-demo.txt")
+cat(readLines(summary_file), sep = "\n")
+```
+
+Per-recording output -- the same `events`/`preproc`/`preproc_runtimes`/
+`preproc_qcsummary` files and run log `vignette("getting-started")` describes
+for a single `eyeQuality(saveData = TRUE)` call -- lands next to each raw
+file, under a `derivatives/eyeQuality-v1/` subdirectory by default (or
+wherever `outputDir` points, if you set it):
+
+```{r}
+list.files(batch_dir, recursive = TRUE, pattern = "desc-demo")
+```
+
+### Reading the batch summary back in
+
+`parsePreprocessingBatchSummary()` parses that summary file back into R
+rather than requiring you to read it as text. `info_to_extract = "summary"`
+gets the one-row run summary (file counts, data size, timing):
+
+```{r}
+parsePreprocessingBatchSummary(summary_file, info_to_extract = "summary")
+```
+
+`"successfulfiles"` and `"skippedfiles"` return a plain character vector of
+filepaths; `"failedfiles"` returns a `file`/`error` data frame, covered
+below.
+
+## Resuming an interrupted or partially completed batch
+
+Batch runs over real datasets can be large enough that re-running everything
+from scratch after an interruption -- or after adding a few new
+participants -- is wasteful. Before dispatching any file,
+`eyeQualityBatch()` checks whether a matching `preproc_qcsummary` output
+already exists for that file under the given `batchName` (and `outputDir`,
+if set); if it does, the file is skipped rather than reprocessed. Calling
+`eyeQualityBatch()` again against the same directory and `batchName`, with
+nothing changed, finds every file already done and skips all of them:
+
+```{r, results = "hide", message = FALSE}
+eyeQualityBatch(
+  batch_dir,
+  batchName = "demo",
+  numberCores = 1,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344
+)
+```
+
+```{r}
+parsePreprocessingBatchSummary(summary_file, info_to_extract = "skippedfiles")
+```
+
+This is also what makes it safe to add new files to an in-progress dataset
+and re-run the same call: only the new files (the ones without an existing
+`preproc_qcsummary` output yet) get dispatched, and already-completed
+files' output is left untouched rather than overwritten. If you do want to
+force every candidate file to be reprocessed regardless of existing output
+-- for example, after changing a preprocessing argument and wanting it
+applied everywhere -- pass `force = TRUE`:
+
+```{r, results = "hide", message = FALSE}
+eyeQualityBatch(
+  batch_dir,
+  batchName = "demo",
+  numberCores = 1,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344,
+  force = TRUE
+)
+```
+
+## Structured failure reporting
+
+Not every file in a large batch will make it through preprocessing --
+a malformed export, an unsupported column layout, or a genuine data problem
+can all cause `eyeQuality()` to raise an error for a given file. Rather than
+stopping the whole batch, `eyeQualityBatch()` catches that error, lets the
+rest of the batch continue, and records the failure -- both the file and its
+error message -- in the summary file's "Files that failed processing"
+section.
+
+To see this in action, this adds one more file to the example directory
+whose timestamps are deliberately out of order (a real, if artificial, cause
+of a preprocessing failure) and re-runs the batch:
+
+```{r, results = "hide", message = FALSE}
+broken <- read.delim(raw_file, check.names = FALSE)
+# swap two rows' timestamps so they're no longer chronologically ordered
+broken[c(5, 6), c("EyeTrackerTimestamp", "RecordingTimestamp")] <-
+  broken[c(6, 5), c("EyeTrackerTimestamp", "RecordingTimestamp")]
+
+broken_session_dir <- file.path(batch_dir, "sub-03", "ses-01")
+dir.create(broken_session_dir, recursive = TRUE, showWarnings = FALSE)
+write.table(
+  broken,
+  file.path(broken_session_dir, "sub-03_ses-01_task-test_recording-eyetracking_physio.tsv"),
+  sep = "\t",
+  row.names = FALSE,
+  quote = FALSE
+)
+
+eyeQualityBatch(
+  batch_dir,
+  batchName = "demo",
+  numberCores = 1,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344
+)
+```
+
+```{r}
+parsePreprocessingBatchSummary(summary_file, info_to_extract = "failedfiles")
+```
+
+The rest of the batch -- every file that already succeeded -- is unaffected;
+only the newly added file shows up as failed, with the same diagnostic
+message `eyeQuality()` would have raised if you'd run it on that one file
+directly. A subsequent `eyeQualityBatch()` call against the same directory
+and `batchName` (still without `force = TRUE`) will retry a previously
+failed file rather than treating it as done, since a failed run never
+produces the `preproc_qcsummary` output the resumability check looks for.
+
+```{r, include = FALSE}
+unlink(batch_dir, recursive = TRUE)
+```
+
+## Where to go next
+
+- `?eyeQualityBatch`, `?listBidsFiles`, and `?parsePreprocessingBatchSummary`
+  document every argument in full.
+- `?eyeQuality-schema` documents the columns each per-recording output file
+  contains.
+- `vignette("getting-started")` covers preprocessing a single recording, and
+  the arguments (`eyeSelection_method`, `validityThreshold`,
+  `smoothGaze_boolean`, and so on) that `eyeQualityBatch()` passes through to
+  every file in a batch.

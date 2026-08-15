@@ -246,9 +246,9 @@ For a whole dataset rather than a single file, `eyeQualityBatch()` runs
 `eyeQuality()` across every recording found by `listBidsFiles()` (which
 understands both a fixed BIDS-like `sub-*/ses-*/` directory layout and more
 flexible glob-style patterns) and writes one set of output files per
-recording. See `?eyeQualityBatch` and `?listBidsFiles` for the full set of
-options, including how to point it at a YAML batch configuration file
-instead of repeating arguments per call.
+recording, plus a batch-level run summary. See `vignette("batch-processing")`
+for a full walkthrough, or `?eyeQualityBatch` and `?listBidsFiles` for the
+complete set of options.
 
 ## Where to go next
 
