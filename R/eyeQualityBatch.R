@@ -44,6 +44,37 @@
 #' @return data
 #' @export
 #'
+#' @examples
+#' \donttest{
+#' # eyeQualityBatch() needs an actual directory of files to point at -- build
+#' # a small two-subject BIDS-like layout from the bundled sample file, inside
+#' # a temporary directory.
+#' raw_file <- system.file("extdata", "tobii_studio_sample.tsv", package = "eyeQuality")
+#' batch_dir <- file.path(tempdir(), "eyeQualityBatch-example")
+#'
+#' for (subject in c("sub-01", "sub-02")) {
+#'   session_dir <- file.path(batch_dir, subject, "ses-01")
+#'   dir.create(session_dir, recursive = TRUE, showWarnings = FALSE)
+#'   file.copy(
+#'     raw_file,
+#'     file.path(session_dir, paste0(subject, "_ses-01_task-test_recording-eyetracking_physio.tsv"))
+#'   )
+#' }
+#'
+#' eyeQualityBatch(
+#'   batch_dir,
+#'   batchName = "example",
+#'   numberCores = 1, # pinned to 1 core here only to keep the example light
+#'   displayDimensionX_mm = 594,
+#'   displayDimensionY_mm = 344
+#' )
+#'
+#' summary_file <- file.path(batch_dir, "preprocessing_batch_summary_desc-example.txt")
+#' parsePreprocessingBatchSummary(summary_file, info_to_extract = "summary")
+#'
+#' unlink(batch_dir, recursive = TRUE)
+#' }
+#'
 eyeQualityBatch <-
   function(directoryBIDS,
            batchName,

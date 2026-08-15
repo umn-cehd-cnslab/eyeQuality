@@ -44,7 +44,38 @@
 #'
 #' @return preprocessed data
 #' @export
-
+#'
+#' @examples
+#' # Small bundled Tobii Studio export, used throughout the package's tests
+#' # and vignettes -- gaze held constant at a single off-center location for
+#' # its whole 200-sample recording.
+#' raw_file <- system.file("extdata", "tobii_studio_sample.tsv", package = "eyeQuality")
+#'
+#' result <- eyeQuality(
+#'   raw_file,
+#'   displayDimensionX_mm = 594, # e.g. a 1920x1080 display, physically 594mm wide
+#'   displayDimensionY_mm = 344, # ...and 344mm tall
+#'   saveData = FALSE
+#' )
+#' result[5, c("gazeX.preprocessed_px", "gazeY.preprocessed_px", "IVT.classification")]
+#'
+#' \donttest{
+#' # saveData = TRUE writes the preprocessed data, event stream, per-stage run
+#' # timings, and quality metrics table to disk instead of returning them.
+#' # Always point outputDir somewhere temporary in a script or example.
+#' out_dir <- file.path(tempdir(), "eyeQuality-example")
+#' eyeQuality(
+#'   raw_file,
+#'   displayDimensionX_mm = 594,
+#'   displayDimensionY_mm = 344,
+#'   saveData = TRUE,
+#'   outputDir = out_dir,
+#'   batchName = "example"
+#' )
+#' list.files(out_dir)
+#' unlink(out_dir, recursive = TRUE)
+#' }
+#'
 eyeQuality <- function(filepath,
                        displayDimensionX_mm,
                        displayDimensionY_mm,
