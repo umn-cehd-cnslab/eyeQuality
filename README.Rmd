@@ -25,11 +25,11 @@ was primarily tested using data exports from Tobii Studio and Tobii Pro).
 
 
 ## Installation
-You can install the eyeQuality from [GitHub](https://github.com/elab-umn/eyeQuality/) with:
+You can install the eyeQuality from [GitHub](https://github.com/umn-cehd-cnslab/eyeQuality/) with:
 
 ``` r
 # install.packages("devtools")
-devtools::install_github("elab-umn/eyeQuality")
+devtools::install_github("umn-cehd-cnslab/eyeQuality")
 ```
 
 Alternatively, you can install from source by downloading the package via github. Follow instructions outlined [here](https://www.dataquest.io/blog/install-package-r/)
@@ -55,7 +55,7 @@ git commands in the Terminal)
 1. Add documentation using roxygen (see [R package roxygen instructions](https://r-pkgs.org/man.html))
 1. Once your changes are ready to be merged, submit a [pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request) on github
 
-If you find any bugs or have feature requests, [open an issue on github](https://github.com/elab-umn/eyetrackingELabR/issues). 
+If you find any bugs or have feature requests, [open an issue on github](https://github.com/umn-cehd-cnslab/eyeQuality/issues).
 Please be as detailed as possible in your issue.
 
 ## Getting started

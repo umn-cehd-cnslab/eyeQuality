@@ -14,11 +14,11 @@ Tobii Studio and Tobii Pro).
 ## Installation
 
 You can install the eyeQuality from
-[GitHub](https://github.com/elab-umn/eyeQuality/) with:
+[GitHub](https://github.com/umn-cehd-cnslab/eyeQuality/) with:
 
 ``` r
 # install.packages("devtools")
-devtools::install_github("elab-umn/eyeQuality")
+devtools::install_github("umn-cehd-cnslab/eyeQuality")
 ```
 
 Alternatively, you can install from source by downloading the package
@@ -52,7 +52,7 @@ help(package = "eyeQuality")
     on github
 
 If you find any bugs or have feature requests, [open an issue on
-github](https://github.com/elab-umn/eyetrackingELabR/issues). Please be
+github](https://github.com/umn-cehd-cnslab/eyeQuality/issues). Please be
 as detailed as possible in your issue.
 
 ## Getting started
