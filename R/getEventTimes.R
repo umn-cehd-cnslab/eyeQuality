@@ -7,7 +7,6 @@
 #' @param lastInd an integer marking which occurrence of the event type should be set as the first. Default 1 sets the first occurance.
 #' @param ... additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.
 #'
-#' @importFrom purrr detect_index
 #' @importFrom stringr str_detect
 #' @return list containing start and end times
 #' @export
