@@ -50,6 +50,28 @@ test_that("eyeQuality runs end-to-end on the Tobii Studio sample fixture without
   expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
 })
 
+test_that("inst/extdata's vignette copy of the sample fixture stays byte-identical to the test fixture", {
+  # P6-02 added inst/extdata/tobii_studio_sample.tsv as a duplicate of this
+  # fixture so getting-started.Rmd can reach it via system.file() after
+  # install (vignettes can't read tests/testthat/fixtures/). The vignette's
+  # prose hardcodes values derived from this file's exact contents (e.g. a
+  # constant gazeX.preprocessed_va of 12.77, "200/200 raw samples valid").
+  # If the two copies ever desync -- someone edits one fixture to add an
+  # edge case without updating the other -- the vignette would silently
+  # build against stale data and its narrated numbers would stop matching
+  # its own output. Comparing the two copies directly catches that before
+  # it ships.
+  test_fixture <- testthat::test_path("fixtures", "tobii_studio_sample.tsv")
+  vignette_fixture <- system.file("extdata", "tobii_studio_sample.tsv", package = "eyeQuality")
+
+  skip_if(!nzchar(vignette_fixture), "inst/extdata/tobii_studio_sample.tsv not found via system.file()")
+
+  expect_identical(
+    readBin(test_fixture, "raw", n = file.info(test_fixture)$size),
+    readBin(vignette_fixture, "raw", n = file.info(vignette_fixture)$size)
+  )
+})
+
 test_that("eyeQuality runs end-to-end on the Tobii Studio monocular fixture without error", {
   skip_on_cran()
 
