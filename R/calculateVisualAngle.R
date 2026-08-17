@@ -2,7 +2,7 @@
 #'
 #' @param gaze_px Integer, gaze position as a pixel coordinate (X or Y)
 #' @param distanceZ  Integer, distance from the screen in mm
-#' @param displayResolution_px Integer, display resolution on the relevant dimension (X ir Y)
+#' @param displayResolution_px Integer, display resolution on the relevant dimension (X or Y)
 #' @param displayDimension_mm Integer, display dimension on the relevant dimension (X or Y)
 #'
 #' @return returns Angle in degrees

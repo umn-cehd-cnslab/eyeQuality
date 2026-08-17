@@ -163,7 +163,7 @@ list_bids_derivative_files(".") # show the full list of processed data
 | gazeX.preprocessed_px   | FINAL PREPROCESSED GAZE X POSITION IN PIXEL SPACE                           |
 | gazeY.preprocessed_px   | FINAL PREPROCESSED GAZE Y POSITION IN PIXEL SPACE                           |
 | gazeX.preprocessed_va   | FINAL PREPROCESSED GAZE X POSITION IN VISUAL ANGLE SPACE                    |
-| gazeY.preprocessed_va   | FINAL PREPROCESSED GAZE Y POSITIONN IN VISUAL ANGLE SPACE                   |
+| gazeY.preprocessed_va   | FINAL PREPROCESSED GAZE Y POSITION IN VISUAL ANGLE SPACE                    |
 
 | Z Distance Variables      | Definitions                                                                                       |
 |:--------------------------|:--------------------------------------------------------------------------------------------------|
@@ -185,7 +185,7 @@ list_bids_derivative_files(".") # show the full list of processed data
 | velocityEuclidean.smooth_va_ms       | Euclidean velocity in VA / second after smoothing          |
 | velocityX.preprocessed_va_ms         | FINAL PREPROCESSED X GAZE VELOCITY IN VA/SECOND            |
 | velocityY.preprocessed_va_ms         | FINAL PREPROCESSED Y GAZE VELOCITY IN VA/SECOND            |
-| velocityEuclidean.preprocessed_va_ms | FINAL PREPROCESSED EUCIDEAN VELOCITY IN VA/SECOND          |
+| velocityEuclidean.preprocessed_va_ms | FINAL PREPROCESSED EUCLIDEAN VELOCITY IN VA/SECOND         |
 
 | IVT Variables           | Definitions                     |
 |:------------------------|:--------------------------------|
@@ -197,7 +197,7 @@ list_bids_derivative_files(".") # show the full list of processed data
 | Validity Variables       | Definitions                                         |
 |:-------------------------|:----------------------------------------------------|
 | validLeft                | Input for classifying left eye validity             |
-| validRight               | Input for classigying right eye validity            |
+| validRight               | Input for classifying right eye validity            |
 | gazeLeft.offscreen       | Classification of left eye offscreen gaze validity  |
 | gazeRight.offscreen      | Classification of right eye offscreen gaze validity |
 | offscreen.classification | FINAL CLASSIFICATION OF OVERALL OFFSCREEN VALIDITY  |

@@ -155,7 +155,7 @@ GP_Definitions <- c(
   "FINAL PREPROCESSED GAZE X POSITION IN PIXEL SPACE",
   "FINAL PREPROCESSED GAZE Y POSITION IN PIXEL SPACE",
   "FINAL PREPROCESSED GAZE X POSITION IN VISUAL ANGLE SPACE",
-  "FINAL PREPROCESSED GAZE Y POSITIONN IN VISUAL ANGLE SPACE"
+  "FINAL PREPROCESSED GAZE Y POSITION IN VISUAL ANGLE SPACE"
 )
 
 GP_Table <- data.frame(GP_Variables, GP_Definitions)
@@ -194,7 +194,7 @@ Vel_Definitions <- c(
   "Euclidean velocity in VA / second after smoothing",
   "FINAL PREPROCESSED X GAZE VELOCITY IN VA/SECOND",
   "FINAL PREPROCESSED Y GAZE VELOCITY IN VA/SECOND",
-  "FINAL PREPROCESSED EUCIDEAN VELOCITY IN VA/SECOND"
+  "FINAL PREPROCESSED EUCLIDEAN VELOCITY IN VA/SECOND"
 )
 
 Vel_Table <- data.frame(Vel_Variables, Vel_Definitions)
@@ -218,7 +218,7 @@ validity_Variables <- c(
 )
 
 validity_Definitions <- c(
-  "Input for classifying left eye validity", "Input for classigying right eye validity",
+  "Input for classifying left eye validity", "Input for classifying right eye validity",
   "Classification of left eye offscreen gaze validity", "Classification of right eye offscreen gaze validity",
   "FINAL CLASSIFICATION OF OVERALL OFFSCREEN VALIDITY"
 )

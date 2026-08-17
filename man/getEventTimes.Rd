@@ -18,11 +18,11 @@ getEventTimes(
 
 \item{firstEvent}{a string defining the first event of interest in the recording}
 
-\item{firstInd}{an integer marking which occurrence of the event type should be set as the first. Default 1 sets the first occurance.}
+\item{firstInd}{an integer marking which occurrence of the event type should be set as the first. Default 1 sets the first occurrence.}
 
 \item{lastEvent}{a string defining the last event of interest in the recording}
 
-\item{lastInd}{an integer marking which occurrence of the event type should be set as the first. Default 1 sets the first occurance.}
+\item{lastInd}{an integer marking which occurrence of the event type should be set as the first. Default 1 sets the first occurrence.}
 
 \item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
 }

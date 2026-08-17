@@ -16,7 +16,7 @@ calculateVisualAngle(
 
 \item{distanceZ}{Integer, distance from the screen in mm}
 
-\item{displayResolution_px}{Integer, display resolution on the relevant dimension (X ir Y)}
+\item{displayResolution_px}{Integer, display resolution on the relevant dimension (X or Y)}
 
 \item{displayDimension_mm}{Integer, display dimension on the relevant dimension (X or Y)}
 }

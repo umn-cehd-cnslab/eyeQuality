@@ -12,7 +12,7 @@
 #' @importFrom stringr str_replace
 #' @importFrom stringr str_detect
 #'
-#' @return data with smoothed gazepoint, distance, and pupilolmetry
+#' @return data with smoothed gazepoint, distance, and pupillometry
 #' @export
 #'
 smoothGaze <-

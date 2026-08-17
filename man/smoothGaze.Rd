@@ -27,7 +27,7 @@ smoothGaze(
 \item{...}{additional passed parameters from parent function}
 }
 \value{
-data with smoothed gazepoint, distance, and pupilolmetry
+data with smoothed gazepoint, distance, and pupillometry
 }
 \description{
 De-noise and smooth rolling averages

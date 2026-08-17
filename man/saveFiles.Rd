@@ -23,7 +23,7 @@ saveFiles(
 
 \item{timing}{list of internal run timing from eyeQuality function}
 
-\item{summaryData}{data from the calcualteOutputMetrics function}
+\item{summaryData}{data from the calculateOutputMetrics function}
 
 \item{batchName}{batch name to insert into save files, useful for running batches with different parameters and/or for specific trials}
 

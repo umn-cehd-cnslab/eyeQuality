@@ -4,7 +4,7 @@
 #' @param data dataframe
 #' @param events dataframe of event markers, only tobii pro files
 #' @param timing list of internal run timing from eyeQuality function
-#' @param summaryData data from the calcualteOutputMetrics function
+#' @param summaryData data from the calculateOutputMetrics function
 #' @param batchName batch name to insert into save files, useful for running batches with different parameters and/or for specific trials
 #' @param outputDir optional directory to write output files to, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL
 #' @import dplyr
