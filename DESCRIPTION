@@ -33,7 +33,9 @@ Suggests:
     lintr,
     styler,
     knitr,
-    rmarkdown
+    rmarkdown,
+    shiny,
+    shinyFiles
 Config/testthat/edition: 3
 Imports:
     rlang,
