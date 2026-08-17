@@ -1,7 +1,7 @@
 # P2-09: batch integration tests exercising eyeQualityBatch() against a real,
 # checked-in 2-subject x 2-session BIDS-like directory tree
-# (tests/testthat/fixtures/bids_sample/, sub-01/ses-01, sub-01/ses-02,
-# sub-02/ses-01, sub-02/ses-02), plus numberCores edge cases at the actual
+# (tests/testthat/fixtures/bids/, sub-1/ses-1, sub-1/ses-2,
+# sub-2/ses-1, sub-2/ses-2), plus numberCores edge cases at the actual
 # multi-file parallel-run level and a round-trip check of
 # parsePreprocessingBatchSummary() against real eyeQualityBatch() output.
 #
@@ -12,13 +12,20 @@
 # fixture untouched (same convention used by every other saveData = TRUE /
 # eyeQualityBatch() test in this suite - see write_p1_01_fixture() and its
 # tempfile()-based tests in test-eyeQualityBatch.R).
+#
+# Subject/session directories use single-digit labels (sub-1/ses-1, not
+# zero-padded sub-01/ses-01) to keep the checked-in fixture paths under the
+# 100-byte tar portability limit R CMD check flags ('checking for portable
+# file names'); subjectPattern_regex/sessionPattern_regex only require the
+# "sub-"/"ses-" prefix plus one or more alphanumerics, so this doesn't affect
+# what's under test.
 
-# Copies the checked-in bids_sample/ fixture tree into a fresh tempdir and
+# Copies the checked-in bids/ fixture tree into a fresh tempdir and
 # returns that tempdir's path. Returns the four raw recording file paths as
 # well (sorted by subject/session) for callers that need to compute expected
 # output filenames.
 copy_bids_sample_fixture <- function() {
-  src <- testthat::test_path("fixtures", "bids_sample")
+  src <- testthat::test_path("fixtures", "bids")
   dest <- tempfile("p209_bids_")
   fs::dir_copy(src, dest)
 
@@ -64,15 +71,15 @@ test_that("eyeQualityBatch uses 1 core for a single-file batch even with numberC
   skip_on_cran()
 
   # A single-recording BIDS directory (one subject, one session) built from
-  # just the sub-01/ses-01 fixture. With numberCores = NULL, eyeQualityBatch()
+  # just the sub-1/ses-1 fixture. With numberCores = NULL, eyeQualityBatch()
   # computes numcores as min(floor(detectCores() * 0.85), n files) subject to
   # a floor of 1 - for exactly 1 file, that expression evaluates to 1
   # regardless of how many cores the host machine actually has (this is what
   # makes the assertion below deterministic across CI/dev machines rather
   # than tied to a specific detectCores() value).
   src_file <- testthat::test_path(
-    "fixtures", "bids_sample", "sub-01", "ses-01",
-    "sub-01_ses-01_task-test_recording-eyetracking_physio.tsv"
+    "fixtures", "bids", "sub-1", "ses-1",
+    "sub-1_ses-1_recording-eyetracking_physio.tsv"
   )
 
   dir <- tempfile("p209_onefile_")

@@ -5,3 +5,12 @@
 ^README\.Rmd$
 ^doc$
 ^Meta$
+^\.claude$
+^CLAUDE\.md$
+^Agent_Team_Plan\.md$
+^Implementation_Strategic_Plan\.md$
+^Validation_Datasets_and_Tasks\.md$
+^Validation_Verification_Strategy\.md$
+^eyeQuality_checklist\.md$
+^\.lintr$
+^\.github$

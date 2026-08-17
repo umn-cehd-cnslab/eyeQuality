@@ -55,13 +55,13 @@ parsePreprocessingBatchSummary <-
           )),
         ) %>%
         select(
-          directory,
-          datasize,
-          nfiles,
-          nPreprocessed,
-          nFailed,
-          runDuration,
-          runTime
+          "directory",
+          "datasize",
+          "nfiles",
+          "nPreprocessed",
+          "nFailed",
+          "runDuration",
+          "runTime"
         ) %>%
         return()
     } else if (info_to_extract %in% c("failedfiles", "successfulfiles", "skippedfiles")) {
