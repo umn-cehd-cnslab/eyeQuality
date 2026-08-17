@@ -10,8 +10,8 @@ Provides a preprocessing and quality-control pipeline for eye tracking data, sta
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/elab-umn/eyeQuality}
-  \item Report bugs at \url{https://github.com/elab-umn/eyeQuality/issues}
+  \item \url{https://github.com/umn-cehd-cnslab/eyeQuality}
+  \item Report bugs at \url{https://github.com/umn-cehd-cnslab/eyeQuality/issues}
 }
 
 }

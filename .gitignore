@@ -33,6 +33,8 @@ vignettes/*.pdf
 .Renviron
 # Mac Hidden Files
 .DS_Store
+# Stray local test/check run output
+*.log
 
 # --- Local Claude Code tooling: not part of the published repo ---
 # Subagents, skills, hooks, and settings used to work through the
