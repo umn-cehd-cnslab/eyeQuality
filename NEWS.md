@@ -1,4 +1,4 @@
-# eyeQuality 1.0.0.0
+# eyeQuality 0.1.0
 
 Initial CRAN release.
 
