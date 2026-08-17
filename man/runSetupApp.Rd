@@ -15,17 +15,18 @@ Nothing; called for the side effect of launching a Shiny app in
 the current R session. Does not return until the app is closed.
 }
 \description{
-Launches a Shiny app for choosing a data directory and previewing which
-files a batch run would find (matched file count, sample filenames, and
-skipped-item count) via \code{listBidsFiles()}, before committing to an actual
-\code{eyeQualityBatch()} run.
+Launches a Shiny app for choosing a data directory, previewing which files
+a batch run would find (matched file count, sample filenames, and
+skipped-item count) via \code{listBidsFiles()}, and launching an
+\code{eyeQualityBatch()} run against that directory in the background, with a
+basic running/done/failed status display.
 }
 \details{
-This app requires the \code{shiny} and \code{shinyFiles} packages, which are not
-installed automatically with this package (see \code{Suggests} in
-\code{DESCRIPTION}) since they're only needed for this optional interface, not
-the core preprocessing pipeline. Install them separately to use this
-function.
+This app requires the \code{shiny}, \code{shinyFiles}, \code{future}, and \code{promises}
+packages, which are not installed automatically with this package (see
+\code{Suggests} in \code{DESCRIPTION}) since they're only needed for this optional
+interface, not the core preprocessing pipeline. Install them separately to
+use this function.
 }
 \examples{
 \dontrun{
