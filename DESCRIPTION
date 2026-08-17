@@ -22,8 +22,8 @@ Description: Provides a preprocessing and quality-control pipeline for eye
     sample removal, and can generate diagnostic plots and summary reports
     for individual files or for batches of files organized in a BIDS-like
     directory structure.
-URL: https://github.com/elab-umn/eyeQuality
-BugReports: https://github.com/elab-umn/eyeQuality/issues
+URL: https://github.com/umn-cehd-cnslab/eyeQuality
+BugReports: https://github.com/umn-cehd-cnslab/eyeQuality/issues
 License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
