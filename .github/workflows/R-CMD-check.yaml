@@ -44,13 +44,13 @@ jobs:
             r-base r-base-dev pandoc build-essential gfortran \
             libcurl4-openssl-dev libssl-dev libxml2-dev \
             libfontconfig1-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
-            libuv1-dev
+            libuv1-dev qpdf
           echo "CRAN_MIRROR=https://packagemanager.posit.co/cran/__linux__/noble/latest" >> "$GITHUB_ENV"
 
       - name: Install R and pandoc (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install r pandoc
+          brew install r pandoc qpdf
 
       - name: Install R and pandoc (Windows)
         if: runner.os == 'Windows'
@@ -58,6 +58,7 @@ jobs:
         run: |
           choco install r.project -y --no-progress
           choco install pandoc -y --no-progress
+          choco install qpdf -y --no-progress
           $rDir = Get-ChildItem "C:\Program Files\R" -Directory | Select-Object -First 1
           $rBin = Join-Path $rDir.FullName "bin\x64"
           Add-Content -Path $env:GITHUB_PATH -Value $rBin
