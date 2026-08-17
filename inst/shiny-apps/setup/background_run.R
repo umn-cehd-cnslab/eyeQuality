@@ -8,10 +8,15 @@
 #
 # Scope note (P9-05 vs P9-06): this file provides the actual async execution
 # primitive (start_background_batch()) and a filesystem-based progress poll
-# (poll_batch_progress()), wired into app.R behind a minimal launch button and
-# "N of M files processed" status line. A full live-progress UI (progress bar,
-# ETA, per-file detail table) is P9-06's job, not this one -- the status
-# surface here is deliberately plain text.
+# (poll_batch_progress()), originally wired into app.R behind a minimal
+# launch button and "N of M files processed" status line. P9-06 added the
+# richer display support below (get_failed_file_details(),
+# estimate_remaining_seconds(), format_duration_seconds()) -- still plain
+# functions with no reactives, so they stay callable/testable outside a
+# running Shiny session -- and app.R now renders a progress bar, live counts,
+# an ETA, and per-file failure detail on top of the same polling loop P9-05
+# built. Neither eyeQualityBatch() nor poll_batch_progress()'s own logic
+# changed for this.
 
 # ensure_future_plan: set future::plan(multisession) once for this R process,
 # if it isn't already set to a multisession-family plan. Idempotent so it's
@@ -182,4 +187,82 @@ poll_batch_progress <- function(directoryBIDS, batchName, n_expected, outputDir 
     n_expected = n_expected,
     n_failed = n_failed
   )
+}
+
+# get_failed_file_details: per-file failure detail (filepath + error message)
+# for a run whose batch summary is already parseable -- reads the same
+# summary file poll_batch_progress() locates by convention, via
+# parsePreprocessingBatchSummary(info_to_extract = "failedfiles") (see
+# vignettes/batch-processing.Rmd for the same calling convention against a
+# completed run). Like poll_batch_progress()'s n_failed, this is only
+# meaningful once the batch summary exists and is parseable -- i.e.
+# effectively only after the whole run finishes, since eyeQualityBatch()
+# writes the "failedfiles" section once at the end, not incrementally.
+#
+# Returns a data.frame with "file"/"error" columns (parsePreprocessingBatchSummary()'s
+# own shape for this section), or NULL if the summary file doesn't exist yet
+# or isn't parseable (e.g. called mid-run).
+get_failed_file_details <- function(directoryBIDS, batchName) {
+  summary_file <- file.path(
+    directoryBIDS,
+    paste0("preprocessing_batch_summary_desc-", batchName, ".txt")
+  )
+  if (!file.exists(summary_file)) {
+    return(NULL)
+  }
+  tryCatch(
+    eyeQuality::parsePreprocessingBatchSummary(summary_file, info_to_extract = "failedfiles"),
+    error = function(e) NULL
+  )
+}
+
+# estimate_remaining_seconds: a deliberately simple linear-rate ETA for an
+# in-progress run, extrapolating from wall-clock elapsed time and files
+# completed so far (average per-file rate so far, times files remaining).
+# Every input is real, already-polled data (no fabricated numbers), but the
+# estimate itself is naive -- it doesn't account for per-file duration
+# variance, uneven scheduling across the underlying parallel::parLapply
+# workers, files that are slower/faster than average, etc. With only one or
+# two files done it will be noisy; that's an honest property of the method,
+# not a bug to work around.
+#
+# start_time: a Sys.time()-style POSIXct marking when the run was launched.
+# n_done, n_expected: current poll_batch_progress() counts.
+#
+# Returns NA_real_ (seconds) when no meaningful estimate is available yet --
+# before any file has completed (undefined rate), once nothing remains, or
+# given otherwise-invalid input -- rather than guessing.
+estimate_remaining_seconds <- function(start_time, n_done, n_expected) {
+  if (is.null(start_time) || is.null(n_done) || is.null(n_expected)) {
+    return(NA_real_)
+  }
+  if (is.na(n_done) || is.na(n_expected) || n_done <= 0 || n_done >= n_expected) {
+    return(NA_real_)
+  }
+
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  if (elapsed <= 0) {
+    return(NA_real_)
+  }
+
+  rate <- n_done / elapsed
+  (n_expected - n_done) / rate
+}
+
+# format_duration_seconds: human-readable rendering of estimate_remaining_seconds()'s
+# output, for direct use in the UI. Returns NA_character_ (rather than a
+# formatted string) for NA/negative input, so callers can decide whether to
+# omit the ETA line entirely instead of showing something misleading.
+format_duration_seconds <- function(secs) {
+  if (is.null(secs) || is.na(secs) || secs < 0) {
+    return(NA_character_)
+  }
+  if (secs < 60) {
+    return(sprintf("~%d sec", max(1L, round(secs))))
+  }
+  mins <- secs / 60
+  if (mins < 60) {
+    return(sprintf("~%.1f min", mins))
+  }
+  sprintf("~%.1f hr", mins / 60)
 }

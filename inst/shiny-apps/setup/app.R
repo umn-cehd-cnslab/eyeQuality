@@ -167,7 +167,17 @@ server <- function(input, output, session) {
   # background_run.R's ensure_future_plan() note on session/tab-close
   # lifecycle for why that independence is intentional.
   run_info <- reactiveValues(directory = NULL, batchName = NULL, n_expected = NULL)
-  progress_state <- reactiveValues(status = "not started", n_done = 0L, n_failed = NA_integer_, message = NULL)
+  # start_time: set when the run launches, used only for
+  # estimate_remaining_seconds()'s ETA -- not part of the underlying state
+  # machine poll_batch_progress() drives (status/n_done/n_failed), so it's
+  # tracked separately rather than folded into that polling logic.
+  # failed_detail: per-file failure detail (data.frame or NULL), populated
+  # once poll_batch_progress()'s n_failed becomes known and positive -- see
+  # get_failed_file_details() in background_run.R.
+  progress_state <- reactiveValues(
+    status = "not started", n_done = 0L, n_failed = NA_integer_, message = NULL,
+    start_time = NULL, failed_detail = NULL
+  )
   # Held for the life of the session purely so the promise chain below has a
   # persistent reference to keep it from being garbage-collected before it
   # resolves; not otherwise read.
@@ -203,6 +213,8 @@ server <- function(input, output, session) {
     progress_state$n_done <- 0L
     progress_state$n_failed <- NA_integer_
     progress_state$message <- NULL
+    progress_state$start_time <- Sys.time()
+    progress_state$failed_detail <- NULL
 
     prom <- start_background_batch(
       directoryBIDS = dir,
@@ -216,6 +228,9 @@ server <- function(input, output, session) {
       progress_state$n_failed <- final$n_failed
       progress_state$status <- if (identical(result$status, "ok")) "done" else "failed"
       progress_state$message <- result$message
+      if (!is.na(final$n_failed) && final$n_failed > 0) {
+        progress_state$failed_detail <- get_failed_file_details(run_info$directory, run_info$batchName)
+      }
     })
     # Catches both a rejected future (an error escaping eyeQualityBatch()'s
     # own tryCatch entirely) and any error raised inside the %...>% handler
@@ -244,29 +259,72 @@ server <- function(input, output, session) {
     invalidateLater(2000, session)
   })
 
+  # progress_bar_ui: a plain HTML5 <progress> element plus a percentage
+  # label, shared by both the "running" and "done" states below. A bare
+  # <progress> tag (rather than e.g. shinyWidgets::progressBar()) is
+  # deliberate -- this app has no shinyWidgets dependency already, and
+  # driving progress from poll_batch_progress()'s external polling rather
+  # than a blocking loop rules out shiny::withProgress()/incProgress()
+  # regardless, so a plain reactively-updated element is the simplest option
+  # that actually fits how progress is discovered here.
+  progress_bar_ui <- function(n_done, n_expected) {
+    pct <- if (isTRUE(n_expected > 0)) round(100 * n_done / n_expected) else 0
+    tagList(
+      tags$progress(value = n_done, max = max(n_expected, 1), style = "width: 100%;"),
+      p(sprintf("%d%% complete", pct))
+    )
+  }
+
   output$run_status <- renderUI({
     switch(progress_state$status,
       "not started" = p(em("No batch run started yet.")),
-      "running" = tagList(
-        p(strong(sprintf(
-          "Running: %d of %d files processed", progress_state$n_done, run_info$n_expected
-        ))),
-        if (!is.na(progress_state$n_failed)) p(sprintf("Failed so far: %d", progress_state$n_failed))
-      ),
-      "done" = tagList(
-        p(strong("Batch run complete.")),
-        p(sprintf(
-          "%d of %d files processed (%d failed).",
-          progress_state$n_done,
-          run_info$n_expected,
-          if (is.na(progress_state$n_failed)) 0 else progress_state$n_failed
-        ))
-      ),
+      "running" = {
+        n_remaining <- max(run_info$n_expected - progress_state$n_done, 0)
+        eta_secs <- estimate_remaining_seconds(
+          progress_state$start_time, progress_state$n_done, run_info$n_expected
+        )
+        eta_label <- format_duration_seconds(eta_secs)
+        tagList(
+          p(strong("Batch run in progress...")),
+          progress_bar_ui(progress_state$n_done, run_info$n_expected),
+          p(sprintf(
+            "Processed: %d   Remaining: %d", progress_state$n_done, n_remaining
+          )),
+          if (!is.na(progress_state$n_failed)) p(sprintf("Failed so far: %d", progress_state$n_failed)),
+          if (!is.na(eta_label)) p(sprintf("Estimated time remaining: %s", eta_label))
+        )
+      },
+      "done" = {
+        n_failed <- if (is.na(progress_state$n_failed)) 0L else progress_state$n_failed
+        tagList(
+          p(strong("Batch run complete.")),
+          progress_bar_ui(progress_state$n_done, run_info$n_expected),
+          p(sprintf(
+            "%d of %d files processed (%d failed).",
+            progress_state$n_done, run_info$n_expected, n_failed
+          )),
+          if (n_failed > 0) {
+            tagList(
+              h5("Failed files"),
+              if (is.null(progress_state$failed_detail)) {
+                p(em("Failure count is known, but per-file detail could not be read from the batch summary."))
+              } else {
+                tableOutput("failed_files_table")
+              }
+            )
+          }
+        )
+      },
       "failed" = tagList(
         p(strong("Batch run did not complete successfully.")),
         p(progress_state$message)
       )
     )
+  })
+
+  output$failed_files_table <- renderTable({
+    req(progress_state$failed_detail)
+    progress_state$failed_detail
   })
 }
 
