@@ -75,6 +75,7 @@ ui <- fluidPage(
     mainPanel(
       h4("Dry-run preview"),
       uiOutput("preview_summary"),
+      uiOutput("preview_diagnostics"),
       h5("Sample filenames"),
       verbatimTextOutput("preview_samples"),
       h5("Skipped items"),
@@ -135,6 +136,21 @@ server <- function(input, output, session) {
     tagList(
       p(strong(sprintf("Matched files: %d", result$matched_count))),
       p(strong(sprintf("Skipped items: %d", result$skipped_count)))
+    )
+  })
+
+  # P7-06: when a preview matches zero files, listBidsFiles() attaches a
+  # diagnostics attribute explaining why (e.g. "found N subfolders but none
+  # matched subjectPattern_regex") -- surface it directly, since this app's
+  # UI has no console for a user to read print()/message() output from.
+  output$preview_diagnostics <- renderUI({
+    result <- preview_result()
+    if (is.null(result$diagnostic_message)) {
+      return(NULL)
+    }
+    div(
+      class = "alert alert-warning",
+      strong("Why zero files matched: "), result$diagnostic_message
     )
   })
 

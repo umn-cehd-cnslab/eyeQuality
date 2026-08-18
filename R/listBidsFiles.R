@@ -58,7 +58,12 @@
 #'
 #' @importFrom stringr str_glue
 #'
-#' @return list of raw ET data files to in BIDS-like directory
+#' @return list of raw ET data files to in BIDS-like directory, with
+#'   `attr(result, "skipped")` set to any directories (`"bids"` mode) or
+#'   paths (`"glob"` mode) that were found but excluded, and, when zero files
+#'   were matched, `attr(result, "diagnostics")` set to a list (`hint` plus
+#'   supporting counts) explaining why -- e.g. that subfolders exist but none
+#'   matched `subjectPattern_regex`, versus no subfolders existing at all.
 #' @export
 #'
 listBidsFiles <-
@@ -95,6 +100,13 @@ listBidsFiles <-
     files <- list()
     directories_for_files <- list()
     skipped_dirs <- character(0)
+    # Tracked separately from skipped_dirs (which stays subject- and
+    # session-level skips combined, for attr(result, "skipped")
+    # back-compat) so a zero-match diagnostic below can tell "0 subject
+    # directories matched subjectPattern_regex" apart from "subjects
+    # matched fine, but every session subfolder was skipped" -- these need
+    # different hints (P7-06).
+    n_subject_dirs_matched <- 0L
 
     # Next we find the list the directories to check.
     if (identical(subject_dirs, character(0))) {
@@ -108,9 +120,11 @@ listBidsFiles <-
         if (is.null(subjectPattern_regex)) {
           # if the subjectPattern_regex was specified as NULL
           # we assume that we will go through every subfolder in directory for files
+          n_subject_dirs_matched <- n_subject_dirs_matched + 1L
           directories_for_files <-
             c(directories_for_files, subject_dir)
         } else if (grepl(subjectPattern_regex, subject_dir)) {
+          n_subject_dirs_matched <- n_subject_dirs_matched + 1L
           # if subjectPattern_regex was specified
           # we only check the subfolders that match subjectPattern_regex
 
@@ -189,11 +203,95 @@ listBidsFiles <-
       print("Otherwise specify a modalityPattern_regex with the naming convention for your eyetracking files.")
       print("If you have 'subject_dir/session_dir/additional_directory/data_files.tsv' structure, specify recursiveSearch = TRUE.")
 
+      attr(result, "diagnostics") <- bids_zero_match_diagnostics(
+        directory = directory,
+        subject_dirs = subject_dirs,
+        n_subject_dirs_matched = n_subject_dirs_matched,
+        n_directories_searched = length(directories_for_files),
+        subjectPattern_regex = subjectPattern_regex,
+        sessionPattern_regex = sessionPattern_regex
+      )
+
       return(result)
     } else {
       return(result)
     }
   }
+
+#' bids_zero_match_diagnostics - build a human-actionable explanation for why
+#' `layout = "bids"` matched zero files
+#'
+#' Internal helper for `listBidsFiles()`. Distinguishes the distinct
+#' zero-match scenarios (P7-06) -- no subfolders at all, subfolders present
+#' but none matched `subjectPattern_regex`, subjects matched but no session
+#' subfolder matched `sessionPattern_regex`, or directories were searched but
+#' contained no matching files -- since each needs a different fix, and a
+#' bare "0 files found" is not actionable from a GUI that has no console to
+#' read `print()`/`message()` output from.
+#'
+#' @param directory the directory `listBidsFiles()` was called on
+#' @param subject_dirs full result of `list.dirs(directory, recursive = FALSE)`
+#' @param n_subject_dirs_matched count of `subject_dirs` treated as usable
+#'   subject directories (either `subjectPattern_regex` matched, or it was NULL)
+#' @param n_directories_searched `length(directories_for_files)` -- how many
+#'   directories were actually handed to `list.files()`
+#' @param subjectPattern_regex,sessionPattern_regex as passed to `listBidsFiles()`
+#'
+#' @return a list with `n_subfolders_found`, `n_subfolders_matched`,
+#'   `example_subfolders` (up to 5 basenames), `n_directories_searched`, and
+#'   `hint` (a single human-readable string)
+#' @keywords internal
+#' @noRd
+bids_zero_match_diagnostics <- function(directory,
+                                         subject_dirs,
+                                         n_subject_dirs_matched,
+                                         n_directories_searched,
+                                         subjectPattern_regex,
+                                         sessionPattern_regex) {
+  n_subfolders_found <- length(subject_dirs)
+  example_subfolders <- utils::head(basename(subject_dirs), 5)
+
+  hint <- if (n_subfolders_found == 0) {
+    stringr::str_glue(
+      "No subfolders found directly under '{directory}'; searched it directly ",
+      "for matching files, and found none."
+    )
+  } else if (n_subject_dirs_matched == 0) {
+    stringr::str_glue(
+      "Found {n_subfolders_found} subfolder(s) under '{directory}' (e.g. ",
+      "{paste(example_subfolders, collapse = ', ')}), but none matched ",
+      "subjectPattern_regex ('{subjectPattern_regex}'). If these are wrapper ",
+      "folders (e.g. site/task/audit-status) rather than actual subject ",
+      "folders, your real subject/session folders may be nested further in: ",
+      "try blanking subjectPattern_regex and sessionPattern_regex together ",
+      "with recursiveSearch = TRUE (searches every subfolder at any depth), ",
+      "or switch to layout = 'glob' with a pathPattern like '**/*.tsv'."
+    )
+  } else if (n_directories_searched == 0) {
+    stringr::str_glue(
+      "Found {n_subject_dirs_matched} subject subfolder(s) matching ",
+      "subjectPattern_regex, but none of their session subfolders matched ",
+      "sessionPattern_regex ('{sessionPattern_regex}'). Try blanking ",
+      "sessionPattern_regex or switching to layout = 'glob'."
+    )
+  } else {
+    stringr::str_glue(
+      "Searched {n_directories_searched} director(y/ies) under '{directory}' ",
+      "but found 0 matching files. If files sit in an additional nested ",
+      "subfolder (e.g. a session or visit-date folder), try recursiveSearch ",
+      "= TRUE, or switch to layout = 'glob' with a pathPattern like ",
+      "'**/*.tsv'."
+    )
+  }
+
+  list(
+    n_subfolders_found = n_subfolders_found,
+    n_subfolders_matched = n_subject_dirs_matched,
+    example_subfolders = example_subfolders,
+    n_directories_searched = n_directories_searched,
+    hint = as.character(hint)
+  )
+}
 
 #' listBidsFiles_glob - arbitrary-depth glob/path-template file matching
 #'
@@ -260,9 +358,75 @@ listBidsFiles_glob <- function(directory,
     print("WARNING: No files found. If you expect to have data files in your directory, please check your directory structure.")
     print("Confirm pathPattern matches file(s) at the depth they actually sit under 'directory' (use '**' for arbitrary depth).")
     print("If files were matched but dropped, check excludePattern_regex - dropped paths are reported in attr(result, 'skipped').")
+
+    attr(result, "diagnostics") <- glob_zero_match_diagnostics(
+      directory = directory,
+      pathPattern = pathPattern,
+      all_files_rel = all_files_rel,
+      n_path_matches = sum(path_matches),
+      n_skipped = length(skipped)
+    )
   }
 
   result
+}
+
+#' glob_zero_match_diagnostics - build a human-actionable explanation for why
+#' `layout = "glob"` matched zero files
+#'
+#' Internal helper for `listBidsFiles_glob()`. See `bids_zero_match_diagnostics()`
+#' for the "bids" mode counterpart and the rationale (P7-06).
+#'
+#' @param directory the directory `listBidsFiles()` was called on
+#' @param pathPattern the glob pattern that was applied
+#' @param all_files_rel every file found anywhere under `directory`
+#'   (`list.files(directory, recursive = TRUE)`), before `pathPattern` filtering
+#' @param n_path_matches how many of `all_files_rel` matched `pathPattern`
+#'   (before `modalityPattern_regex`/`excludePattern_regex` filtering)
+#' @param n_skipped how many `pathPattern` matches were dropped by
+#'   `excludePattern_regex`
+#'
+#' @return a list with `n_files_scanned`, `n_path_pattern_matches`,
+#'   `example_files_found` (up to 5 relative paths), and `hint`
+#' @keywords internal
+#' @noRd
+glob_zero_match_diagnostics <- function(directory,
+                                         pathPattern,
+                                         all_files_rel,
+                                         n_path_matches,
+                                         n_skipped) {
+  n_files_scanned <- length(all_files_rel)
+  example_files <- utils::head(all_files_rel, 5)
+
+  hint <- if (n_files_scanned == 0) {
+    stringr::str_glue(
+      "No files at all were found under '{directory}' (searched recursively)."
+    )
+  } else if (n_path_matches == 0) {
+    stringr::str_glue(
+      "Found {n_files_scanned} file(s) under '{directory}' (e.g. ",
+      "{paste(example_files, collapse = ', ')}), but none matched pathPattern ",
+      "('{pathPattern}'). Check the depth ('*' is one directory level, '**' is ",
+      "any depth) and file extension in the pattern."
+    )
+  } else if (n_skipped == n_path_matches) {
+    stringr::str_glue(
+      "pathPattern matched {n_path_matches} file(s), but excludePattern_regex ",
+      "dropped all of them -- see attr(result, 'skipped') for what was excluded."
+    )
+  } else {
+    stringr::str_glue(
+      "pathPattern matched {n_path_matches} file(s), but modalityPattern_regex ",
+      "excluded all of them."
+    )
+  }
+
+  list(
+    n_files_scanned = n_files_scanned,
+    n_path_pattern_matches = n_path_matches,
+    example_files_found = example_files,
+    hint = as.character(hint)
+  )
 }
 
 #' globToRegex - translate a restricted glob syntax to a POSIX/PCRE regex

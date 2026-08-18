@@ -59,7 +59,12 @@ or where a centralized output directory happens to sit inside
 \item{...}{additional parameters that may get passed from wrapper functions}
 }
 \value{
-list of raw ET data files to in BIDS-like directory
+list of raw ET data files to in BIDS-like directory, with
+\code{attr(result, "skipped")} set to any directories (\code{"bids"} mode) or
+paths (\code{"glob"} mode) that were found but excluded, and, when zero files
+were matched, \code{attr(result, "diagnostics")} set to a list (\code{hint} plus
+supporting counts) explaining why -- e.g. that subfolders exist but none
+matched \code{subjectPattern_regex}, versus no subfolders existing at all.
 }
 \description{
 listBidsFiles - get list of all ET like files.

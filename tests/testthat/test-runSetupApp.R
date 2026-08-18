@@ -134,3 +134,73 @@ test_that("build_dry_run_preview rejects an unrecognized layout value", {
     "layout"
   )
 })
+
+# P7-06: manual QA against real (non-BIDS-named) nested study data found
+# build_dry_run_preview() silently ignoring an explicit
+# subjectPattern_regex/sessionPattern_regex = NULL (the app's own encoding
+# of a blanked text field, per its "blank = every subfolder" hint) and
+# falling back to listBidsFiles()'s built-in "sub-XX"/"ses-XX" defaults
+# instead. Root cause: the args list passed to listBidsFiles() via do.call()
+# was assembled incrementally with `args$name <- value`, and assigning NULL
+# that way removes the list element rather than setting it to NULL, so
+# do.call() never saw an explicit NULL to override listBidsFiles()'s own
+# default argument value with.
+
+build_non_bids_scratch_tree <- function() {
+  root <- tempfile("p706_non_bids_scratch_")
+  # non-BIDS subject naming (plain numeric/alphanumeric IDs), reproducing a
+  # real-world nested study directory (dataset/site/task/audit-status/
+  # subject) that doesn't fit the "sub-XX" convention
+  dir.create(file.path(root, "1001"), recursive = TRUE)
+  dir.create(file.path(root, "IBIS2002"), recursive = TRUE)
+  file.create(file.path(root, "1001", "1001_et.tsv"))
+  file.create(file.path(root, "IBIS2002", "IBIS2002_et.tsv"))
+  root
+}
+
+test_that("build_dry_run_preview bids mode with default subjectPattern_regex matches nothing against non-BIDS subject folder names", {
+  root <- build_non_bids_scratch_tree()
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+
+  out <- capture.output(result <- build_dry_run_preview(directory = root, layout = "bids"))
+
+  expect_equal(result$matched_count, 0)
+  expect_false(is.null(result$diagnostic_message))
+  expect_match(result$diagnostic_message, "subjectPattern_regex", fixed = TRUE)
+})
+
+test_that("build_dry_run_preview bids mode with subjectPattern_regex = NULL actually searches every subfolder (regression: NULL was previously dropped, not passed through)", {
+  root <- build_non_bids_scratch_tree()
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+
+  result <- build_dry_run_preview(
+    directory = root,
+    layout = "bids",
+    subjectPattern_regex = NULL,
+    sessionPattern_regex = NULL
+  )
+
+  expect_equal(result$matched_count, 2)
+  expect_setequal(basename(result$matched_files), c("1001_et.tsv", "IBIS2002_et.tsv"))
+  expect_null(result$diagnostic_message)
+})
+
+test_that("build_dry_run_preview glob mode finds the same non-BIDS-named files without needing subjectPattern_regex at all", {
+  root <- build_non_bids_scratch_tree()
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+
+  result <- build_dry_run_preview(directory = root, layout = "glob", pathPattern = "**/*.tsv")
+
+  expect_equal(result$matched_count, 2)
+  expect_null(result$diagnostic_message)
+})
+
+test_that("build_dry_run_preview's diagnostic_message is NULL whenever at least one file matches", {
+  result <- build_dry_run_preview(
+    directory = testthat::test_path("fixtures", "bids"),
+    layout = "bids"
+  )
+
+  expect_gt(result$matched_count, 0)
+  expect_null(result$diagnostic_message)
+})

@@ -323,6 +323,216 @@ test_that("listBidsFiles with layout = 'glob' treats regex metacharacters in pat
   expect_equal(normalizePath(result_paren), normalizePath(paren_file))
 })
 
+# P7-06: zero-match calls in either layout mode attach a richer
+# attr(result, "diagnostics") list (n_* counts, example names, and a
+# human-readable "hint" string) so a caller with no console to read the
+# print()/message() diagnostics from (e.g. a Shiny app) can still explain
+# *why* nothing matched. Only attached when the result is empty, so it's
+# purely additive and doesn't change attr(result, "skipped") or the shape of
+# a successful, non-empty result (see the "shape is unaffected" test above).
+
+test_that("listBidsFiles bids mode attaches diagnostics when subfolders exist but none match subjectPattern_regex", {
+  base_dir <- tempfile("p706_diag_subject_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  # non-BIDS subject folder naming (plain numeric IDs), reproducing the
+  # real-world report this diagnostic exists for
+  for (id in c("1001", "1002")) {
+    d <- file.path(base_dir, id)
+    dir.create(d)
+    file.create(file.path(d, paste0(id, "_et.tsv")))
+  }
+
+  out <- capture.output(result <- listBidsFiles(base_dir))
+  diag <- attr(result, "diagnostics")
+
+  expect_length(result, 0)
+  expect_false(is.null(diag))
+  expect_equal(diag$n_subfolders_found, 2)
+  expect_equal(diag$n_subfolders_matched, 0)
+  expect_setequal(diag$example_subfolders, c("1001", "1002"))
+  expect_match(diag$hint, "subjectPattern_regex", fixed = TRUE)
+  expect_match(diag$hint, "recursiveSearch", fixed = TRUE)
+  expect_match(diag$hint, "glob", fixed = TRUE)
+})
+
+# P7-06 follow-up: manual QA against real IBIS-EP data clarified that its
+# subject folders ARE properly BIDS-named ("sub-XX/ses-XX") -- the real
+# structure is one or more separate BIDS roots (each e.g.
+# <site>/<task>/AUDIT_PASSED/sub-XX/ses-XX/...) nested underneath
+# non-BIDS-named wrapper folders (dataset/site/task/audit-status). Pointed
+# directly at a single site's BIDS root, "bids" mode's defaults already work
+# with zero configuration (no bug there). Pointed at the wrapper root
+# spanning multiple sites, "bids" mode's fixed subject/session depth cannot
+# see the deeply-nested "sub-XX" folders directly -- these tests confirm the
+# two documented workarounds (blank patterns + recursiveSearch = TRUE, and
+# layout = "glob" with a "**" pathPattern) both correctly reach files at
+# arbitrary depth through those wrapper folders.
+
+build_nested_bids_roots_tree <- function() {
+  root <- tempfile("p706_nested_bids_roots_")
+  sites <- list(c("Texas", "02_Dancing_Ladies"), c("Missouri", "05_Singing_Birds"))
+  for (site in sites) {
+    audit_dir <- file.path(root, "IBIS-EP_DATA", site[1], site[2], "AUDIT_PASSED")
+    for (sub in c("sub-01", "sub-02")) {
+      session_dir <- file.path(audit_dir, sub, "ses-01")
+      dir.create(session_dir, recursive = TRUE)
+      file.create(file.path(session_dir, paste0(sub, "_ses-01_et.tsv")))
+    }
+  }
+  root
+}
+
+test_that("listBidsFiles bids mode with defaults works with zero configuration when pointed directly at a single properly-BIDS-named root", {
+  root <- build_nested_bids_roots_tree()
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  single_site_root <- file.path(root, "IBIS-EP_DATA", "Texas", "02_Dancing_Ladies", "AUDIT_PASSED")
+
+  result <- listBidsFiles(single_site_root)
+
+  expect_length(result, 2)
+  expect_null(attr(result, "diagnostics"))
+})
+
+test_that("listBidsFiles bids mode with blank patterns + recursiveSearch = TRUE finds BIDS-named files nested under multiple non-BIDS wrapper levels", {
+  root <- build_nested_bids_roots_tree()
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  multi_site_root <- file.path(root, "IBIS-EP_DATA")
+
+  # blank patterns alone are not enough at this depth (only one wrapper
+  # level -- the site folder -- gets searched, non-recursively)
+  result_no_recursive <- listBidsFiles(
+    multi_site_root,
+    subjectPattern_regex = NULL,
+    sessionPattern_regex = NULL,
+    recursiveSearch = FALSE
+  )
+  expect_length(result_no_recursive, 0)
+
+  result_recursive <- listBidsFiles(
+    multi_site_root,
+    subjectPattern_regex = NULL,
+    sessionPattern_regex = NULL,
+    recursiveSearch = TRUE
+  )
+  expect_length(result_recursive, 4)
+})
+
+test_that("listBidsFiles layout = 'glob' with a '**' pathPattern finds BIDS-named files nested under multiple non-BIDS wrapper levels", {
+  root <- build_nested_bids_roots_tree()
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+  multi_site_root <- file.path(root, "IBIS-EP_DATA")
+
+  result <- listBidsFiles(multi_site_root, layout = "glob", pathPattern = "**/*.tsv")
+
+  expect_length(result, 4)
+})
+
+test_that("listBidsFiles bids mode attaches diagnostics when a subject matches but no session subfolder matches sessionPattern_regex", {
+  base_dir <- tempfile("p706_diag_session_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  visit_dir <- file.path(base_dir, "sub-01", "2024-01-15_visit")
+  dir.create(visit_dir, recursive = TRUE)
+  file.create(file.path(visit_dir, "sub-01_et.tsv"))
+
+  out <- capture.output(result <- listBidsFiles(base_dir))
+  diag <- attr(result, "diagnostics")
+
+  expect_length(result, 0)
+  expect_equal(diag$n_subfolders_found, 1)
+  expect_equal(diag$n_subfolders_matched, 1)
+  expect_equal(diag$n_directories_searched, 0)
+  expect_match(diag$hint, "sessionPattern_regex", fixed = TRUE)
+})
+
+test_that("listBidsFiles bids mode attaches diagnostics when subject/session dirs are searched but contain no matching files", {
+  base_dir <- tempfile("p706_diag_recursive_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  # subject and session dirs match, but the file sits one level deeper
+  # (needs recursiveSearch = TRUE or layout = "glob" to find it)
+  nested_dir <- file.path(base_dir, "sub-01", "ses-01", "extra")
+  dir.create(nested_dir, recursive = TRUE)
+  file.create(file.path(nested_dir, "sub-01_ses-01_et.tsv"))
+
+  out <- capture.output(result <- listBidsFiles(base_dir))
+  diag <- attr(result, "diagnostics")
+
+  expect_length(result, 0)
+  expect_equal(diag$n_subfolders_found, 1)
+  expect_equal(diag$n_subfolders_matched, 1)
+  expect_equal(diag$n_directories_searched, 1)
+  expect_match(diag$hint, "recursiveSearch", fixed = TRUE)
+})
+
+test_that("listBidsFiles bids mode attaches diagnostics when there are no subfolders at all", {
+  base_dir <- tempfile("p706_diag_flat_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  out <- capture.output(result <- listBidsFiles(base_dir))
+  diag <- attr(result, "diagnostics")
+
+  expect_length(result, 0)
+  expect_equal(diag$n_subfolders_found, 0)
+  expect_match(diag$hint, "No subfolders found", fixed = TRUE)
+})
+
+test_that("listBidsFiles bids mode does not attach diagnostics when files are matched", {
+  base_dir <- tempfile("p706_diag_success_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+  dir.create(file.path(base_dir, "sub-01", "ses-01"), recursive = TRUE)
+  file.create(file.path(base_dir, "sub-01", "ses-01", "sub-01_ses-01_et.tsv"))
+
+  result <- listBidsFiles(base_dir)
+
+  expect_length(result, 1)
+  expect_null(attr(result, "diagnostics"))
+})
+
+test_that("listBidsFiles glob mode attaches diagnostics when pathPattern matches nothing", {
+  base_dir <- tempfile("p706_diag_glob_nomatch_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+  file.create(file.path(base_dir, "data.csv"))
+
+  out <- capture.output(
+    result <- listBidsFiles(base_dir, layout = "glob", pathPattern = "*.tsv")
+  )
+  diag <- attr(result, "diagnostics")
+
+  expect_length(result, 0)
+  expect_equal(diag$n_files_scanned, 1)
+  expect_equal(diag$n_path_pattern_matches, 0)
+  expect_match(diag$hint, "pathPattern", fixed = TRUE)
+})
+
+test_that("listBidsFiles glob mode attaches diagnostics when pathPattern matches but excludePattern_regex drops everything", {
+  base_dir <- tempfile("p706_diag_glob_excluded_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+  file.create(file.path(base_dir, "data.tsv"))
+
+  out <- capture.output(
+    result <- listBidsFiles(
+      base_dir,
+      layout = "glob",
+      pathPattern = "*.tsv",
+      excludePattern_regex = "."
+    )
+  )
+  diag <- attr(result, "diagnostics")
+
+  expect_length(result, 0)
+  expect_equal(diag$n_path_pattern_matches, 1)
+  expect_match(diag$hint, "excludePattern_regex", fixed = TRUE)
+})
+
 test_that("globToRegex() escapes regex metacharacters while preserving glob wildcard semantics", {
   # literal "." is escaped, so it only matches a literal dot, not any character
   regex_dot <- eyeQuality:::globToRegex("data.tsv")
