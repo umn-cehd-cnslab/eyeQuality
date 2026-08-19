@@ -1269,3 +1269,188 @@ test_that("Cross-app round trip: Setup app saves a config, Analyze app loads/twe
     expect_equal(extra$qcThresholds$valid_pct, 90)
   })
 })
+
+# ---------------------------------------------------------------------------
+# P10-04: build_qc_comparison_plot() / build_qc_comparison_table()
+# ---------------------------------------------------------------------------
+#
+# Small hand-built long-format tables throughout (recording/batch_name/
+# source_file/qc_metric/percent[/qc_flag]) rather than a real qcsummary
+# table -- both functions only ever read those columns (see helpers.R), and
+# a synthetic table lets deliberately chosen values cross/not cross
+# thresholds and exercise both thresholdable and non-thresholdable metrics,
+# which real batch/eyeQuality() fixture output (uniformly 100% valid/0%
+# interpolated) can't do.
+
+# comparison_test_table: builds a synthetic table_flagged-shaped data.frame
+# for n recordings, all reporting the same qc_metric. qc_flags defaults to
+# all-FALSE (the correct compute_qc_flags() output for a non-thresholdable
+# metric, or a thresholdable metric whose values don't cross), matching this
+# file's qc_flags_test_table() convention above.
+comparison_test_table <- function(metric, percent, qc_flags = NULL) {
+  n <- length(percent)
+  if (is.null(qc_flags)) {
+    qc_flags <- rep(FALSE, n)
+  }
+  data.frame(
+    recording = paste0("rec-", seq_len(n)),
+    batch_name = "test_batch",
+    source_file = paste0("/data/rec-", seq_len(n), "_qcsummary.tsv"),
+    qc_metric = metric,
+    percent = percent,
+    qc_flag = qc_flags,
+    stringsAsFactors = FALSE
+  )
+}
+
+# find_hline_layer: returns the first geom_hline() ggplot2 layer in `plot`,
+# or NULL if none is present -- geom_hline(yintercept = ...)'s value is
+# stored on the layer's own `data` slot (a 1-row data.frame with a
+# yintercept column), not as a mapped aesthetic, confirmed directly against
+# ggplot2's own layer construction behavior rather than assumed.
+find_hline_layer <- function(plot) {
+  for (l in plot$layers) {
+    if (inherits(l$geom, "GeomHline")) {
+      return(l)
+    }
+  }
+  NULL
+}
+
+test_that("build_qc_comparison_plot returns a ggplot object with one bar row per matching recording", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5, 0.7))
+  plot <- build_qc_comparison_plot(tbl, "valid_raw_data", default_qc_thresholds())
+
+  expect_s3_class(plot, "ggplot")
+  expect_equal(nrow(plot$data), 3)
+})
+
+test_that("build_qc_comparison_plot colors bars Flagged/OK matching table_flagged's own qc_flag column for a thresholdable metric", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5, 0.7), qc_flags = c(FALSE, TRUE, FALSE))
+  plot <- build_qc_comparison_plot(tbl, "valid_raw_data", default_qc_thresholds())
+
+  expect_equal(
+    as.character(plot$data$comparison_status),
+    c("OK", "Flagged", "OK")
+  )
+})
+
+test_that("build_qc_comparison_plot marks a metric with no configured threshold as 'No threshold configured' regardless of qc_flag", {
+  # blinks_BothEyes is not in qc_threshold_config (see helpers.R's own
+  # comment on which 3 metrics are thresholdable) -- compute_qc_flags()
+  # never sets qc_flag TRUE for it, but this pins down that even if qc_flag
+  # were somehow TRUE here, the plot still reports the distinct third status
+  # rather than miscategorizing it as "OK".
+  tbl <- comparison_test_table("blinks_BothEyes", c(0.1, 0.9), qc_flags = c(FALSE, TRUE))
+  plot <- build_qc_comparison_plot(tbl, "blinks_BothEyes", default_qc_thresholds())
+
+  expect_equal(
+    as.character(plot$data$comparison_status),
+    c("No threshold configured", "No threshold configured")
+  )
+})
+
+test_that("build_qc_comparison_plot draws a dashed threshold reference line at the configured threshold's live value", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  thresholds <- default_qc_thresholds()
+  thresholds$valid_pct <- 0.65
+
+  plot <- build_qc_comparison_plot(tbl, "valid_raw_data", thresholds)
+  hline <- find_hline_layer(plot)
+
+  expect_false(is.null(hline))
+  expect_equal(hline$data$yintercept, 0.65)
+})
+
+test_that("build_qc_comparison_plot omits the threshold reference line for a metric with no configured threshold", {
+  tbl <- comparison_test_table("blinks_BothEyes", c(0.1, 0.9))
+  plot <- build_qc_comparison_plot(tbl, "blinks_BothEyes", default_qc_thresholds())
+
+  expect_true(is.null(find_hline_layer(plot)))
+})
+
+test_that("build_qc_comparison_plot omits the threshold reference line when the configured threshold's value is NA", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  thresholds <- default_qc_thresholds()
+  thresholds$valid_pct <- NA
+
+  plot <- build_qc_comparison_plot(tbl, "valid_raw_data", thresholds)
+
+  expect_true(is.null(find_hline_layer(plot)))
+})
+
+test_that("build_qc_comparison_plot returns NULL when the metric has no matching rows in the table", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  plot <- build_qc_comparison_plot(tbl, "some_metric_not_in_table", default_qc_thresholds())
+
+  expect_null(plot)
+})
+
+test_that("build_qc_comparison_plot returns NULL for a NULL table, NULL metric, or empty-string metric, rather than erroring", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  thresholds <- default_qc_thresholds()
+
+  expect_null(build_qc_comparison_plot(NULL, "valid_raw_data", thresholds))
+  expect_null(build_qc_comparison_plot(tbl, NULL, thresholds))
+  expect_null(build_qc_comparison_plot(tbl, "", thresholds))
+})
+
+test_that("build_qc_comparison_table pivots a long qcsummary table wide, one row per file and one column per selected metric, with correct values", {
+  long_tbl <- rbind(
+    comparison_test_table("valid_raw_data", c(0.9, 0.5)),
+    comparison_test_table("robustness_proportion_valid_data_to_all_data", c(0.95, 0.55))
+  )
+  # rows above were built independently, so give them matching recording ids
+  # across the two metrics the way a real combined table would
+  long_tbl$recording <- rep(c("rec-1", "rec-2"), 2)
+  long_tbl$source_file <- rep(c("/data/rec-1_qcsummary.tsv", "/data/rec-2_qcsummary.tsv"), 2)
+
+  result <- build_qc_comparison_table(
+    long_tbl,
+    c("valid_raw_data", "robustness_proportion_valid_data_to_all_data")
+  )
+
+  expect_equal(nrow(result), 2)
+  expect_setequal(
+    colnames(result),
+    c("recording", "batch_name", "source_file", "valid_raw_data", "robustness_proportion_valid_data_to_all_data")
+  )
+
+  by_recording <- setNames(seq_len(nrow(result)), result$recording)
+  expect_equal(result$valid_raw_data[by_recording[["rec-1"]]], 0.9)
+  expect_equal(result$valid_raw_data[by_recording[["rec-2"]]], 0.5)
+  expect_equal(result$robustness_proportion_valid_data_to_all_data[by_recording[["rec-1"]]], 0.95)
+  expect_equal(result$robustness_proportion_valid_data_to_all_data[by_recording[["rec-2"]]], 0.55)
+})
+
+test_that("build_qc_comparison_table returns NULL for an empty metric selection", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  expect_null(build_qc_comparison_table(tbl, character(0)))
+})
+
+test_that("build_qc_comparison_table returns NULL for a NULL or 0-row input table", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  expect_null(build_qc_comparison_table(NULL, "valid_raw_data"))
+  expect_null(build_qc_comparison_table(tbl[0, ], "valid_raw_data"))
+})
+
+test_that("build_qc_comparison_table returns NULL when none of the selected metrics have any matching rows", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  expect_null(build_qc_comparison_table(tbl, "some_metric_not_in_table"))
+})
+
+test_that("build_qc_comparison_table keeps only the first value for a duplicate recording/qc_metric combination rather than nesting a list-column", {
+  dup_tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.9))
+  # id_cols for pivot_wider() is recording/batch_name/source_file together --
+  # all three must match for this to be a genuine duplicate id/metric
+  # combination, not just a same-named recording from two distinct files.
+  dup_tbl$recording <- c("rec-1", "rec-1")
+  dup_tbl$source_file <- c("/data/rec-1_qcsummary.tsv", "/data/rec-1_qcsummary.tsv")
+  dup_tbl$percent <- c(0.9, 0.3) # two different values reported for the same recording/metric
+
+  result <- build_qc_comparison_table(dup_tbl, "valid_raw_data")
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$valid_raw_data, 0.9)
+  expect_type(result$valid_raw_data, "double")
+})

@@ -126,6 +126,36 @@ ui <- fluidPage(
             h4("Smoothed gaze position timecourse"),
             plotOutput("plot_gaze_timecourse", height = "350px")
           )
+        ),
+        # P10-04: cross-file comparison, distinct from the two views above --
+        # "QC table" is one row per metric per file (every file, every
+        # metric, at once) and "Plots" is every channel for one file at a
+        # time; this tab is one metric (or a handful) across every file at
+        # once, for spotting outlier files without scanning the long table
+        # row by row.
+        tabPanel(
+          "Compare files",
+          br(),
+          p(
+            "Compare how loaded files stack up against each other on a chosen QC metric, ",
+            "using the same thresholds configured in the sidebar."
+          ),
+          uiOutput("compare_status_ui"),
+          h4("Metric across files"),
+          selectInput("compare_metric_plot", "QC metric", choices = character(0)),
+          plotOutput("compare_plot", height = "500px"),
+          hr(),
+          h4("Side-by-side comparison table"),
+          p(
+            class = "text-muted",
+            "One row per file, one column per selected metric. Cells are highlighted the same way ",
+            "as the QC table tab for any metric with a configured threshold."
+          ),
+          selectizeInput(
+            "compare_metrics_table", "QC metrics to include",
+            choices = character(0), multiple = TRUE
+          ),
+          DTOutput("compare_table")
         )
       )
     )
@@ -374,6 +404,125 @@ server <- function(input, output, session) {
     result <- plot_result()
     req(result, result$ok)
     result$plots[[3]]
+  })
+
+  # --- P10-04: cross-file QC metric comparison view ---
+  #
+  # compare_metric_choices: every distinct qc_metric value in the currently
+  # loaded table, sorted -- the full set a user could plot/compare, not just
+  # the 3 thresholdable ones (qc_threshold_config), since a reviewer may
+  # still want to eyeball a descriptive metric (e.g. blink rate) across files
+  # even though this app takes no pass/fail position on it (see
+  # qc_threshold_config's own comment on why only 3 metrics are
+  # thresholdable). Empty (not NULL) before any data is loaded, so the
+  # selectInput/selectizeInput below always get a well-typed `choices`
+  # argument.
+  compare_metric_choices <- reactive({
+    tbl <- load_result()$table
+    if (is.null(tbl) || !"qc_metric" %in% names(tbl)) {
+      return(character(0))
+    }
+    sort(unique(tbl$qc_metric))
+  })
+
+  # Repopulates both the single-metric plot selector and the multi-metric
+  # table selector on every (re)load, defaulting to the configured,
+  # thresholdable metrics (qc_threshold_config) when present -- those are the
+  # ones this app already has an opinion on, so they're the most useful
+  # starting point -- and falling back to whatever's first alphabetically
+  # otherwise. Runs on every load_result() change (not just the first), so a
+  # directory reload with a different set of files resets these choices
+  # rather than leaving a stale selection from the previous load in place.
+  observeEvent(load_result(), {
+    choices <- compare_metric_choices()
+    if (length(choices) == 0) {
+      updateSelectInput(session, "compare_metric_plot", choices = character(0))
+      updateSelectizeInput(session, "compare_metrics_table", choices = character(0), selected = character(0))
+      return()
+    }
+
+    configured <- unique(qc_threshold_config$qc_metric[qc_threshold_config$qc_metric %in% choices])
+
+    default_plot_metric <- if (length(configured) > 0) configured[1] else choices[1]
+    updateSelectInput(session, "compare_metric_plot", choices = choices, selected = default_plot_metric)
+
+    default_table_metrics <- if (length(configured) > 0) configured else choices[1]
+    updateSelectizeInput(
+      session, "compare_metrics_table",
+      choices = choices, selected = default_table_metrics
+    )
+  })
+
+  output$compare_status_ui <- renderUI({
+    if (length(compare_metric_choices()) == 0) {
+      return(div(class = "alert alert-info", "Load qcsummary files first to compare metrics across files."))
+    }
+    NULL
+  })
+
+  # build_qc_comparison_plot() (helpers.R) is handed qc_table_flagged() --
+  # not load_result()$table directly -- so this plot's bar coloring always
+  # matches the QC table tab's own row highlighting for the same metric
+  # (both trace back to the same compute_qc_flags() call), rather than this
+  # view recomputing pass/fail independently and risking drift from P10-02's
+  # flagging.
+  output$compare_plot <- renderPlot({
+    metric <- input$compare_metric_plot
+    req(metric, nzchar(metric))
+    tbl <- qc_table_flagged()
+    req(tbl)
+    plot <- build_qc_comparison_plot(tbl, metric, qc_thresholds())
+    req(plot)
+    plot
+  })
+
+  # Wide comparison table: one row per file, one column per selected metric.
+  # Built from load_result()$table (not qc_table_flagged()) since qc_flag is
+  # a per-row (per metric-per-file), not per-column, concept -- once
+  # pivoted wide there's no single qc_flag value per file to carry over.
+  # Threshold crossing is instead shown per output *column* below via
+  # DT::formatStyle(), reusing qc_threshold_config's own direction/threshold
+  # definitions directly (the same source of truth compute_qc_flags() reads)
+  # rather than a second flagging mechanism.
+  output$compare_table <- renderDT({
+    metrics <- input$compare_metrics_table
+    validate(need(length(metrics) > 0, "Select at least one QC metric above."))
+    tbl <- build_qc_comparison_table(load_result()$table, metrics)
+    validate(need(!is.null(tbl), "No data available for the selected metric(s)."))
+
+    thresholds <- qc_thresholds()
+    dt <- DT::datatable(
+      tbl,
+      rownames = FALSE,
+      filter = "top",
+      options = list(pageLength = 25, scrollX = TRUE)
+    )
+
+    # One formatStyle() call per configured metric that made it into this
+    # table's columns -- styleInterval()'s two-color order depends on
+    # direction, matching compute_qc_flags()'s own min/max semantics: "min"
+    # (higher is better) flags below the threshold, so the low-value color
+    # comes first; "max" (lower is better) flags above it, so the high-value
+    # color comes second.
+    for (i in seq_len(nrow(qc_threshold_config))) {
+      cfg <- qc_threshold_config[i, ]
+      if (!(cfg$qc_metric %in% names(tbl))) {
+        next
+      }
+      threshold_value <- thresholds[[cfg$threshold_id]]
+      if (is.null(threshold_value) || is.na(threshold_value)) {
+        next
+      }
+      colors <- if (identical(cfg$direction, "min")) {
+        c("#fbe3e4", "white")
+      } else {
+        c("white", "#fbe3e4")
+      }
+      dt <- dt %>% DT::formatStyle(cfg$qc_metric, backgroundColor = DT::styleInterval(threshold_value, colors))
+    }
+
+    metric_cols <- setdiff(names(tbl), c("recording", "batch_name", "source_file"))
+    dt %>% DT::formatPercentage(metric_cols, 1)
   })
 
   # --- P10-07: save/load QC thresholds via the shared batch_config.yaml ---

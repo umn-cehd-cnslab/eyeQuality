@@ -608,3 +608,166 @@ filter_recognized_qc_thresholds <- function(qcThresholds) {
     dropped = entry_names[!keep_flags]
   )
 }
+
+# ---------------------------------------------------------------------------
+# P10-04: cross-file QC metric comparison view
+# ---------------------------------------------------------------------------
+#
+# P10-03's row-click plot view answers "what does this one file's data look
+# like", and the QC table itself (P10-01/P10-02) is already sortable/
+# filterable/flagged, but neither makes it easy to eyeball how one qc_metric
+# stacks up *across* every loaded file at a glance, or to line several
+# metrics up side by side per file. The two helpers below back a new
+# "Compare files" tab in app.R that does exactly that: a per-metric bar chart
+# across recordings (build_qc_comparison_plot()), and a wide, one-row-per-
+# file comparison table for a chosen set of metrics (build_qc_comparison_table()).
+#
+# Both are read-only views over the same qc_threshold_config/compute_qc_flags()
+# machinery P10-02 already built -- neither reimplements threshold direction
+# logic; build_qc_comparison_plot() in particular is deliberately handed the
+# already-flagged table (qc_table_flagged() in app.R) rather than recomputing
+# pass/fail itself, so this view can never drift from the QC table's own
+# flagging.
+
+# build_qc_comparison_plot: a horizontal bar chart of one qc_metric's value
+# across every loaded recording, for spotting outlier files at a glance
+# (rather than scanning the long QC table row by row). Reuses ggplot2 (already
+# a package Import, and already the plotting library
+# generateEyeTrackingPlots() depends on -- see R/generateEyeTrackingPlots.R)
+# rather than introducing a new plotting dependency for this one view.
+#
+# table_flagged: the combined qcsummary table with a "qc_flag" column already
+#   attached (app.R's qc_table_flagged() reactive, i.e. load_result()$table
+#   run through compute_qc_flags()) -- reused directly here so bar coloring
+#   always matches the QC table's own row highlighting for the same metric,
+#   rather than this function re-deriving pass/fail itself.
+# metric: a single qc_metric value to plot (one of table_flagged$qc_metric).
+# thresholds: the current threshold values (app.R's qc_thresholds() reactive,
+#   0-1 fractions keyed by threshold_id) -- used only to position the dashed
+#   reference line at the metric's live threshold, when one is configured;
+#   the bar coloring itself comes from table_flagged$qc_flag, not from
+#   recomputing against `thresholds` here.
+#
+# Returns a ggplot object, or NULL if `metric` has no rows in table_flagged
+# (e.g. a stale selection left over from a previous, since-reloaded table).
+build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
+  if (is.null(table_flagged) || is.null(metric) || !nzchar(metric)) {
+    return(NULL)
+  }
+  rows <- table_flagged[table_flagged$qc_metric == metric, , drop = FALSE]
+  if (nrow(rows) == 0) {
+    return(NULL)
+  }
+
+  cfg_row <- qc_threshold_config[qc_threshold_config$qc_metric == metric, , drop = FALSE]
+  has_threshold <- nrow(cfg_row) == 1
+
+  # Status is read straight off table_flagged's own qc_flag column (see
+  # header comment above) for any metric that has a configured threshold; a
+  # metric with no configured threshold (most of calculateOutputMetrics()'s
+  # ~32 rows -- see qc_threshold_config's own comment on why only 3 are
+  # thresholdable) gets a distinct third status rather than being
+  # miscategorized as "OK", since compute_qc_flags() never sets qc_flag TRUE
+  # for an unconfigured metric.
+  rows$comparison_status <- if (has_threshold) {
+    ifelse(rows$qc_flag, "Flagged", "OK")
+  } else {
+    "No threshold configured"
+  }
+  rows$comparison_status <- factor(
+    rows$comparison_status,
+    levels = c("Flagged", "OK", "No threshold configured")
+  )
+
+  # Sorted (not left in table row order) so outlier files land visibly at
+  # either end of the chart rather than scattered through an arbitrary
+  # file-discovery order -- coord_flip() below then reads the sorted axis
+  # top-to-bottom, with recording labels legible instead of overlapping
+  # x-axis text.
+  plot <- ggplot2::ggplot(
+    rows,
+    ggplot2::aes(
+      x = stats::reorder(recording, percent),
+      y = percent,
+      fill = comparison_status
+    )
+  ) +
+    ggplot2::geom_col() +
+    ggplot2::coord_flip() +
+    ggplot2::scale_fill_manual(
+      values = c(
+        "Flagged" = "#c0392b",
+        "OK" = "#27ae60",
+        "No threshold configured" = "#7f8c8d"
+      ),
+      drop = FALSE
+    ) +
+    # percent's underlying values are 0-1 fractions (see
+    # calculateOutputMetrics.R), not already scaled to 0-100 -- labeled as a
+    # percentage here purely for axis display, matching the numericInput
+    # thresholds' own 0-100 unit.
+    ggplot2::scale_y_continuous(labels = function(x) paste0(round(x * 100), "%")) +
+    ggplot2::labs(
+      x = NULL,
+      y = metric,
+      fill = "QC status",
+      title = paste("Across-file comparison:", metric)
+    ) +
+    ggplot2::theme_minimal()
+
+  if (has_threshold) {
+    threshold_value <- thresholds[[cfg_row$threshold_id[1]]]
+    if (!is.null(threshold_value) && !is.na(threshold_value)) {
+      plot <- plot + ggplot2::geom_hline(
+        yintercept = threshold_value, linetype = "dashed", color = "black"
+      )
+    }
+  }
+
+  plot
+}
+
+# build_qc_comparison_table: reshape the combined long qcsummary table (one
+# row per qc_metric per file) to wide -- one row per file, one column per
+# selected qc_metric -- so a user can line several metrics up side by side
+# per recording, rather than only viewing one metric at a time (the bar chart
+# above) or scrolling through the long table's every metric row per file.
+#
+# table: the combined qcsummary table (load_result()$table -- pre- or
+#   post-qc_flag, this function only reads qc_metric/percent so either works,
+#   but app.R passes the plain, un-flagged table since qc_flag isn't a
+#   per-metric-column concept in wide form -- see app.R's compare_table
+#   render for how threshold crossing is instead shown per output column via
+#   DT::formatStyle()).
+# metrics: character vector of qc_metric values to include as columns.
+#
+# Returns a data.frame with recording/batch_name/source_file plus one column
+# per (present) entry of `metrics`, or NULL if `table` is empty/NULL, or none
+# of `metrics` has any matching rows.
+build_qc_comparison_table <- function(table, metrics) {
+  if (is.null(table) || nrow(table) == 0 || length(metrics) == 0) {
+    return(NULL)
+  }
+  if (!all(c("recording", "batch_name", "source_file", "qc_metric", "percent") %in% names(table))) {
+    return(NULL)
+  }
+
+  subset_tbl <- table[table$qc_metric %in% metrics, c("recording", "batch_name", "source_file", "qc_metric", "percent")]
+  if (nrow(subset_tbl) == 0) {
+    return(NULL)
+  }
+
+  # values_fn = first-value-wins rather than the default list-column
+  # behavior: guards against a (theoretically possible, e.g. a hand-edited
+  # qcsummary.tsv with a duplicated qc_metric row) duplicate id/metric
+  # combination producing a nested list-cell DT can't render, at the cost of
+  # silently keeping just the first such row -- an edge case worth not
+  # crashing on rather than one this table is trying to detect/report.
+  tidyr::pivot_wider(
+    subset_tbl,
+    id_cols = c("recording", "batch_name", "source_file"),
+    names_from = "qc_metric",
+    values_from = "percent",
+    values_fn = function(x) x[1]
+  )
+}
