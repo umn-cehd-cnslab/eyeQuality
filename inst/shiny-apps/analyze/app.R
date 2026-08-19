@@ -13,6 +13,13 @@ library(DT)
 
 source("helpers.R", local = TRUE)
 
+# P10-02: qc_threshold_config (helpers.R) has one row per (threshold_id,
+# qc_metric) pair -- interpolated_LeftEye/RightEye deliberately share one
+# threshold_id/UI control (see helpers.R's comment on qc_threshold_config).
+# The UI only needs one input per unique threshold_id, so it's deduplicated
+# once here rather than re-deduplicating inline wherever the UI is built.
+qc_threshold_ui_config <- qc_threshold_config[!duplicated(qc_threshold_config$threshold_id), ]
+
 ui <- fluidPage(
   titlePanel("eyeQuality: Analyze / QC Explorer"),
   p(
@@ -34,7 +41,31 @@ ui <- fluidPage(
         "Search subdirectories recursively",
         value = TRUE
       ),
-      actionButton("load", "Load qcsummary files", class = "btn-primary")
+      actionButton("load", "Load qcsummary files", class = "btn-primary"),
+      hr(),
+      h4("QC thresholds"),
+      p(
+        "Rows for these metrics are highlighted in the QC table when their ",
+        "value crosses the threshold below. See P10-02 in helpers.R for why ",
+        "only these metrics are thresholdable."
+      ),
+      # P10-02: one numericInput per unique threshold_id in
+      # qc_threshold_config (helpers.R) -- currently 3 (valid_pct, robust_pct,
+      # interp_pct). Looping over the shared config here (rather than
+      # hardcoding 3 numericInput() calls with separately-typed labels)
+      # keeps the UI and the flagging logic's metric/label/direction
+      # definitions from being able to drift apart.
+      lapply(seq_len(nrow(qc_threshold_ui_config)), function(i) {
+        cfg <- qc_threshold_ui_config[i, ]
+        numericInput(
+          paste0("qc_threshold_", cfg$threshold_id),
+          cfg$label,
+          value = cfg$default_percent,
+          min = 0,
+          max = 100,
+          step = 1
+        )
+      })
     ),
     mainPanel(
       uiOutput("load_summary"),
@@ -45,6 +76,7 @@ ui <- fluidPage(
           "QC table",
           br(),
           p("Click a row to view that recording's plots in the \"Plots\" tab."),
+          uiOutput("qc_flag_summary"),
           DTOutput("qc_table")
         ),
         tabPanel(
@@ -136,20 +168,115 @@ server <- function(input, output, session) {
     )
   })
 
-  output$qc_table <- renderDT({
+  # P10-02: current threshold values, as 0-1 fractions keyed by
+  # threshold_id -- matching compute_qc_flags()'s expected shape. Falls back
+  # to default_qc_thresholds() for any input that's momentarily NULL (not
+  # rendered yet) or NA (user cleared the numericInput box), rather than
+  # letting compute_qc_flags() see a hole and skip that threshold_id
+  # entirely -- from a QC reviewer's perspective, clearing the box should
+  # revert to the documented default, not silently disable flagging.
+  qc_thresholds <- reactive({
+    defaults <- default_qc_thresholds()
+    ids <- names(defaults)
+    stats::setNames(
+      lapply(ids, function(id) {
+        val <- input[[paste0("qc_threshold_", id)]]
+        if (is.null(val) || is.na(val)) defaults[[id]] else val / 100
+      }),
+      ids
+    )
+  })
+
+  # qc_table_flagged: load_result()'s table with a "qc_flag" column appended
+  # -- TRUE for rows whose metric currently crosses its configured
+  # threshold (compute_qc_flags(), helpers.R). Recomputed whenever either
+  # the loaded data or the threshold inputs change, but this reactive itself
+  # is never rendered directly -- see the initial renderDT() (built once per
+  # load, using isolate()'d thresholds so a threshold tweak doesn't rebuild
+  # the whole DT widget and reset the user's sort/filter/page state) and the
+  # dataTableProxy observer just below (which pushes qc_table_flagged()'s
+  # updated "qc_flag" values into the already-rendered widget via
+  # DT::replaceData() instead).
+  qc_table_flagged <- reactive({
     result <- load_result()
     req(result$table)
+    tbl <- result$table
+    tbl$qc_flag <- compute_qc_flags(tbl, qc_thresholds())
+    tbl
+  })
+
+  # P10-05 hook: distinct recordings with >=1 currently-flagged qc_metric
+  # row, for a future "export flagged file list" feature to consume
+  # directly rather than recomputing threshold-crossing logic itself. Not
+  # rendered to any output here -- P10-02's scope is the flagging mechanism,
+  # not the export UI.
+  flagged_recordings <- reactive({
+    tbl <- qc_table_flagged()
+    unique(tbl[tbl$qc_flag, c("recording", "batch_name", "source_file"), drop = FALSE])
+  })
+
+  output$qc_flag_summary <- renderUI({
+    tbl <- qc_table_flagged()
+    n_flagged_rows <- sum(tbl$qc_flag)
+    if (n_flagged_rows == 0) {
+      return(div(class = "alert alert-info", "No rows currently cross a configured QC threshold."))
+    }
+    div(
+      class = "alert alert-warning",
+      sprintf(
+        "%d row(s) across %d recording(s) currently cross a configured QC threshold (highlighted below).",
+        n_flagged_rows, nrow(flagged_recordings())
+      )
+    )
+  })
+
+  # Built once per data load (not per threshold tweak, see qc_table_flagged()
+  # above), with formatStyle() baking a row-highlight rule that reads each
+  # row's own "qc_flag" column value at every DataTables draw -- including
+  # redraws triggered by replaceData() below, not just this initial render.
+  # That's what lets the threshold observer further down update highlighting
+  # without rebuilding this widget. "qc_flag" itself is hidden via
+  # columnDefs (it's plumbing, not a metric a user would sort/filter on).
+  output$qc_table <- renderDT({
+    tbl <- isolate(qc_table_flagged())
+    req(tbl)
+    qc_flag_col <- which(names(tbl) == "qc_flag") - 1L
     datatable(
-      result$table,
+      tbl,
       filter = "top",
       rownames = FALSE,
       selection = "single",
       options = list(
         pageLength = 25,
-        scrollX = TRUE
+        scrollX = TRUE,
+        columnDefs = list(list(visible = FALSE, targets = qc_flag_col))
       )
-    )
+    ) %>%
+      DT::formatStyle(
+        columns = "qc_flag",
+        target = "row",
+        backgroundColor = DT::styleEqual(c(TRUE, FALSE), c("#fbe3e4", "white"))
+      )
   })
+
+  qc_table_proxy <- DT::dataTableProxy("qc_table")
+
+  # Reactively re-flag without a full table reload: triggered specifically by
+  # qc_thresholds() (not qc_table_flagged()) so this only fires when a
+  # threshold input actually changes, never on the data-load event that
+  # already triggers renderDT()'s own (isolate()'d) initial render above --
+  # avoiding any race between this proxy update and the widget's own
+  # creation on first load. Pushes qc_table_flagged()'s updated "qc_flag"
+  # column into the already-rendered widget via replaceData(), which
+  # triggers a DataTables redraw (re-running the formatStyle rule baked in
+  # above against the new qc_flag values) while preserving the widget's
+  # current sort/filter/page state -- unlike calling renderDT() again, which
+  # would rebuild the widget from scratch.
+  observeEvent(qc_thresholds(), {
+    tbl <- qc_table_flagged()
+    req(tbl)
+    DT::replaceData(qc_table_proxy, tbl, resetPaging = FALSE, rownames = FALSE)
+  }, ignoreInit = TRUE)
 
   # P10-03: row click -> that row's plots. DT's "*_rows_selected" input
   # reports the index into the data.frame passed to datatable() (result$table

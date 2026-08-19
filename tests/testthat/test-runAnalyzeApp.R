@@ -549,3 +549,260 @@ test_that("row selection resolves distinct qc_table_rows_selected indices to the
     expect_null(plot_result())
   })
 })
+
+# ---------------------------------------------------------------------------
+# P10-02: qc_threshold_config / default_qc_thresholds()
+# ---------------------------------------------------------------------------
+
+test_that("default_qc_thresholds() converts qc_threshold_config's 0-100 default_percent values to 0-1 fractions, one entry per unique threshold_id", {
+  defaults <- default_qc_thresholds()
+
+  expect_equal(names(defaults), c("valid_pct", "robust_pct", "interp_pct"))
+  expect_equal(defaults$valid_pct, 0.80)
+  expect_equal(defaults$robust_pct, 0.80)
+  expect_equal(defaults$interp_pct, 0.20)
+})
+
+test_that("qc_threshold_config has exactly one row per (threshold_id, qc_metric) and interpolated_LeftEye/RightEye share one threshold_id", {
+  # Pins down the "shared control" design: a regression that accidentally
+  # split interp_pct into two separate threshold_ids would silently break the
+  # single-numericInput-controls-both-eyes UI without any other test here
+  # catching it.
+  shared_rows <- qc_threshold_config[qc_threshold_config$threshold_id == "interp_pct", ]
+  expect_equal(sort(shared_rows$qc_metric), c("interpolated_LeftEye", "interpolated_RightEye"))
+  expect_true(all(shared_rows$direction == "max"))
+
+  expect_equal(
+    qc_threshold_config$direction[qc_threshold_config$qc_metric == "valid_raw_data"],
+    "min"
+  )
+  expect_equal(
+    qc_threshold_config$direction[qc_threshold_config$qc_metric == "robustness_proportion_valid_data_to_all_data"],
+    "min"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# P10-02: compute_qc_flags() -- boundary conditions, all 3 metrics, both
+# directions
+# ---------------------------------------------------------------------------
+#
+# Small hand-built tables throughout (qc_metric + percent only) rather than a
+# real qcsummary table -- compute_qc_flags() only ever reads those two
+# columns (see helpers.R), and real batch/eyeQuality() fixture output is
+# uniformly 100% valid / 0% interpolated (too clean to naturally cross any
+# default threshold), so a synthetic table is both sufficient and the only
+# practical way to hit every boundary deliberately.
+
+qc_flags_test_table <- function(valid_raw_data = 1, robustness = 1, interp_left = 0, interp_right = 0, blinks_both = 0.5) {
+  data.frame(
+    qc_metric = c(
+      "valid_raw_data",
+      "robustness_proportion_valid_data_to_all_data",
+      "interpolated_LeftEye",
+      "interpolated_RightEye",
+      "blinks_BothEyes"
+    ),
+    percent = c(valid_raw_data, robustness, interp_left, interp_right, blinks_both),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("compute_qc_flags flags valid_raw_data just below the min threshold, but not exactly at or just above it", {
+  thresholds <- default_qc_thresholds() # valid_pct = 0.80
+
+  below <- qc_flags_test_table(valid_raw_data = 0.799)
+  at <- qc_flags_test_table(valid_raw_data = 0.80)
+  above <- qc_flags_test_table(valid_raw_data = 0.801)
+
+  expect_true(compute_qc_flags(below, thresholds)[1])
+  expect_false(compute_qc_flags(at, thresholds)[1])
+  expect_false(compute_qc_flags(above, thresholds)[1])
+})
+
+test_that("compute_qc_flags flags robustness_proportion_valid_data_to_all_data just below the min threshold, but not exactly at or just above it", {
+  thresholds <- default_qc_thresholds() # robust_pct = 0.80
+
+  below <- qc_flags_test_table(robustness = 0.799)
+  at <- qc_flags_test_table(robustness = 0.80)
+  above <- qc_flags_test_table(robustness = 0.801)
+
+  expect_true(compute_qc_flags(below, thresholds)[2])
+  expect_false(compute_qc_flags(at, thresholds)[2])
+  expect_false(compute_qc_flags(above, thresholds)[2])
+})
+
+test_that("compute_qc_flags flags interpolated_LeftEye/RightEye just above the max threshold, but not exactly at or just below it", {
+  thresholds <- default_qc_thresholds() # interp_pct = 0.20
+
+  above <- qc_flags_test_table(interp_left = 0.201, interp_right = 0.201)
+  at <- qc_flags_test_table(interp_left = 0.20, interp_right = 0.20)
+  below <- qc_flags_test_table(interp_left = 0.199, interp_right = 0.199)
+
+  expect_equal(compute_qc_flags(above, thresholds)[3:4], c(TRUE, TRUE))
+  expect_equal(compute_qc_flags(at, thresholds)[3:4], c(FALSE, FALSE))
+  expect_equal(compute_qc_flags(below, thresholds)[3:4], c(FALSE, FALSE))
+})
+
+test_that("compute_qc_flags's shared interp_pct threshold_id can flag one eye without the other", {
+  thresholds <- default_qc_thresholds()
+  tbl <- qc_flags_test_table(interp_left = 0.25, interp_right = 0.10)
+
+  flags <- compute_qc_flags(tbl, thresholds)
+  expect_true(flags[3]) # interpolated_LeftEye: 0.25 > 0.20
+  expect_false(flags[4]) # interpolated_RightEye: 0.10 not > 0.20
+})
+
+test_that("compute_qc_flags never flags a qc_metric row that isn't in qc_threshold_config, regardless of value", {
+  tbl <- qc_flags_test_table(blinks_both = 0.99)
+  flags <- compute_qc_flags(tbl, default_qc_thresholds())
+  expect_false(flags[5]) # blinks_BothEyes row
+})
+
+test_that("compute_qc_flags never flags a row whose percent value is NA, rather than propagating NA into the comparison", {
+  tbl <- qc_flags_test_table(valid_raw_data = NA_real_)
+  flags <- compute_qc_flags(tbl, default_qc_thresholds())
+  expect_false(is.na(flags[1]))
+  expect_false(flags[1])
+})
+
+test_that("compute_qc_flags skips a threshold_id entirely (no comparison made) when its threshold value is missing, NULL, or NA", {
+  # value chosen to guarantee it WOULD flag under any real default threshold
+  tbl <- qc_flags_test_table(valid_raw_data = 0.01)
+
+  thresholds_missing_key <- default_qc_thresholds()
+  thresholds_missing_key$valid_pct <- NULL
+  expect_false(compute_qc_flags(tbl, thresholds_missing_key)[1])
+
+  thresholds_na <- default_qc_thresholds()
+  thresholds_na$valid_pct <- NA
+  expect_false(compute_qc_flags(tbl, thresholds_na)[1])
+})
+
+# ---------------------------------------------------------------------------
+# P10-02: compute_qc_flags() -- graceful degradation
+# ---------------------------------------------------------------------------
+
+test_that("compute_qc_flags returns a length-0 logical vector for a NULL table", {
+  result <- compute_qc_flags(NULL, default_qc_thresholds())
+  expect_type(result, "logical")
+  expect_length(result, 0)
+})
+
+test_that("compute_qc_flags returns a length-0 logical vector for a 0-row table", {
+  result <- compute_qc_flags(qc_flags_test_table()[0, ], default_qc_thresholds())
+  expect_type(result, "logical")
+  expect_length(result, 0)
+})
+
+test_that("compute_qc_flags returns an all-FALSE vector, not an error, when the table is missing the percent column", {
+  tbl <- qc_flags_test_table()
+  tbl$percent <- NULL
+  result <- compute_qc_flags(tbl, default_qc_thresholds())
+  expect_length(result, nrow(tbl))
+  expect_true(all(!result))
+})
+
+test_that("compute_qc_flags returns an all-FALSE vector, not an error, when the table is missing the qc_metric column", {
+  tbl <- qc_flags_test_table()
+  tbl$qc_metric <- NULL
+  result <- compute_qc_flags(tbl, default_qc_thresholds())
+  expect_length(result, nrow(tbl))
+  expect_true(all(!result))
+})
+
+# ---------------------------------------------------------------------------
+# P10-02: live threshold changes drive app.R's reactive flagging end to end
+# ---------------------------------------------------------------------------
+
+test_that("changing a QC threshold numericInput live changes qc_thresholds() and qc_table_flagged()'s qc_flag output, including the interp_pct control shared by both eyes", {
+  skip_on_cran()
+
+  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  expect_true(nzchar(app_dir))
+
+  # Hand-built qcsummary.tsv fixture (not a real batch run): real
+  # eyeQuality()/eyeQualityBatch() fixture output is uniformly 100%
+  # valid/0% interpolated and can't naturally cross any threshold in the
+  # UI's 0-100 range, so this fixture is deliberately built with values that
+  # DO cross the defaults, to prove the reactive wiring genuinely responds to
+  # a live input change end to end (not just that compute_qc_flags() itself
+  # works, which the tests above already cover in isolation).
+  dir <- tempfile("p1002_testserver_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(
+      qc_metric = c(
+        "valid_raw_data",
+        "robustness_proportion_valid_data_to_all_data",
+        "interpolated_LeftEye",
+        "interpolated_RightEye"
+      ),
+      percent = c(0.50, 0.90, 0.10, 0.10)
+    ),
+    file.path(dir, "sub-t_ses-1_recording-eyetracking_physio_desc-p1002ts_preproc_qcsummary.tsv")
+  )
+
+  home <- fs::path_home()
+  rel <- sub(paste0("^", normalizePath(home, winslash = "/"), "/?"), "", dir)
+  path_segments <- as.list(strsplit(rel, "/")[[1]])
+
+  shiny::testServer(app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+
+    result <- load_result()
+    expect_equal(result$n_files, 1L)
+
+    # Before any threshold input has been touched, qc_thresholds() falls
+    # back to default_qc_thresholds() (80/80/20%): valid_raw_data (0.50)
+    # crosses (< 0.80), robustness (0.90) does not, interpolated (0.10, both
+    # eyes) does not (not > 0.20).
+    expect_equal(qc_thresholds()$valid_pct, 0.80)
+    tbl0 <- qc_table_flagged()
+    flags0 <- setNames(tbl0$qc_flag, tbl0$qc_metric)
+    expect_true(flags0[["valid_raw_data"]])
+    expect_false(flags0[["robustness_proportion_valid_data_to_all_data"]])
+    expect_false(flags0[["interpolated_LeftEye"]])
+    expect_false(flags0[["interpolated_RightEye"]])
+    expect_equal(nrow(flagged_recordings()), 1)
+
+    # Lower the valid_pct threshold below the fixture's 0.50 value: the
+    # reactive itself must pick up the new value, and valid_raw_data must
+    # stop crossing.
+    session$setInputs(qc_threshold_valid_pct = 40)
+    expect_equal(qc_thresholds()$valid_pct, 0.40)
+    tbl1 <- qc_table_flagged()
+    flags1 <- setNames(tbl1$qc_flag, tbl1$qc_metric)
+    expect_false(flags1[["valid_raw_data"]])
+    expect_equal(nrow(flagged_recordings()), 0)
+
+    # Tighten the shared interp_pct threshold below the fixture's 0.10 value:
+    # both interpolated_LeftEye AND interpolated_RightEye must start crossing
+    # together, confirming the one-control-drives-both-eyes design is wired
+    # through to the live reactive, not just qc_threshold_config's data shape.
+    session$setInputs(qc_threshold_interp_pct = 5)
+    expect_equal(qc_thresholds()$interp_pct, 0.05)
+    tbl2 <- qc_table_flagged()
+    flags2 <- setNames(tbl2$qc_flag, tbl2$qc_metric)
+    expect_true(flags2[["interpolated_LeftEye"]])
+    expect_true(flags2[["interpolated_RightEye"]])
+    expect_false(flags2[["valid_raw_data"]])
+    expect_equal(nrow(flagged_recordings()), 1)
+
+    # Clearing the numericInput back to NA (user deletes the box's contents)
+    # must revert that threshold_id to its documented default rather than
+    # disabling flagging for it.
+    session$setInputs(qc_threshold_valid_pct = NA)
+    expect_equal(qc_thresholds()$valid_pct, 0.80)
+    tbl3 <- qc_table_flagged()
+    flags3 <- setNames(tbl3$qc_flag, tbl3$qc_metric)
+    expect_true(flags3[["valid_raw_data"]])
+  })
+})

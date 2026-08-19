@@ -247,6 +247,172 @@ load_qcsummary_table <- function(directory, recursive = TRUE) {
   )
 }
 
+# ---------------------------------------------------------------------------
+# P10-02: configurable QC thresholds with visual flagging
+# ---------------------------------------------------------------------------
+
+# qc_threshold_config: the fixed set of qc_metric rows this app treats as
+# sensible pass/fail thresholding candidates, out of the ~32 rows
+# calculateOutputMetrics() (R/calculateOutputMetrics.R) writes per file.
+#
+# Deliberately NOT every metric -- most of the 32 rows are descriptive
+# (eye-selection source, smoothing magnitude, fixation/saccade/blink
+# duration) rather than universal pass/fail signals: they characterize *how*
+# the pipeline processed a recording, not whether the recording is good or
+# bad, and several (e.g. blink rate, fixation duration) have no single
+# "more/less is better" direction at all -- a high blink rate isn't
+# inherently a QC failure the way a low percentage of valid data is. The
+# three chosen here are the ones with an unambiguous, universal direction
+# and a direct bearing on "is this recording usable":
+#   - valid_raw_data: the most basic gate -- what fraction of all samples
+#     had any raw gaze data at all (higher is better).
+#   - robustness_proportion_valid_data_to_all_data: calculateOutputMetrics()
+#     itself names this with a "robustness_" prefix, and it's a distinct
+#     signal from valid_raw_data -- it's computed post-IVT-classification
+#     (fixation + saccade + unclassified samples, i.e. excluding blinks and
+#     IVT-flagged missing time, as a fraction of all samples), so it
+#     captures data quality *after* accounting for blinks/classification
+#     rather than raw non-NA-ness (higher is better).
+#   - interpolated_LeftEye / interpolated_RightEye: the fraction of final
+#     (post-eye-selection) samples that needed gap-filling via
+#     interpolation -- heavy interpolation is a classic eye-tracking QC
+#     concern independent of whether the underlying raw/robustness
+#     percentages already look fine (lower is better). Left and right share
+#     one threshold_id/UI control below since they're the same underlying
+#     concern split by eye, and a QC reviewer thinks of "how much
+#     interpolation" as one question, not two.
+# Explicitly NOT included (with reasoning, so this isn't just an oversight):
+#   - missing_raw_data_BothEyes / final_na are exact complements of
+#     valid_raw_data / final_valid (percent values sum to 1 by construction
+#     in calculateOutputMetrics()) -- thresholding both directions of the
+#     same underlying quantity would just double the UI for no new
+#     information.
+#   - blinks_*, eye_select_*, smoothed_*, ivt_fixations/saccades/
+#     unclassified/missing (as raw classification proportions rather than
+#     the robustness rollup above), and the duration-based
+#     robustness_fixation_duration row are descriptive/paradigm-dependent
+#     (e.g. what counts as a "normal" blink rate or fixation duration
+#     varies by task) rather than metrics with an obvious universal
+#     pass/fail cutoff -- flagging them by default would be asserting a
+#     QC opinion this app has no basis for.
+#
+# Columns:
+#   threshold_id: the UI input/reactive key this row's flagging is
+#     controlled by. Multiple qc_metric rows can share one threshold_id
+#     (interpolated_LeftEye/RightEye above) when they represent the same
+#     underlying QC question.
+#   qc_metric: the exact value in the table's qc_metric column this row
+#     applies to.
+#   label: UI label shown next to the threshold input.
+#   direction: "min" (flag when the metric's value is BELOW the threshold --
+#     for higher-is-better metrics) or "max" (flag when ABOVE -- for
+#     lower-is-better metrics).
+#   default_percent: default threshold, as a 0-100 percentage (matching the
+#     numericInput UI unit) -- converted to the table's underlying 0-1
+#     fraction (see calculateOutputMetrics()'s "percent" column, which is a
+#     raw ratio, not multiplied by 100) at comparison time.
+qc_threshold_config <- data.frame(
+  threshold_id = c("valid_pct", "robust_pct", "interp_pct", "interp_pct"),
+  qc_metric = c(
+    "valid_raw_data",
+    "robustness_proportion_valid_data_to_all_data",
+    "interpolated_LeftEye",
+    "interpolated_RightEye"
+  ),
+  label = c(
+    "Minimum % valid raw data",
+    "Minimum % robust (classifiable) data",
+    "Maximum % interpolated data (either eye)",
+    "Maximum % interpolated data (either eye)"
+  ),
+  direction = c("min", "min", "max", "max"),
+  default_percent = c(80, 80, 20, 20),
+  stringsAsFactors = FALSE
+)
+
+# default_qc_thresholds: qc_threshold_config's default_percent values,
+# collapsed to one entry per threshold_id and converted from a 0-100
+# percentage to the 0-1 fraction the table's "percent" column actually uses
+# -- the form compute_qc_flags() expects. Used both to seed the UI's
+# numericInput default values and as the fallback when an input is
+# temporarily NULL/NA (e.g. mid-typing in the UI).
+#
+# Returns a named list, one entry per unique threshold_id.
+default_qc_thresholds <- function() {
+  unique_cfg <- qc_threshold_config[!duplicated(qc_threshold_config$threshold_id), ]
+  stats::setNames(as.list(unique_cfg$default_percent / 100), unique_cfg$threshold_id)
+}
+
+# compute_qc_flags: given the combined qcsummary table (one row per
+# qc_metric per file, as built by load_qcsummary_table()) and a set of
+# current threshold values, return a logical vector (same length and row
+# order as `table`) marking which rows cross their configured threshold.
+#
+# Row-level, not a per-recording rollup, deliberately: the table is already
+# long-format (one row per metric per file, per P10-01's design -- see
+# read_one_qcsummary()'s comment on why that shape was kept rather than
+# pivoted), and a QC reviewer scanning the table wants to see exactly which
+# metric(s) tripped the threshold for a given recording, not just a single
+# opaque pass/fail badge that would need drilling back into the long table
+# to explain. Flagging the specific row(s) that crossed keeps that
+# information visible without needing a second, reshaped table. A
+# per-recording rollup (e.g. "does this recording have >=1 flagged metric")
+# is still one line away from this vector -- see the "flagged_recordings"
+# reactive in app.R, built for P10-05's export feature to consume -- so nothing
+# here forecloses that view; it's just not the table's own row unit.
+#
+# Rows whose qc_metric isn't one of qc_threshold_config's configured metrics
+# are never flagged. Rows with an NA value for the relevant column (e.g. a
+# future adapter that doesn't populate "percent" for that metric -- see
+# P10-06) are also never flagged, rather than propagating NA into the
+# comparison and erroring/blanking DT's styling.
+#
+# table: a data.frame with at least "qc_metric" and "percent" columns (as
+#   produced by read_one_qcsummary()/load_qcsummary_table()). NULL, 0-row,
+#   or missing either column returns an all-FALSE (or length-0) vector
+#   rather than erroring.
+# thresholds: a named list/vector of 0-1 fractions, keyed by threshold_id
+#   (see default_qc_thresholds() for the expected shape). A missing or
+#   NA/NULL entry for a given threshold_id skips flagging for that
+#   threshold_id's metric(s) entirely (falls through, no comparison made)
+#   rather than guessing a default -- callers (app.R) are expected to have
+#   already substituted default_qc_thresholds() for any blank UI input
+#   before calling this.
+#
+# Returns a logical vector.
+compute_qc_flags <- function(table, thresholds) {
+  if (is.null(table)) {
+    return(logical(0))
+  }
+  n <- nrow(table)
+  if (n == 0 || !all(c("qc_metric", "percent") %in% names(table))) {
+    return(rep(FALSE, n))
+  }
+
+  flagged <- rep(FALSE, n)
+  for (i in seq_len(nrow(qc_threshold_config))) {
+    cfg <- qc_threshold_config[i, ]
+    threshold_value <- thresholds[[cfg$threshold_id]]
+    if (is.null(threshold_value) || is.na(threshold_value)) {
+      next
+    }
+
+    rows <- which(table$qc_metric == cfg$qc_metric)
+    if (length(rows) == 0) {
+      next
+    }
+
+    values <- table$percent[rows]
+    crosses <- if (identical(cfg$direction, "min")) {
+      !is.na(values) & values < threshold_value
+    } else {
+      !is.na(values) & values > threshold_value
+    }
+    flagged[rows] <- flagged[rows] | crosses
+  }
+  flagged
+}
+
 # resolve_preproc_data_path: given a qcsummary.tsv output's full path (as
 # stored in the combined table's source_file column -- see
 # read_one_qcsummary() above), return the full path of its sibling
