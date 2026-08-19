@@ -246,3 +246,94 @@ load_qcsummary_table <- function(directory, recursive = TRUE) {
     read_errors = read_errors
   )
 }
+
+# resolve_preproc_data_path: given a qcsummary.tsv output's full path (as
+# stored in the combined table's source_file column -- see
+# read_one_qcsummary() above), return the full path of its sibling
+# *_preproc.tsv data file: the full per-sample preprocessed data saveFiles()
+# writes alongside qcsummary.tsv (see R/saveFiles.R), and the actual input
+# generateEyeTrackingPlots() (R/generateEyeTrackingPlots.R) needs -- a
+# per-timestamp data.frame with gazeLeftX/gazeRightX/pupilLeft/etc. and
+# gazeX.preprocessed_px/gazeY.preprocessed_px columns, not
+# calculateOutputMetrics()'s one-row-per-qc_metric summary table qcsummary.tsv
+# itself holds.
+#
+# saveFiles() builds both filenames off the same "_desc-<batchName>_preproc"
+# stem (its local `preprocdesc`), with qcsummary.tsv's name just appending
+# "_qcsummary" onto that same stem before the extension (its local
+# `qcsummarydesc` is literally `paste0(preprocdesc-equivalent, "_qcsummary")`)
+# -- so the sibling preproc data file is recovered by stripping the trailing
+# "_qcsummary" immediately before ".tsv". Verified against a real
+# eyeQualityBatch() run's actual output directory for P10-03 (both the
+# batchName-present and batchName-NULL naming forms produce this same
+# stem/suffix relationship), not just inferred from reading saveFiles()'s
+# source.
+#
+# Returns a single character string. The returned path may not exist on
+# disk (e.g. someone deleted or moved it after the batch run completed) --
+# callers should check file.exists() themselves; see load_plot_data() below,
+# which does exactly that.
+resolve_preproc_data_path <- function(qcsummary_path) {
+  sub("_qcsummary\\.tsv$", ".tsv", qcsummary_path)
+}
+
+# load_plot_data: resolve a selected qc_table row's source_file (a
+# qcsummary.tsv path) to its sibling preproc data file, load that file, and
+# generate its diagnostic plots via generateEyeTrackingPlots() -- reused
+# directly from R/generateEyeTrackingPlots.R, not reimplemented here, per
+# this app's scope (P10-03).
+#
+# Handles two failure modes gracefully instead of letting either crash the
+# app:
+#   - the missing-sibling-file case (the *_preproc.tsv was deleted, moved, or
+#     renamed since the batch run completed, while its *_qcsummary.tsv sat
+#     untouched)
+#   - any read/plot failure once the file is found (e.g. a preproc file from
+#     a different adapter/geometry missing a column
+#     generateEyeTrackingPlots() expects -- see P10-06)
+#
+# Returns a list:
+#   ok: TRUE/FALSE
+#   preproc_path: the resolved sibling path (always populated, even when ok
+#     == FALSE, so callers can surface it in an error message)
+#   data: the loaded data.frame (only when ok == TRUE)
+#   plots: the list returned by generateEyeTrackingPlots() (only when ok ==
+#     TRUE)
+#   error: human-readable string (only when ok == FALSE)
+load_plot_data <- function(qcsummary_path) {
+  preproc_path <- resolve_preproc_data_path(qcsummary_path)
+
+  if (!file.exists(preproc_path)) {
+    return(list(
+      ok = FALSE,
+      preproc_path = preproc_path,
+      error = sprintf(
+        paste0(
+          "The preprocessed data file this row's plots depend on is missing: %s. ",
+          "It should sit alongside %s (the qcsummary.tsv this row was loaded from) ",
+          "in the same derivatives/eyeQuality-v1/ folder -- it may have been moved, ",
+          "renamed, or deleted since the batch run completed."
+        ),
+        preproc_path, basename(qcsummary_path)
+      )
+    ))
+  }
+
+  tryCatch(
+    {
+      data <- readr::read_tsv(preproc_path, show_col_types = FALSE, progress = FALSE)
+      plots <- generateEyeTrackingPlots(data)
+      list(ok = TRUE, preproc_path = preproc_path, data = data, plots = plots)
+    },
+    error = function(e) {
+      list(
+        ok = FALSE,
+        preproc_path = preproc_path,
+        error = sprintf(
+          "Failed to load or plot %s: %s",
+          preproc_path, conditionMessage(e)
+        )
+      )
+    }
+  )
+}

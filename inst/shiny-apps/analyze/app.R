@@ -40,7 +40,28 @@ ui <- fluidPage(
       uiOutput("load_summary"),
       uiOutput("load_diagnostics"),
       uiOutput("read_error_ui"),
-      DTOutput("qc_table")
+      tabsetPanel(
+        tabPanel(
+          "QC table",
+          br(),
+          p("Click a row to view that recording's plots in the \"Plots\" tab."),
+          DTOutput("qc_table")
+        ),
+        tabPanel(
+          "Plots",
+          br(),
+          uiOutput("plot_status_ui"),
+          conditionalPanel(
+            condition = "output.plot_ready == true",
+            h4("Raw gaze, pupil, and distance channels"),
+            plotOutput("plot_raw_gaze", height = "700px"),
+            h4("Gaze density heatmap"),
+            plotOutput("plot_gaze_heatmap", height = "450px"),
+            h4("Smoothed gaze position timecourse"),
+            plotOutput("plot_gaze_timecourse", height = "350px")
+          )
+        )
+      )
     )
   )
 )
@@ -122,11 +143,75 @@ server <- function(input, output, session) {
       result$table,
       filter = "top",
       rownames = FALSE,
+      selection = "single",
       options = list(
         pageLength = 25,
         scrollX = TRUE
       )
     )
+  })
+
+  # P10-03: row click -> that row's plots. DT's "*_rows_selected" input
+  # reports the index into the data.frame passed to datatable() (result$table
+  # above), not the currently-displayed/sorted/filtered row order, so this
+  # index is stable regardless of any column sort or the "filter = 'top'"
+  # search boxes a user has applied.
+  selected_source_file <- reactive({
+    sel <- input$qc_table_rows_selected
+    if (is.null(sel) || length(sel) == 0) {
+      return(NULL)
+    }
+    result <- load_result()
+    req(result$table)
+    result$table$source_file[sel[1]]
+  })
+
+  # Resolves the selected row's source_file (a qcsummary.tsv path) to its
+  # sibling *_preproc.tsv data file, loads it, and calls
+  # generateEyeTrackingPlots() on it -- see load_plot_data() in helpers.R.
+  # Returns NULL (rather than a not-ok result) when nothing is selected yet,
+  # so downstream outputs can req() this cleanly before a row is clicked.
+  plot_result <- reactive({
+    sf <- selected_source_file()
+    if (is.null(sf)) {
+      return(NULL)
+    }
+    load_plot_data(sf)
+  })
+
+  output$plot_ready <- reactive({
+    result <- plot_result()
+    isTRUE(!is.null(result) && result$ok)
+  })
+  outputOptions(output, "plot_ready", suspendWhenHidden = FALSE)
+
+  output$plot_status_ui <- renderUI({
+    result <- plot_result()
+    if (is.null(result)) {
+      return(div(class = "alert alert-info", "Select a row in the QC table tab to view its plots here."))
+    }
+    if (!result$ok) {
+      return(div(class = "alert alert-danger", strong("Could not render plots: "), result$error))
+    }
+    div(class = "alert alert-success", sprintf("Showing plots for: %s", result$preproc_path))
+  })
+
+  output$plot_raw_gaze <- renderPlot({
+    result <- plot_result()
+    req(result, result$ok)
+    result$plots[[1]]
+  })
+
+  output$plot_gaze_heatmap <- renderPlot({
+    result <- plot_result()
+    req(result, result$ok)
+    result$plots[[2]]
+  })
+
+  output$plot_gaze_timecourse <- renderPlot({
+    result <- plot_result()
+    req(result, result$ok)
+    result$plots[[3]]
   })
 }
 

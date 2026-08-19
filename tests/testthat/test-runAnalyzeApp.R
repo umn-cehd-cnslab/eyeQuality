@@ -310,3 +310,242 @@ test_that("load_qcsummary_table excludes an unreadable matched file from table a
   expect_equal(nrow(result$table), 2)
   expect_true(all(result$table$recording == "sub-a_ses-1"))
 })
+
+# ---------------------------------------------------------------------------
+# P10-03: resolve_preproc_data_path()
+# ---------------------------------------------------------------------------
+
+test_that("resolve_preproc_data_path strips the trailing _qcsummary immediately before .tsv, leaving the sibling preproc data path", {
+  # saveFiles() builds both filenames off the same "_desc-<batchName>_preproc"
+  # stem, with qcsummary.tsv's name just appending "_qcsummary" onto that
+  # stem before the extension (see R/saveFiles.R's preprocdesc/qcsummarydesc) --
+  # so stripping "_qcsummary" right before ".tsv" must recover the exact
+  # preproc sibling filename, for both the batchName-present and
+  # batchName-NULL naming forms.
+  expect_equal(
+    resolve_preproc_data_path("/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-mybatch_preproc_qcsummary.tsv"),
+    "/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-mybatch_preproc.tsv"
+  )
+  expect_equal(
+    resolve_preproc_data_path("/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-preproc_qcsummary.tsv"),
+    "/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-preproc.tsv"
+  )
+})
+
+test_that("resolve_preproc_data_path leaves a path with no _qcsummary.tsv suffix unchanged rather than mangling it", {
+  # sub() with an anchored pattern and no match returns the input unchanged --
+  # this pins that behavior down explicitly, since a caller passing something
+  # that isn't a real qcsummary.tsv path (e.g. already resolved, or a typo)
+  # should get back exactly what it passed in, not a silently truncated path.
+  expect_equal(
+    resolve_preproc_data_path("/data/sub-01_desc-mybatch_preproc.tsv"),
+    "/data/sub-01_desc-mybatch_preproc.tsv"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# P10-03: load_plot_data()
+# ---------------------------------------------------------------------------
+
+test_that("load_plot_data returns ok = TRUE with 3 real ggplot objects for a real qcsummary/preproc pair from a batch run", {
+  skip_on_cran()
+
+  dir <- copy_bids_fixture_tree()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  eyeQualityBatch(dir, batchName = "p1003plots", numberCores = 1)
+
+  found <- discover_qcsummary_files(dir, recursive = TRUE)
+  expect_length(found, 4)
+
+  result <- load_plot_data(found[1])
+
+  expect_true(result$ok)
+  expect_equal(result$preproc_path, resolve_preproc_data_path(found[1]))
+  expect_true(file.exists(result$preproc_path))
+  expect_s3_class(result$data, "data.frame")
+  expect_length(result$plots, 3)
+  expect_true(all(vapply(result$plots, function(p) inherits(p, "ggplot") || inherits(p, "gg"), logical(1))))
+})
+
+test_that("load_plot_data resolves two different qcsummary rows to two genuinely different preproc files and datasets", {
+  skip_on_cran()
+
+  dir <- copy_bids_fixture_tree()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  eyeQualityBatch(dir, batchName = "p1003distinct", numberCores = 1)
+
+  found <- discover_qcsummary_files(dir, recursive = TRUE)
+  expect_length(found, 4)
+
+  result_a <- load_plot_data(found[1])
+  result_b <- load_plot_data(found[2])
+
+  expect_true(result_a$ok)
+  expect_true(result_b$ok)
+  expect_false(identical(result_a$preproc_path, result_b$preproc_path))
+  expect_false(identical(result_a$data, result_b$data))
+})
+
+test_that("load_plot_data returns ok = FALSE with a clear, non-crashing error when the sibling preproc file is missing", {
+  # Filename deliberately avoids the word "missing" -- load_plot_data()'s
+  # generic tryCatch failure branch (a genuine read/plot error once a file IS
+  # found) also produces an error string containing the file's basename, so a
+  # qcsummary_path with "missing" baked into its own name would let this test
+  # pass even if the dedicated file.exists() early-return branch below were
+  # deleted and every failure fell through to the generic branch instead --
+  # asserting on "should sit alongside" (wording unique to the early-return
+  # branch's message) is what actually pins down that specific branch ran.
+  qcsummary_path <- file.path(tempdir(), "sub-x_ses-1_desc-gonewrong_preproc_qcsummary.tsv")
+  # deliberately don't create the sibling *_preproc.tsv file
+
+  result <- load_plot_data(qcsummary_path)
+
+  expect_false(result$ok)
+  expect_equal(result$preproc_path, resolve_preproc_data_path(qcsummary_path))
+  expect_true(is.character(result$error) && nzchar(result$error))
+  expect_match(result$error, "should sit alongside", fixed = TRUE)
+  expect_null(result$data)
+  expect_null(result$plots)
+})
+
+test_that("load_plot_data returns ok = FALSE with a clear error (not a crash) when the preproc file exists but is missing columns generateEyeTrackingPlots() needs", {
+  dir <- tempfile("p1003_badcols_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  qcsummary_path <- file.path(dir, "sub-y_ses-1_desc-badcols_preproc_qcsummary.tsv")
+  preproc_path <- file.path(dir, "sub-y_ses-1_desc-badcols_preproc.tsv")
+  file.create(qcsummary_path)
+  # a syntactically valid .tsv, but missing every column
+  # generateEyeTrackingPlots()/plotGazeAndBlinks() require (recordingTimestamp_ms,
+  # IVT.classification, blink.classification, gazeLeftX, etc.)
+  readr::write_tsv(data.frame(x = 1:3, y = 4:6), preproc_path)
+
+  result <- load_plot_data(qcsummary_path)
+
+  expect_false(result$ok)
+  expect_true(is.character(result$error) && nzchar(result$error))
+  expect_null(result$data)
+  expect_null(result$plots)
+})
+
+# ---------------------------------------------------------------------------
+# P10-03: row-selection wiring (app.R) -- DT_rows_selected index stability
+# ---------------------------------------------------------------------------
+#
+# DT::renderDT()'s default server = TRUE (server-side processing) is what's
+# actually used by this app's qc_table output (renderDT() at its default,
+# unmodified -- see app.R). Confirmed directly from DT's own R source
+# (DT:::dataTablesFilter(), the ajax handler invoked for every sort/search/
+# page request DataTables' JS makes back to the server) that under
+# server-side mode, row indices reported back to Shiny as
+# "<id>_rows_selected" are indices into the *original* data.frame passed to
+# datatable() (this app's result$table): dataTablesFilter() computes iAll
+# (search-filtered indices into the original data), reorders it into iCurrent
+# for the requested sort order, and DT's client-side JS
+# (updateRowsSelected()/methods.select()) maps any click position on the
+# currently-displayed page back through DT_rows_current before sending
+# "rows_selected" to Shiny -- so a value the app receives in
+# input$qc_table_rows_selected is guaranteed stable across sort/search/page
+# state, never a raw display-order/page-local index. That guarantee is what
+# lets app.R's selected_source_file() safely index directly into
+# result$table$source_file[sel[1]] (the same pre-sort/filter data.frame) --
+# these tests exercise that indexing directly, standing in for a value DT's
+# JS would send after a user has sorted/filtered/paged the table.
+test_that("row selection resolves distinct qc_table_rows_selected indices to their correct, distinct source_file/recording, matching a real 4-file, 128-row combined table", {
+  skip_on_cran()
+
+  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  expect_true(nzchar(app_dir))
+
+  dir <- copy_bids_fixture_tree()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  # Normalized to forward slashes up front: shinyFiles::parseDirPath()
+  # reconstructs directory paths via fs::path() (always forward-slash), so
+  # comparing this test's own directly-built expected_table$source_file
+  # against the app's resolved-through-shinyFiles values needs both sides on
+  # the same separator convention -- tempfile()'s raw return value on Windows
+  # keeps its root segment backslash-separated, which is purely a string
+  # representation difference, not a real path mismatch.
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  eyeQualityBatch(dir, batchName = "p1003rowsel", numberCores = 1)
+
+  # Build the exact combined table the app itself would build, to know ahead
+  # of time which row indices belong to which recording/source_file.
+  expected_table <- load_qcsummary_table(dir, recursive = TRUE)$table
+  expect_equal(nrow(expected_table), 128)
+
+  # 32 qc_metric rows per file, in discover_qcsummary_files()'s sorted file
+  # order -- pick one row index from each of the 4 files' row ranges,
+  # deliberately not just row 1 of each, to stand in for indices a user could
+  # only have reached after sorting/filtering/paging away from the table's
+  # natural top-to-bottom order.
+  probe_indices <- c(5, 40, 70, 115)
+  expected_recordings <- expected_table$recording[probe_indices]
+  expect_length(unique(expected_recordings), 4)
+
+  # shinyDirChoose()'s "roots" include Home = fs::path_home() -- the same
+  # root the app's server() constructs (see `volumes` in app.R) -- and
+  # shinyFiles::parseDirPath() resolves an input$directory value of
+  # list(root = <name>, path = <segments>) as
+  # path(roots[[root]], paste0(path, collapse = "/")). tempfile() dirs sit
+  # under the OS temp dir, which is itself under the user's home directory on
+  # this platform, so `dir`'s path relative to fs::path_home() is a real,
+  # resolvable shinyDirChoose()-style selection -- not a mocked-out
+  # selected_dir(), but the actual shinyFiles resolution path app.R uses.
+  home <- fs::path_home()
+  expect_true(startsWith(normalizePath(dir, winslash = "/"), normalizePath(home, winslash = "/")))
+  rel <- sub(
+    paste0("^", normalizePath(home, winslash = "/"), "/?"),
+    "",
+    normalizePath(dir, winslash = "/")
+  )
+  path_segments <- as.list(strsplit(rel, "/")[[1]])
+
+  shiny::testServer(app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = TRUE
+    )
+    session$setInputs(load = 1)
+
+    result <- load_result()
+    expect_equal(result$n_files, 4L)
+    expect_equal(nrow(result$table), 128)
+
+    # Compared via normalizePath() on both sides rather than raw string
+    # equality: what this test actually needs to pin down is that
+    # qc_table_rows_selected == idx resolves to the SAME underlying file
+    # expected_table$source_file[idx] points at -- not that both code paths
+    # produce byte-identical path strings. selected_source_file()/plot_result()
+    # get there via shinyFiles::parseDirPath() (fs::path(), always
+    # forward-slash), while expected_table was built by calling
+    # load_qcsummary_table() directly on the raw tempfile()-returned `dir`
+    # string; those two routes can differ in slash style/short-vs-long
+    # Windows path segments for the exact same file without that being a real
+    # bug in either.
+    norm <- function(p) normalizePath(p, winslash = "/", mustWork = FALSE)
+
+    for (idx in probe_indices) {
+      session$setInputs(qc_table_rows_selected = idx)
+
+      expect_equal(norm(selected_source_file()), norm(expected_table$source_file[idx]))
+
+      pr <- plot_result()
+      expect_true(pr$ok)
+      expect_equal(norm(pr$preproc_path), norm(resolve_preproc_data_path(expected_table$source_file[idx])))
+    }
+
+    # deselecting (DT sends an empty integer vector, not NULL, when a
+    # previously-selected row is clicked again to toggle it off) must clear
+    # plot_result() back to NULL, not leave the last-selected row's plots
+    # showing.
+    session$setInputs(qc_table_rows_selected = integer(0))
+    expect_null(selected_source_file())
+    expect_null(plot_result())
+  })
+})
