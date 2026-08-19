@@ -204,3 +204,285 @@ test_that("build_dry_run_preview's diagnostic_message is NULL whenever at least 
   expect_gt(result$matched_count, 0)
   expect_null(result$diagnostic_message)
 })
+
+# ---------------------------------------------------------------------------
+# P9-04: save/load batch_config.yaml via the running app (shiny::testServer())
+# ---------------------------------------------------------------------------
+#
+# These exercise app.R's server directly (not just helpers.R's plain
+# functions), via shiny::testServer(app_dir, ...) -- same convention as
+# test-runAnalyzeApp.R's live-reactive tests. shinyDirButton/shinySaveButton
+# selections are simulated the same way test-runAnalyzeApp.R does: real
+# tempfile() directories under fs::path_home() (so shinyFiles::parseDirPath()/
+# parseSavePath() resolve them for real, not mocked), reduced to root/path
+# segment lists relative to that root.
+#
+# Important limitation confirmed independently while writing these (not just
+# asserted from the implementer's notes): shiny::testServer()'s
+# MockShinySession$sendInputMessage() is a documented no-op --
+# `body(shiny:::MockShinySession$new()$sendInputMessage)` literally contains
+# the string "sendInputMessage is a noop." -- so update*Input() calls made by
+# the "Load config" handler never actually change input$batchName etc. in
+# this harness the way a real browser would. Tests below that need to
+# exercise what happens AFTER a load (the resave round-trip) work around this
+# by explicitly session$setInputs()-ing the fields a real client would have
+# reflected, and call this out inline; this is a real gap in what testServer()
+# alone can prove for this app, not a bug in the app or in these tests.
+
+setup_app_dir <- system.file("shiny-apps", "setup", package = "eyeQuality")
+if (!nzchar(setup_app_dir)) {
+  stop("test-runSetupApp.R: could not locate inst/shiny-apps/setup/ via system.file()")
+}
+
+# rel_home_segments: converts an absolute path under fs::path_home() into the
+# root/path-segment list shinyFiles::shinyDirChoose()/shinyFileSave() selections
+# use, so a real directory/save-target can be simulated via session$setInputs()
+# without a live browser picker. Same technique as test-runAnalyzeApp.R.
+rel_home_segments <- function(path) {
+  home <- normalizePath(fs::path_home(), winslash = "/")
+  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  testthat::skip_if_not(
+    startsWith(path, home),
+    "test tempdir is not under fs::path_home(); shinyFiles root-relative simulation would not resolve"
+  )
+  rel <- sub(paste0("^", home, "/?"), "", path)
+  as.list(strsplit(rel, "/")[[1]])
+}
+
+test_that("Setup app save round-trip: form values survive write_batch_config()/read_batch_config() field-by-field", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p904_save_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+  data_segments <- rel_home_segments(data_dir)
+
+  save_dir <- tempfile("p904_save_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "roundtrip.yaml")
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = data_segments))
+    session$setInputs(
+      layout = "glob",
+      pathPattern = "**/*.tsv",
+      excludePattern_regex = "derivatives",
+      modalityPattern_regex = "gaze",
+      displayDimensionX_mm = 601,
+      displayDimensionY_mm = 401,
+      eyeSelection_method = "Strict",
+      validityThreshold = 0.65,
+      outputDir = "",
+      batchName = "p904_save_roundtrip"
+    )
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "roundtrip.yaml", type = "yaml"
+    ))
+
+    status <- config_io_status()
+    expect_true(status$ok)
+  })
+
+  expect_true(file.exists(save_path))
+  loaded <- read_batch_config(save_path)
+  expect_equal(loaded$batchName, "p904_save_roundtrip")
+  expect_equal(loaded$layout, "glob")
+  expect_equal(loaded$pathPattern, "**/*.tsv")
+  expect_equal(loaded$excludePattern_regex, "derivatives")
+  expect_equal(loaded$modalityPattern_regex, "gaze")
+  expect_equal(loaded$displayDimensionX_mm, 601)
+  expect_equal(loaded$displayDimensionY_mm, 401)
+  expect_equal(loaded$eyeSelection_method, "Strict")
+  expect_equal(loaded$validityThreshold, 0.65)
+  expect_null(loaded$outputDir)
+  # numberCores has no form control at all; a fresh save (no config loaded
+  # this session) must still record the real value "Start batch run" would
+  # use, not NULL/NA -- regression guard for DEFAULT_GUI_NUMBER_CORES wiring.
+  expect_equal(loaded$numberCores, 2)
+  expect_null(loaded$adapterType)
+})
+
+test_that("Setup app load-then-resave: adapterType/numberCores survive via loaded_config_extra even with no form control for either", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p904_loadresave_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+
+  loaded_cfg_path <- tempfile("p904_loadresave_cfg_", fileext = ".yaml")
+  on.exit(unlink(loaded_cfg_path), add = TRUE)
+  write_batch_config(
+    list(
+      batchName = "loaded_before_resave",
+      directoryBIDS = normalizePath(data_dir, winslash = "/"),
+      layout = "bids",
+      displayDimensionX_mm = 555,
+      displayDimensionY_mm = 355,
+      adapterType = "TobiiStudio",
+      numberCores = 7
+    ),
+    loaded_cfg_path
+  )
+
+  save_dir <- tempfile("p904_loadresave_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "resaved.yaml")
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(load_config_file = data.frame(
+      name = "loaded_before_resave.yaml",
+      datapath = loaded_cfg_path,
+      stringsAsFactors = FALSE
+    ))
+
+    load_status <- config_io_status()
+    expect_true(load_status$ok)
+
+    extra <- loaded_config_extra()
+    expect_equal(extra$adapterType, "TobiiStudio")
+    expect_equal(extra$numberCores, 7)
+
+    # See the file-level comment above: update*Input() calls the load handler
+    # just made are no-ops in this harness, so input$batchName/displayDimension*_mm/
+    # layout/eyeSelection_method never actually changed here the way a real
+    # browser would have reflected them. Set them explicitly to what the
+    # config just loaded, standing in for that reflection, so the resave below
+    # can succeed (these fields ARE form-owned and validate_batch_config()
+    # requires batchName/displayDimension*_mm) -- this does not touch
+    # adapterType/numberCores, which is the actual behavior under test.
+    session$setInputs(
+      layout = "bids",
+      batchName = "loaded_before_resave",
+      displayDimensionX_mm = 555,
+      displayDimensionY_mm = 355,
+      eyeSelection_method = "Maximize"
+    )
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "resaved.yaml", type = "yaml"
+    ))
+    save_status <- config_io_status()
+    expect_true(save_status$ok)
+  })
+
+  expect_true(file.exists(save_path))
+  resaved <- read_batch_config(save_path)
+  expect_equal(resaved$adapterType, "TobiiStudio")
+  expect_equal(resaved$numberCores, 7)
+})
+
+test_that("Setup app invalid config upload: validate_batch_config()'s error surfaces and zero update*Input() calls happen (form never partially applied)", {
+  skip_on_cran()
+
+  # missing batchName/directoryBIDS/displayDimension*_mm -- validate_batch_config()
+  # rejects this outright.
+  invalid_cfg_path <- tempfile("p904_invalid_cfg_", fileext = ".yaml")
+  on.exit(unlink(invalid_cfg_path), add = TRUE)
+  yaml::write_yaml(list(schemaVersion = 1, layout = "glob"), invalid_cfg_path)
+
+  shiny::testServer(setup_app_dir, {
+    pushed_input_ids <- character(0)
+    real_send <- session$sendInputMessage
+    session$sendInputMessage <- function(inputId, message) {
+      pushed_input_ids <<- c(pushed_input_ids, inputId)
+      real_send(inputId, message)
+    }
+
+    session$setInputs(load_config_file = data.frame(
+      name = "invalid.yaml",
+      datapath = invalid_cfg_path,
+      stringsAsFactors = FALSE
+    ))
+
+    status <- config_io_status()
+    expect_false(status$ok)
+    expect_match(status$message, "batchName", fixed = TRUE)
+    expect_match(status$message, "directoryBIDS", fixed = TRUE)
+
+    # No update*Input() call for ANY field -- a partially-applied form (e.g.
+    # layout pushed through but batchName not) would be worse than none at
+    # all, since it would look successful.
+    expect_length(pushed_input_ids, 0)
+
+    expect_null(loaded_config_extra())
+  })
+})
+
+# ---------------------------------------------------------------------------
+# P9-04: "Start batch run" now forwards the same layout/pattern/processing
+# parameters the dry-run preview above it was already built against
+# ---------------------------------------------------------------------------
+#
+# Before this task, the launch handler's start_background_batch() call only
+# ever passed directoryBIDS/batchName/numberCores -- layout, subjectPattern_regex/
+# sessionPattern_regex/pathPattern/excludePattern_regex/recursiveSearch, and
+# every processing-parameter field added alongside "Save config" were silently
+# dropped, so a real run always used eyeQualityBatch()'s own bids-layout
+# defaults regardless of what the preview above had actually matched against.
+# This is verified end to end here (not mocked) -- start_background_batch()
+# isn't a plain function reachable from a testServer() expr block (it's
+# sourced local to app.R's own top-level environment, which
+# shiny::testServer()'s expr-clone mechanism does not expose for
+# reassignment -- confirmed while writing this test), and P9-05/06 already
+# deliberately chose not to build a from-scratch async mocking harness for
+# this exact call site (see test-background_run.R's file-level comment). A
+# real (but fast: numberCores = 2, 2 tiny fixture files, ~few seconds) launch
+# through the app is used instead, distinguishing glob-layout with a
+# subject-restricting pathPattern (matches 2 of 4 fixture files) from what
+# bids-layout's own defaults would have matched (all 4) -- if layout/pathPattern
+# were dropped again, this run would silently process all 4 files instead of 2.
+test_that("Setup app launch actually threads the current layout/pathPattern into the real batch run (not silently defaulting to bids layout)", {
+  skip_on_cran()
+  skip_if_not_installed("later") # used below to pump the event loop while the real future/promises launch resolves
+
+  src <- testthat::test_path("fixtures", "bids")
+  dest <- tempfile("p904_launch_")
+  fs::dir_copy(src, dest)
+  on.exit(unlink(dest, recursive = TRUE), add = TRUE)
+  dest <- normalizePath(dest, winslash = "/", mustWork = TRUE)
+  data_segments <- rel_home_segments(dest)
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = data_segments))
+    session$setInputs(
+      layout = "glob",
+      pathPattern = "sub-1/**/*.tsv", # matches only sub-1's 2 files, not all 4
+      excludePattern_regex = "",
+      modalityPattern_regex = "",
+      displayDimensionX_mm = 594,
+      displayDimensionY_mm = 344,
+      eyeSelection_method = "Maximize",
+      validityThreshold = NA,
+      outputDir = "",
+      batchName = "p904_launch_e2e"
+    )
+    session$setInputs(preview = 1)
+    expect_equal(preview_result()$matched_count, 2)
+
+    session$setInputs(launch = 1)
+
+    # future/promises resolution needs the later event loop pumped manually
+    # in a script/test context (no running Shiny app to do it automatically);
+    # poll with a generous timeout since this spawns real worker processes.
+    deadline <- Sys.time() + 60
+    repeat {
+      later::run_now(timeoutSecs = 1)
+      if (!identical(progress_state$status, "running")) break
+      if (Sys.time() > deadline) break
+    }
+    expect_equal(progress_state$status, "done")
+    expect_equal(progress_state$n_done, 2)
+  })
+
+  qc_files <- list.files(dest, pattern = "qcsummary\\.tsv$", recursive = TRUE, full.names = TRUE)
+  # The regression this guards against: if layout/pathPattern were dropped
+  # from the launch call again, eyeQualityBatch() would fall back to its own
+  # bids-layout defaults and process all 4 fixture files, not just sub-1's 2.
+  expect_length(qc_files, 2)
+  expect_true(all(grepl("sub-1_", basename(qc_files))))
+})

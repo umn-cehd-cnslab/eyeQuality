@@ -91,3 +91,107 @@ build_dry_run_preview <- function(directory,
     diagnostic_message = if (is.null(diagnostics)) NULL else diagnostics$hint
   )
 }
+
+# --- P9-04: save/load named batch_config.yaml files -------------------------
+
+# blank_to_null: the Setup form's convention for "not specified" is a blank
+# text field or an emptied numericInput (which Shiny reports as NA, not
+# missing) -- both should become NULL when building a batch_config.yaml
+# (R/batchConfig.R), matching what listBidsFiles()/eyeQuality() themselves
+# treat as "use the default" for these optional fields. A length-0 value
+# (e.g. an as-yet-unset input) is treated the same way.
+blank_to_null <- function(x) {
+  if (is.null(x) || length(x) == 0) {
+    return(NULL)
+  }
+  if (length(x) == 1 && is.na(x)) {
+    return(NULL)
+  }
+  if (is.character(x) && length(x) == 1 && !nzchar(trimws(x))) {
+    return(NULL)
+  }
+  x
+}
+
+# null_to_blank: the inverse conversion, for repopulating a text input from a
+# loaded config's NULL-valued optional field -- updateTextInput()'s `value`
+# must be a character string, not NULL.
+null_to_blank <- function(x) {
+  if (is.null(x)) "" else x
+}
+
+# build_batch_config_from_form: assemble a batch_config.yaml-shaped named
+# list (see R/batchConfig.R) from the Setup app's current form input values,
+# for the "Save config" control (P9-04).
+#
+# The form doesn't expose every field batch_config.yaml's schema supports --
+# notably `adapterType` (P9-02's device selector is the dedicated task for
+# that; adding it here would duplicate/preempt that work) and `numberCores`
+# (deliberately kept out of the launch form itself, see background_run.R's
+# note on the GUI's conservative hardcoded default). Rather than dropping
+# those fields on every save, `extra` carries forward whatever config was
+# most recently loaded this session (see app.R's `loaded_config_extra`) --
+# its fields are the starting point, then every field the form DOES control
+# is overlaid on top (so the form's current value always wins for the fields
+# it owns, even when that value is NULL/blank).
+#
+# `numberCores` is handled as a special case rather than a plain form field:
+# if `extra` already has a `numberCores` (i.e. this session loaded a config
+# that set one), that value is preserved untouched; otherwise
+# `defaultNumberCores` is used, so a freshly-saved config (never loaded from
+# a file) still records the actual core count the "Start batch run" button
+# would use (see app.R), for the same reproducibility purpose the plan calls
+# for -- without adding a numberCores input to the launch form itself.
+#
+# extra: NULL, or a full config list (typically from `read_batch_config()`)
+#   whose fields the form doesn't itself control should be preserved through
+#   this save.
+# defaultNumberCores: value to record for `numberCores` when `extra` doesn't
+#   already have one.
+#
+# Returns a named list suitable for `write_batch_config()`; does not fill in
+# schema defaults or validate -- that's `write_batch_config()`'s job.
+build_batch_config_from_form <- function(directoryBIDS,
+                                          batchName,
+                                          layout,
+                                          subjectPattern_regex,
+                                          sessionPattern_regex,
+                                          recursiveSearch,
+                                          pathPattern,
+                                          excludePattern_regex,
+                                          modalityPattern_regex,
+                                          displayDimensionX_mm,
+                                          displayDimensionY_mm,
+                                          outputDir,
+                                          validityThreshold,
+                                          eyeSelection_method,
+                                          extra = NULL,
+                                          defaultNumberCores = NULL) {
+  extra <- if (is.null(extra)) list() else extra
+
+  numberCores <- if (!is.null(extra[["numberCores"]])) extra[["numberCores"]] else defaultNumberCores
+
+  form_fields <- list(
+    directoryBIDS = blank_to_null(directoryBIDS),
+    batchName = blank_to_null(batchName),
+    layout = layout,
+    subjectPattern_regex = blank_to_null(subjectPattern_regex),
+    sessionPattern_regex = blank_to_null(sessionPattern_regex),
+    recursiveSearch = isTRUE(recursiveSearch),
+    pathPattern = blank_to_null(pathPattern),
+    excludePattern_regex = blank_to_null(excludePattern_regex),
+    modalityPattern_regex = blank_to_null(modalityPattern_regex),
+    displayDimensionX_mm = blank_to_null(displayDimensionX_mm),
+    displayDimensionY_mm = blank_to_null(displayDimensionY_mm),
+    outputDir = blank_to_null(outputDir),
+    validityThreshold = blank_to_null(validityThreshold),
+    eyeSelection_method = eyeSelection_method,
+    numberCores = numberCores
+  )
+
+  # keep.null = TRUE: a form field explicitly set to NULL (e.g. a blanked
+  # outputDir) must overwrite whatever `extra` had for that field, not be
+  # skipped -- see write_batch_config()'s own use of modifyList() for the
+  # same reasoning.
+  utils::modifyList(extra, form_fields, keep.null = TRUE)
+}

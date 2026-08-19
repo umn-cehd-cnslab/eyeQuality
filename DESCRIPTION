@@ -38,6 +38,7 @@ Suggests:
     shinyFiles,
     future,
     promises (>= 1.3.3),
+    later,
     DT
 Config/testthat/edition: 3
 Imports:

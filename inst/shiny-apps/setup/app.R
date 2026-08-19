@@ -70,7 +70,46 @@ ui <- fluidPage(
         )
       ),
       textInput("modalityPattern_regex", "File name pattern (regex, optional -- default matches *.tsv)", value = ""),
-      actionButton("preview", "Preview matched files", class = "btn-primary")
+      hr(),
+      h5("Processing parameters"),
+      # displayDimensionX_mm/Y_mm: batch_config.yaml (R/batchConfig.R)
+      # requires these (no schema-wide default), so a real value is needed
+      # here for "Save config" to ever produce a valid file -- defaulted to
+      # eyeQualityBatch()'s own built-in defaults (594x344mm), not left
+      # blank, so an unedited form is already save-able and already matches
+      # what "Start batch run" would use if these fields didn't exist at
+      # all.
+      numericInput("displayDimensionX_mm", "Display width (mm)", value = 594, min = 1),
+      numericInput("displayDimensionY_mm", "Display height (mm)", value = 344, min = 1),
+      selectInput(
+        "eyeSelection_method",
+        "Eye selection method",
+        choices = c("Maximize", "Strict", "Left", "Right"),
+        selected = "Maximize"
+      ),
+      numericInput(
+        "validityThreshold",
+        "Validity threshold (0-1, blank = adapter default)",
+        value = NA,
+        min = 0,
+        max = 1,
+        step = 0.05
+      ),
+      textInput("outputDir", "Output directory (blank = default location alongside each input file)", value = ""),
+      textInput("batchName", "Batch name (used to label output files)", value = "run1"),
+      actionButton("preview", "Preview matched files", class = "btn-primary"),
+      hr(),
+      h5("Save / load config"),
+      p(class = "text-muted", "Save the settings above to a batch_config.yaml, or load one back in."),
+      shinyFiles::shinySaveButton(
+        "save_config",
+        "Save config...",
+        "Save current settings as batch_config.yaml",
+        filetype = list(yaml = c("yaml", "yml"))
+      ),
+      br(), br(),
+      fileInput("load_config_file", "Load config", accept = c(".yaml", ".yml")),
+      uiOutput("config_io_status")
     ),
     mainPanel(
       h4("Dry-run preview"),
@@ -91,12 +130,38 @@ ui <- fluidPage(
 server <- function(input, output, session) {
   volumes <- c(Home = fs::path_home(), shinyFiles::getVolumes()())
   shinyFiles::shinyDirChoose(input, "directory", roots = volumes, session = session)
+  shinyFiles::shinyFileSave(input, "save_config", roots = volumes, session = session)
+
+  # DEFAULT_GUI_NUMBER_CORES: the single source of truth for the numberCores
+  # value the "Start batch run" launch call below actually uses -- also read
+  # by build_current_config() (P9-04, further down) so a config saved
+  # without ever loading one from a file still records the real value this
+  # run would use, rather than a second hardcoded literal that could drift
+  # from the launch call's own.
+  DEFAULT_GUI_NUMBER_CORES <- 2L
+
+  # directory_override: P9-04's "Load config" sets a directory string
+  # directly from a loaded batch_config.yaml's `directoryBIDS`. shinyFiles
+  # has no supported way to programmatically set a shinyDirButton's
+  # selection (input$directory is a roots-relative path-segment list built
+  # entirely client-side by its JS picker, not a plain string an
+  # update*Input()-style call can set) -- so a loaded directory is tracked
+  # here instead and used as a fallback wherever the user hasn't (yet, or
+  # again) made a real picker selection. A subsequent real pick via the
+  # button always takes precedence (see selected_dir() below), so this is
+  # purely a "reflect the loaded value until the user overrides it" bridge,
+  # not a fake picker selection.
+  directory_override <- reactiveVal(NULL)
 
   selected_dir <- reactive({
-    if (is.null(input$directory) || !is.list(input$directory)) {
-      return(character(0))
+    if (!is.null(input$directory) && is.list(input$directory)) {
+      return(shinyFiles::parseDirPath(volumes, input$directory))
     }
-    shinyFiles::parseDirPath(volumes, input$directory)
+    override <- directory_override()
+    if (!is.null(override) && nzchar(override)) {
+      return(override)
+    }
+    character(0)
   })
 
   output$selected_directory <- renderText({
@@ -210,7 +275,6 @@ server <- function(input, output, session) {
     }
 
     tagList(
-      textInput("batchName", "Batch name (used to label output files)", value = "run1"),
       actionButton("launch", "Start batch run", class = "btn-success")
     )
   })
@@ -232,11 +296,53 @@ server <- function(input, output, session) {
     progress_state$start_time <- Sys.time()
     progress_state$failed_detail <- NULL
 
-    prom <- start_background_batch(
-      directoryBIDS = dir,
-      batchName = batch_name,
-      numberCores = 2L # see background_run.R for why this default, not eyeQualityBatch()'s auto-detect
+    # P9-04: forward the same layout/pattern arguments the dry-run preview
+    # above was already built and validated against (via build_dry_run_preview(),
+    # same layout-conditional list(...) shape -- see its P7-06 comment on why
+    # this can't be assembled incrementally without dropping explicit NULLs),
+    # plus the processing-parameter inputs added alongside "Save config"
+    # (display dimensions, eye selection method, validity threshold, output
+    # directory). Before this, "Start batch run" silently ignored all of
+    # these and ran eyeQualityBatch() against its own listBidsFiles()/
+    # eyeQuality() defaults regardless of what the preview above had actually
+    # matched against -- a real run could process a different (or empty) set
+    # of files than the dry-run preview just showed, most visibly for glob
+    # layout (eyeQualityBatch() defaults to bids-layout matching). Discovered
+    # while wiring the new form fields through for reproducibility; fixed
+    # here rather than left in place, since it directly undermines the
+    # "preview accurately previews what a run will do" and "save now, rerun
+    # identically later" guarantees this task is otherwise building toward.
+    layout_args <- if (identical(input$layout, "bids")) {
+      list(
+        layout = input$layout,
+        subjectPattern_regex = if (nzchar(input$subjectPattern_regex)) input$subjectPattern_regex else NULL,
+        sessionPattern_regex = if (nzchar(input$sessionPattern_regex)) input$sessionPattern_regex else NULL,
+        recursiveSearch = isTRUE(input$recursiveSearch)
+      )
+    } else {
+      list(
+        layout = input$layout,
+        pathPattern = if (nzchar(input$pathPattern)) input$pathPattern else NULL,
+        excludePattern_regex = if (nzchar(input$excludePattern_regex)) input$excludePattern_regex else NULL
+      )
+    }
+
+    launch_args <- c(
+      list(
+        directoryBIDS = dir,
+        batchName = batch_name,
+        numberCores = DEFAULT_GUI_NUMBER_CORES, # see background_run.R for why this default, not eyeQualityBatch()'s auto-detect
+        outputDir = blank_to_null(input$outputDir),
+        displayDimensionX_mm = input$displayDimensionX_mm,
+        displayDimensionY_mm = input$displayDimensionY_mm,
+        eyeSelection_method = input$eyeSelection_method,
+        validityThreshold = blank_to_null(input$validityThreshold),
+        modalityPattern_regex = if (nzchar(input$modalityPattern_regex)) input$modalityPattern_regex else NULL
+      ),
+      layout_args
     )
+
+    prom <- do.call(start_background_batch, launch_args)
 
     prom <- prom %...>% (function(result) {
       final <- poll_batch_progress(run_info$directory, run_info$batchName, run_info$n_expected)
@@ -341,6 +447,141 @@ server <- function(input, output, session) {
   output$failed_files_table <- renderTable({
     req(progress_state$failed_detail)
     progress_state$failed_detail
+  })
+
+  # --- P9-04: save/load named batch_config.yaml configs -----------------
+  #
+  # loaded_config_extra: the full config most recently loaded via "Load
+  # config" this session (or NULL if none has been), used purely so
+  # build_batch_config_from_form() can carry forward the schema fields this
+  # form has no input for (adapterType, numberCores) on the next save -- see
+  # that function's own comment in helpers.R for why those two specifically.
+  loaded_config_extra <- reactiveVal(NULL)
+  # config_io_status: list(ok = TRUE/FALSE, message = ...) for the most
+  # recent save or load attempt, or NULL before either has happened this
+  # session. Rendered below as a persistent alert (not a transient
+  # notification) so a validation failure - e.g. a hand-edited config
+  # missing a required field - stays visible and readable rather than
+  # flashing by, per this task's "surface validate_batch_config()'s error
+  # message" requirement.
+  config_io_status <- reactiveVal(NULL)
+
+  # build_current_config: the form's current values, batch_config.yaml-shaped
+  # (see build_batch_config_from_form()), used by both the save handler below
+  # and available for anything else that wants "what would Save write right
+  # now."
+  build_current_config <- reactive({
+    dir <- selected_dir()
+    build_batch_config_from_form(
+      directoryBIDS = if (length(dir) == 0) NULL else dir,
+      batchName = input$batchName,
+      layout = input$layout,
+      subjectPattern_regex = input$subjectPattern_regex,
+      sessionPattern_regex = input$sessionPattern_regex,
+      recursiveSearch = input$recursiveSearch,
+      pathPattern = input$pathPattern,
+      excludePattern_regex = input$excludePattern_regex,
+      modalityPattern_regex = input$modalityPattern_regex,
+      displayDimensionX_mm = input$displayDimensionX_mm,
+      displayDimensionY_mm = input$displayDimensionY_mm,
+      outputDir = input$outputDir,
+      validityThreshold = input$validityThreshold,
+      eyeSelection_method = input$eyeSelection_method,
+      extra = loaded_config_extra(),
+      defaultNumberCores = DEFAULT_GUI_NUMBER_CORES
+    )
+  })
+
+  # shinySaveButton (rather than downloadButton/downloadHandler): this app
+  # already treats the data directory as server-local (shinyDirButton, not a
+  # browser upload), so a server-local save-as picker matches its existing
+  # model better than a browser download would. It also makes graceful
+  # invalid-config handling straightforward: write_batch_config() validates
+  # before writing anything (see R/batchConfig.R), so a bad config here is
+  # just a caught error and a notification/status message -- never a
+  # partially-written file, and never the generic unhandled-error page a
+  # downloadHandler's content() throwing would otherwise produce.
+  observeEvent(input$save_config, {
+    if (is.null(input$save_config) || !is.list(input$save_config)) {
+      return()
+    }
+    save_path <- shinyFiles::parseSavePath(volumes, input$save_config)
+    if (nrow(save_path) == 0) {
+      return()
+    }
+    dest <- save_path$datapath[1]
+
+    result <- tryCatch(
+      {
+        eyeQuality::write_batch_config(build_current_config(), dest)
+        list(ok = TRUE, message = paste0("Saved config to ", dest))
+      },
+      error = function(e) {
+        list(ok = FALSE, message = paste0("Could not save config: ", conditionMessage(e)))
+      }
+    )
+    config_io_status(result)
+  })
+
+  # Load config: reads the uploaded file via read_batch_config(validate =
+  # TRUE), so a config that doesn't validate cleanly (missing a required
+  # field, an out-of-range value, a hand-edited typo) is caught here as a
+  # plain error and surfaced via config_io_status - never partially applied
+  # to the form. Only on a clean read do any update*Input() calls happen.
+  observeEvent(input$load_config_file, {
+    req(input$load_config_file)
+
+    result <- tryCatch(
+      {
+        config <- eyeQuality::read_batch_config(input$load_config_file$datapath, validate = TRUE)
+        list(ok = TRUE, config = config)
+      },
+      error = function(e) {
+        list(ok = FALSE, message = paste0("Could not load config: ", conditionMessage(e)))
+      }
+    )
+
+    if (!isTRUE(result$ok)) {
+      config_io_status(list(ok = FALSE, message = result$message))
+      return()
+    }
+
+    config <- result$config
+    loaded_config_extra(config)
+
+    if (!is.null(config$directoryBIDS) && nzchar(config$directoryBIDS)) {
+      directory_override(config$directoryBIDS)
+    }
+
+    updateRadioButtons(session, "layout", selected = config$layout)
+    updateTextInput(session, "subjectPattern_regex", value = null_to_blank(config$subjectPattern_regex))
+    updateTextInput(session, "sessionPattern_regex", value = null_to_blank(config$sessionPattern_regex))
+    updateCheckboxInput(session, "recursiveSearch", value = isTRUE(config$recursiveSearch))
+    updateTextInput(session, "pathPattern", value = null_to_blank(config$pathPattern))
+    updateTextInput(session, "excludePattern_regex", value = null_to_blank(config$excludePattern_regex))
+    updateTextInput(session, "modalityPattern_regex", value = null_to_blank(config$modalityPattern_regex))
+    updateTextInput(session, "batchName", value = null_to_blank(config$batchName))
+    updateNumericInput(session, "displayDimensionX_mm", value = config$displayDimensionX_mm)
+    updateNumericInput(session, "displayDimensionY_mm", value = config$displayDimensionY_mm)
+    updateTextInput(session, "outputDir", value = null_to_blank(config$outputDir))
+    updateNumericInput(
+      session, "validityThreshold",
+      value = if (is.null(config$validityThreshold)) NA else config$validityThreshold
+    )
+    updateSelectInput(session, "eyeSelection_method", selected = config$eyeSelection_method)
+
+    config_io_status(list(ok = TRUE, message = paste0("Loaded config from ", input$load_config_file$name)))
+  })
+
+  output$config_io_status <- renderUI({
+    status <- config_io_status()
+    if (is.null(status)) {
+      return(NULL)
+    }
+    div(
+      class = if (isTRUE(status$ok)) "alert alert-success" else "alert alert-danger",
+      status$message
+    )
   })
 }
 
