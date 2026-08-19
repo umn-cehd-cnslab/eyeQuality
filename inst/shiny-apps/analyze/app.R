@@ -65,7 +65,41 @@ ui <- fluidPage(
           max = 100,
           step = 1
         )
-      })
+      }),
+      hr(),
+      # P10-07: save the thresholds above into the same batch_config.yaml the
+      # Setup app (P9-04) reads/writes, rather than a second, fragmented
+      # config format. "Load config" pulls in an existing file's qcThresholds
+      # (if it has one) and repopulates the numericInputs above from it, and
+      # also remembers its other (run-parameter) fields so a later "Save
+      # config" updates that same file in place instead of dropping them --
+      # see build_current_config()/loaded_config_extra below.
+      h4("Save / load config"),
+      p(
+        class = "text-muted",
+        "Load an existing batch_config.yaml (e.g. one exported by the Setup app) to repopulate the ",
+        "thresholds above from its qcThresholds section, if it has one. Save writes the thresholds ",
+        "above back into that same config -- or, with no config loaded yet, a fresh one using the ",
+        "study info fields below."
+      ),
+      fileInput("load_config_file", "Load config", accept = c(".yaml", ".yml")),
+      h5("Study info"),
+      p(
+        class = "text-muted",
+        "Required by batch_config.yaml's schema even for a QC-thresholds-only save. Filled in ",
+        "automatically by \"Load config\"; fill in by hand for a fresh config."
+      ),
+      textInput("cfg_batchName", "Batch name", value = ""),
+      textInput("cfg_directoryBIDS", "Data directory (directoryBIDS)", value = ""),
+      numericInput("cfg_displayDimensionX_mm", "Display width (mm)", value = NA, min = 1),
+      numericInput("cfg_displayDimensionY_mm", "Display height (mm)", value = NA, min = 1),
+      shinyFiles::shinySaveButton(
+        "save_config",
+        "Save config...",
+        "Save current QC thresholds (and study info) as batch_config.yaml",
+        filetype = list(yaml = c("yaml", "yml"))
+      ),
+      uiOutput("config_io_status")
     ),
     mainPanel(
       uiOutput("load_summary"),
@@ -101,6 +135,7 @@ ui <- fluidPage(
 server <- function(input, output, session) {
   volumes <- c(Home = fs::path_home(), shinyFiles::getVolumes()())
   shinyFiles::shinyDirChoose(input, "directory", roots = volumes, session = session)
+  shinyFiles::shinyFileSave(input, "save_config", roots = volumes, session = session)
 
   selected_dir <- reactive({
     if (is.null(input$directory) || !is.list(input$directory)) {
@@ -339,6 +374,154 @@ server <- function(input, output, session) {
     result <- plot_result()
     req(result, result$ok)
     result$plots[[3]]
+  })
+
+  # --- P10-07: save/load QC thresholds via the shared batch_config.yaml ---
+  #
+  # loaded_config_extra: the full config most recently loaded via "Load
+  # config" this session (or NULL if none has been), used purely so
+  # build_current_config() can carry forward every schema field this app's
+  # own form doesn't expose (layout, patterns, eyeSelection_method, etc.) on
+  # the next save -- same pattern as the Setup app's own loaded_config_extra
+  # (P9-04). Its qcThresholds field, if any, is always the already-filtered
+  # (filter_recognized_qc_thresholds(), helpers.R) set kept from the most
+  # recent load, so a later resave can never resurrect a dropped/
+  # unrecognized entry the app never actually applied.
+  loaded_config_extra <- reactiveVal(NULL)
+  # config_io_status: list(ok = TRUE/FALSE, message = ...) for the most
+  # recent save or load attempt, or NULL before either has happened this
+  # session -- same persistent-alert rendering convention as the Setup app.
+  config_io_status <- reactiveVal(NULL)
+
+  # build_current_config: loaded_config_extra() (or an empty base, for a
+  # fresh config) with the study-info fields and the live threshold values
+  # overlaid on top, batch_config.yaml-shaped and ready for
+  # write_batch_config(). keep.null = TRUE so an explicitly blanked study-info
+  # field (e.g. clearing "Data directory" after loading a config) actually
+  # clears that field in the saved config rather than leaving the loaded
+  # value in place -- same reasoning as write_batch_config()'s own
+  # modifyList() call (R/batchConfig.R).
+  build_current_config <- reactive({
+    extra <- loaded_config_extra()
+    extra <- if (is.null(extra)) list() else extra
+
+    form_fields <- list(
+      batchName = blank_to_null(input$cfg_batchName),
+      directoryBIDS = blank_to_null(input$cfg_directoryBIDS),
+      displayDimensionX_mm = blank_to_null(input$cfg_displayDimensionX_mm),
+      displayDimensionY_mm = blank_to_null(input$cfg_displayDimensionY_mm),
+      qcThresholds = qc_thresholds_to_percent(qc_thresholds())
+    )
+
+    utils::modifyList(extra, form_fields, keep.null = TRUE)
+  })
+
+  # shinySaveButton (rather than downloadButton/downloadHandler): matches the
+  # Setup app's own P9-04 save control, and for the same reason --
+  # write_batch_config() validates before writing anything (R/batchConfig.R),
+  # so an incomplete "fresh" save (e.g. no batch name filled in, no config
+  # loaded to carry a directoryBIDS forward) is just a caught error and a
+  # clear status message here, never a partially-written file.
+  observeEvent(input$save_config, {
+    if (is.null(input$save_config) || !is.list(input$save_config)) {
+      return()
+    }
+    save_path <- shinyFiles::parseSavePath(volumes, input$save_config)
+    if (nrow(save_path) == 0) {
+      return()
+    }
+    dest <- save_path$datapath[1]
+
+    result <- tryCatch(
+      {
+        eyeQuality::write_batch_config(build_current_config(), dest)
+        list(ok = TRUE, message = paste0("Saved config to ", dest))
+      },
+      error = function(e) {
+        list(ok = FALSE, message = paste0("Could not save config: ", conditionMessage(e)))
+      }
+    )
+    config_io_status(result)
+  })
+
+  # Load config: read(validate = FALSE) deliberately, unlike the Setup app's
+  # own load handler -- this app only cares about qcThresholds (plus
+  # carrying forward whatever else the file has for a later resave), not
+  # whether the file's run parameters are themselves complete/valid, so a
+  # config this app can't fully validate (e.g. one still missing a batch
+  # name, saved standalone from this same app) must still load its
+  # thresholds rather than being rejected outright. Any qcThresholds entry
+  # that isn't a currently recognized threshold_id, or whose value isn't a
+  # sane 0-100 percentage, is dropped by filter_recognized_qc_thresholds()
+  # (helpers.R) rather than erroring -- covers both a hand-edited typo and a
+  # config written by a future eyeQuality version with a metric this version
+  # doesn't know about (P10-07's forward-compatibility requirement).
+  #
+  # Every threshold_id's numericInput is always set here (to the loaded
+  # value if kept, otherwise back to its documented default) rather than
+  # only updating the ones the file happened to specify -- so "load" fully
+  # determines the resulting threshold state, the same way the Setup app's
+  # load handler unconditionally sets every form field it owns.
+  observeEvent(input$load_config_file, {
+    req(input$load_config_file)
+
+    result <- tryCatch(
+      {
+        config <- eyeQuality::read_batch_config(input$load_config_file$datapath, validate = FALSE)
+        list(ok = TRUE, config = config)
+      },
+      error = function(e) {
+        list(ok = FALSE, message = paste0("Could not load config: ", conditionMessage(e)))
+      }
+    )
+
+    if (!isTRUE(result$ok)) {
+      config_io_status(list(ok = FALSE, message = result$message))
+      return()
+    }
+
+    config <- result$config
+    filtered <- filter_recognized_qc_thresholds(config$qcThresholds)
+    config$qcThresholds <- filtered$kept
+    loaded_config_extra(config)
+
+    updateTextInput(session, "cfg_batchName", value = null_to_blank(config$batchName))
+    updateTextInput(session, "cfg_directoryBIDS", value = null_to_blank(config$directoryBIDS))
+    updateNumericInput(
+      session, "cfg_displayDimensionX_mm",
+      value = if (is.null(config$displayDimensionX_mm)) NA else config$displayDimensionX_mm
+    )
+    updateNumericInput(
+      session, "cfg_displayDimensionY_mm",
+      value = if (is.null(config$displayDimensionY_mm)) NA else config$displayDimensionY_mm
+    )
+
+    defaults_percent <- lapply(default_qc_thresholds(), function(f) f * 100)
+    for (id in names(defaults_percent)) {
+      kept_value <- filtered$kept[[id]]
+      percent_value <- if (!is.null(kept_value)) kept_value else defaults_percent[[id]]
+      updateNumericInput(session, paste0("qc_threshold_", id), value = percent_value)
+    }
+
+    message <- paste0("Loaded config from ", input$load_config_file$name)
+    if (length(filtered$dropped) > 0) {
+      message <- paste0(
+        message, " (ignored unrecognized/invalid qcThresholds entry(ies): ",
+        paste(filtered$dropped, collapse = ", "), ")"
+      )
+    }
+    config_io_status(list(ok = TRUE, message = message))
+  })
+
+  output$config_io_status <- renderUI({
+    status <- config_io_status()
+    if (is.null(status)) {
+      return(NULL)
+    }
+    div(
+      class = if (isTRUE(status$ok)) "alert alert-success" else "alert alert-danger",
+      status$message
+    )
   })
 }
 

@@ -806,3 +806,466 @@ test_that("changing a QC threshold numericInput live changes qc_thresholds() and
     expect_true(flags3[["valid_raw_data"]])
   })
 })
+
+# ---------------------------------------------------------------------------
+# P10-07: save/load QC thresholds via the shared batch_config.yaml
+# ---------------------------------------------------------------------------
+#
+# helpers.R-level tests first (filter_recognized_qc_thresholds(),
+# qc_thresholds_to_percent() -- Shiny-free), then live app.R save/load flows
+# via shiny::testServer(), following the same shinyDirButton/shinySaveButton
+# simulation technique and MockShinySession$sendInputMessage() no-op
+# workaround established in test-runSetupApp.R's own P9-04 tests (see that
+# file's header comment for the full explanation of the limitation).
+
+# ---------------------------------------------------------------------------
+# filter_recognized_qc_thresholds()
+# ---------------------------------------------------------------------------
+
+test_that("filter_recognized_qc_thresholds keeps every recognized, in-range entry and drops nothing when the input is already clean", {
+  result <- filter_recognized_qc_thresholds(list(valid_pct = 72, robust_pct = 58, interp_pct = 22))
+
+  expect_equal(result$kept, list(valid_pct = 72, robust_pct = 58, interp_pct = 22))
+  expect_length(result$dropped, 0)
+})
+
+test_that("filter_recognized_qc_thresholds drops an unrecognized threshold_id but keeps the recognized entries alongside it", {
+  result <- filter_recognized_qc_thresholds(list(valid_pct = 72, not_a_real_metric = 40))
+
+  expect_equal(result$kept, list(valid_pct = 72))
+  expect_equal(result$dropped, "not_a_real_metric")
+})
+
+test_that("filter_recognized_qc_thresholds drops a recognized id whose value is out of the 0-100 range", {
+  result <- filter_recognized_qc_thresholds(list(robust_pct = 150, interp_pct = -5))
+
+  expect_length(result$kept, 0)
+  expect_setequal(result$dropped, c("robust_pct", "interp_pct"))
+})
+
+test_that("filter_recognized_qc_thresholds drops a recognized id whose value is non-numeric or NA", {
+  result <- filter_recognized_qc_thresholds(list(valid_pct = "eighty", robust_pct = NA_real_))
+
+  expect_length(result$kept, 0)
+  expect_setequal(result$dropped, c("valid_pct", "robust_pct"))
+})
+
+test_that("filter_recognized_qc_thresholds returns empty kept/dropped for NULL or a zero-length input, never an error", {
+  result_null <- filter_recognized_qc_thresholds(NULL)
+  expect_equal(result_null, list(kept = list(), dropped = character(0)))
+
+  result_empty <- filter_recognized_qc_thresholds(list())
+  expect_equal(result_empty, list(kept = list(), dropped = character(0)))
+})
+
+test_that("filter_recognized_qc_thresholds does not raise an error the way validate_batch_config's strict path would on the same bad input", {
+  # The whole point of this function existing separately from
+  # validate_batch_config() (R/batchConfig.R): a hand-edited file with a typo
+  # or out-of-range value must not block the Analyze app's "Load config" flow
+  # the way it correctly blocks write_batch_config()/a strict re-save.
+  bad_input <- list(valid_pct = 999, made_up_id = 10)
+
+  expect_error(
+    eyeQuality::validate_batch_config(list(
+      schemaVersion = 1, batchName = "x", directoryBIDS = "/d",
+      displayDimensionX_mm = 1, displayDimensionY_mm = 1,
+      qcThresholds = bad_input
+    )),
+    "qcThresholds"
+  )
+  expect_no_error(filter_recognized_qc_thresholds(bad_input))
+})
+
+# ---------------------------------------------------------------------------
+# qc_thresholds_to_percent()
+# ---------------------------------------------------------------------------
+
+test_that("qc_thresholds_to_percent converts a named list of 0-1 fractions to the 0-100 percentage scale batch_config.yaml stores", {
+  result <- qc_thresholds_to_percent(list(valid_pct = 0.72, robust_pct = 0.5, interp_pct = 0.2))
+
+  expect_equal(result, list(valid_pct = 72, robust_pct = 50, interp_pct = 20))
+})
+
+test_that("qc_thresholds_to_percent maps a NULL or NA fraction to NA_real_ rather than erroring", {
+  result <- qc_thresholds_to_percent(list(valid_pct = NULL, robust_pct = NA))
+  expect_equal(result$robust_pct, NA_real_)
+})
+
+# ---------------------------------------------------------------------------
+# Live app.R save/load flows (shiny::testServer())
+# ---------------------------------------------------------------------------
+
+analyze_app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+if (!nzchar(analyze_app_dir)) {
+  stop("test-runAnalyzeApp.R: could not locate inst/shiny-apps/analyze/ via system.file()")
+}
+setup_app_dir_p1007 <- system.file("shiny-apps", "setup", package = "eyeQuality")
+if (!nzchar(setup_app_dir_p1007)) {
+  stop("test-runAnalyzeApp.R: could not locate inst/shiny-apps/setup/ via system.file()")
+}
+
+# rel_home_segments: converts an absolute path under fs::path_home() into the
+# root/path-segment list shinyFiles::shinyDirChoose()/shinyFileSave()
+# selections use, so a real directory/save-target can be simulated via
+# session$setInputs() without a live browser picker. Duplicated locally
+# (rather than shared with test-runSetupApp.R) per this repo's test-file
+# self-containedness convention -- see e.g. copy_bids_fixture_tree() above.
+rel_home_segments_p1007 <- function(path) {
+  home <- normalizePath(fs::path_home(), winslash = "/")
+  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  testthat::skip_if_not(
+    startsWith(path, home),
+    "test tempdir is not under fs::path_home(); shinyFiles root-relative simulation would not resolve"
+  )
+  rel <- sub(paste0("^", home, "/?"), "", path)
+  as.list(strsplit(rel, "/")[[1]])
+}
+
+test_that("Analyze app fresh save: study info + live thresholds round-trip through write_batch_config()/read_batch_config()", {
+  skip_on_cran()
+
+  save_dir <- tempfile("p1007_fresh_save_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments_p1007(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "fresh.yaml")
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      cfg_batchName = "analyze_fresh_save",
+      cfg_directoryBIDS = "/data/analyze_fresh",
+      cfg_displayDimensionX_mm = 601,
+      cfg_displayDimensionY_mm = 401,
+      qc_threshold_valid_pct = 70,
+      qc_threshold_robust_pct = 55,
+      qc_threshold_interp_pct = 25
+    )
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "fresh.yaml", type = "yaml"
+    ))
+
+    status <- config_io_status()
+    expect_true(status$ok)
+  })
+
+  expect_true(file.exists(save_path))
+  loaded <- read_batch_config(save_path)
+  expect_equal(loaded$batchName, "analyze_fresh_save")
+  expect_equal(loaded$directoryBIDS, "/data/analyze_fresh")
+  expect_equal(loaded$displayDimensionX_mm, 601)
+  expect_equal(loaded$displayDimensionY_mm, 401)
+  expect_equal(loaded$qcThresholds$valid_pct, 70)
+  expect_equal(loaded$qcThresholds$robust_pct, 55)
+  expect_equal(loaded$qcThresholds$interp_pct, 25)
+  # no config was ever loaded this session, so run-parameter fields the
+  # Analyze app's own form doesn't expose fall back to default_batch_config()
+  expect_equal(loaded$layout, "bids")
+  expect_null(loaded$adapterType)
+})
+
+test_that("Analyze app fresh save with no study info filled in fails cleanly via validate_batch_config(), no partial file written", {
+  skip_on_cran()
+
+  save_dir <- tempfile("p1007_fresh_fail_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments_p1007(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "fresh_fail.yaml")
+
+  shiny::testServer(analyze_app_dir, {
+    # deliberately leave cfg_batchName/cfg_directoryBIDS/cfg_displayDimension*_mm
+    # at their blank/NA ui defaults -- only touch the thresholds
+    session$setInputs(qc_threshold_valid_pct = 65)
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "fresh_fail.yaml", type = "yaml"
+    ))
+
+    status <- config_io_status()
+    expect_false(status$ok)
+    expect_match(status$message, "batchName", fixed = TRUE)
+    expect_match(status$message, "directoryBIDS", fixed = TRUE)
+    expect_match(status$message, "displayDimensionX_mm", fixed = TRUE)
+    expect_match(status$message, "displayDimensionY_mm", fixed = TRUE)
+  })
+
+  expect_false(file.exists(save_path))
+})
+
+test_that("Analyze app load-Setup-only-config-then-resave: run params survive untouched, only the tweaked threshold changes", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p1007_loadresave_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+
+  # A config with no qcThresholds section at all -- exactly what the Setup
+  # app alone would have produced (P9-04), predating this task.
+  loaded_cfg_path <- tempfile("p1007_loadresave_cfg_", fileext = ".yaml")
+  on.exit(unlink(loaded_cfg_path), add = TRUE)
+  write_batch_config(
+    list(
+      batchName = "setup_only_run",
+      directoryBIDS = normalizePath(data_dir, winslash = "/"),
+      layout = "glob",
+      pathPattern = "sub-*/**/*.tsv",
+      excludePattern_regex = "deriv",
+      modalityPattern_regex = "gaze",
+      adapterType = "TobiiStudio",
+      numberCores = 6,
+      eyeSelection_method = "Left",
+      validityThreshold = 0.55,
+      outputDir = "/custom/out",
+      displayDimensionX_mm = 555,
+      displayDimensionY_mm = 333
+    ),
+    loaded_cfg_path
+  )
+
+  save_dir <- tempfile("p1007_loadresave_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments_p1007(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "resaved.yaml")
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(load_config_file = data.frame(
+      name = "setup_only_run.yaml",
+      datapath = loaded_cfg_path,
+      stringsAsFactors = FALSE
+    ))
+
+    load_status <- config_io_status()
+    expect_true(load_status$ok)
+
+    extra <- loaded_config_extra()
+    expect_equal(extra$layout, "glob")
+    expect_equal(extra$pathPattern, "sub-*/**/*.tsv")
+    expect_equal(extra$adapterType, "TobiiStudio")
+    expect_equal(extra$numberCores, 6)
+    expect_equal(extra$eyeSelection_method, "Left")
+    expect_equal(extra$validityThreshold, 0.55)
+    expect_equal(extra$outputDir, "/custom/out")
+    # no qcThresholds section in the loaded file -> filtered to an empty kept set
+    expect_equal(extra$qcThresholds, list())
+
+    # See this file's header comment: update*Input() calls the load handler
+    # just made are no-ops in this harness, so input$cfg_batchName/
+    # cfg_directoryBIDS/cfg_displayDimension*_mm never actually changed here
+    # the way a real browser would have reflected them. Set them explicitly to
+    # what the config just loaded, standing in for that reflection, so the
+    # resave below can succeed (validate_batch_config() requires all four) --
+    # this does not touch layout/pathPattern/adapterType/etc., which is the
+    # actual behavior under test.
+    session$setInputs(
+      cfg_batchName = "setup_only_run",
+      cfg_directoryBIDS = normalizePath(data_dir, winslash = "/"),
+      cfg_displayDimensionX_mm = 555,
+      cfg_displayDimensionY_mm = 333
+    )
+
+    # tweak exactly one threshold
+    session$setInputs(qc_threshold_interp_pct = 12)
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "resaved.yaml", type = "yaml"
+    ))
+    save_status <- config_io_status()
+    expect_true(save_status$ok)
+  })
+
+  expect_true(file.exists(save_path))
+  resaved <- read_batch_config(save_path)
+  expect_equal(resaved$batchName, "setup_only_run")
+  expect_equal(resaved$layout, "glob")
+  expect_equal(resaved$pathPattern, "sub-*/**/*.tsv")
+  expect_equal(resaved$excludePattern_regex, "deriv")
+  expect_equal(resaved$modalityPattern_regex, "gaze")
+  expect_equal(resaved$adapterType, "TobiiStudio")
+  expect_equal(resaved$numberCores, 6)
+  expect_equal(resaved$eyeSelection_method, "Left")
+  expect_equal(resaved$validityThreshold, 0.55)
+  expect_equal(resaved$outputDir, "/custom/out")
+  expect_equal(resaved$displayDimensionX_mm, 555)
+  expect_equal(resaved$displayDimensionY_mm, 333)
+  # tweaked threshold shows the new value...
+  expect_equal(resaved$qcThresholds$interp_pct, 12)
+  # ...while untouched thresholds fall back to their documented defaults
+  # (80/80), not to something left over from the loaded config (which had none)
+  expect_equal(resaved$qcThresholds$valid_pct, 80)
+  expect_equal(resaved$qcThresholds$robust_pct, 80)
+})
+
+test_that("Analyze app load-with-unrecognized-key: dropped gracefully with a status message, recognized key still carried forward for resave", {
+  skip_on_cran()
+
+  # Hand-edited config (not written via write_batch_config(), which would
+  # refuse this outright) with one recognized-and-sane entry, one
+  # unrecognized threshold_id, and one recognized id with an out-of-range
+  # value -- both of the latter two must be dropped, not just the first.
+  hand_edited_path <- tempfile("p1007_handedited_", fileext = ".yaml")
+  on.exit(unlink(hand_edited_path), add = TRUE)
+  yaml::write_yaml(list(
+    schemaVersion = 1,
+    batchName = "hand_edited_run",
+    directoryBIDS = "/data/hand_edited",
+    displayDimensionX_mm = 200,
+    displayDimensionY_mm = 150,
+    qcThresholds = list(valid_pct = 66, made_up_metric = 999, robust_pct = 150)
+  ), hand_edited_path)
+
+  save_dir <- tempfile("p1007_handedited_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments_p1007(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "handedited_resaved.yaml")
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(load_config_file = data.frame(
+      name = "hand_edited.yaml",
+      datapath = hand_edited_path,
+      stringsAsFactors = FALSE
+    ))
+
+    load_status <- config_io_status()
+    expect_true(load_status$ok) # the load itself still succeeds overall
+    expect_match(load_status$message, "made_up_metric", fixed = TRUE)
+    expect_match(load_status$message, "robust_pct", fixed = TRUE)
+
+    extra <- loaded_config_extra()
+    expect_equal(extra$qcThresholds, list(valid_pct = 66))
+
+    # See the file-level workaround comment above: reflect what a real
+    # browser's update*Input() calls would have set for the one entry that
+    # WAS kept, since MockShinySession's sendInputMessage() is a no-op here.
+    session$setInputs(
+      cfg_batchName = "hand_edited_run",
+      cfg_directoryBIDS = "/data/hand_edited",
+      cfg_displayDimensionX_mm = 200,
+      cfg_displayDimensionY_mm = 150,
+      qc_threshold_valid_pct = 66
+    )
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "handedited_resaved.yaml", type = "yaml"
+    ))
+    save_status <- config_io_status()
+    expect_true(save_status$ok)
+  })
+
+  resaved <- read_batch_config(save_path)
+  # the recognized/sane entry survived the drop-and-resave round trip...
+  expect_equal(resaved$qcThresholds$valid_pct, 66)
+  # ...while the dropped entries are nowhere in the resaved file: robust_pct
+  # falls back to its documented default (80), and made_up_metric never
+  # existed as a recognized key to begin with
+  expect_equal(resaved$qcThresholds$robust_pct, 80)
+  expect_false("made_up_metric" %in% names(resaved$qcThresholds))
+})
+
+test_that("Cross-app round trip: Setup app saves a config, Analyze app loads/tweaks/resaves it in place, Setup app reloads it with its own fields unaffected", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p1007_crossapp_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+  data_segments <- rel_home_segments_p1007(data_dir)
+
+  shared_dir <- tempfile("p1007_crossapp_shared_")
+  dir.create(shared_dir, recursive = TRUE)
+  on.exit(unlink(shared_dir, recursive = TRUE), add = TRUE)
+  shared_segments <- rel_home_segments_p1007(shared_dir)
+  shared_path <- file.path(normalizePath(shared_dir, winslash = "/"), "shared.yaml")
+
+  # --- Step 1: Setup app saves the initial config -----------------------
+  shiny::testServer(setup_app_dir_p1007, {
+    session$setInputs(directory = list(root = "Home", path = data_segments))
+    session$setInputs(
+      layout = "glob",
+      pathPattern = "**/*.tsv",
+      excludePattern_regex = "deriv",
+      modalityPattern_regex = "gaze",
+      displayDimensionX_mm = 611,
+      displayDimensionY_mm = 411,
+      eyeSelection_method = "Strict",
+      validityThreshold = 0.6,
+      outputDir = "",
+      batchName = "crossapp_study"
+    )
+    session$setInputs(save_config = list(
+      root = "Home", path = shared_segments, name = "shared.yaml", type = "yaml"
+    ))
+    expect_true(config_io_status()$ok)
+  })
+
+  expect_true(file.exists(shared_path))
+  after_setup_save <- read_batch_config(shared_path)
+  expect_null(after_setup_save$qcThresholds)
+
+  # --- Step 2: Analyze app loads it, tweaks thresholds, resaves in place --
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(load_config_file = data.frame(
+      name = "shared.yaml",
+      datapath = shared_path,
+      stringsAsFactors = FALSE
+    ))
+    expect_true(config_io_status()$ok)
+
+    # reflect the loaded study-info fields (see no-op workaround comment above)
+    session$setInputs(
+      cfg_batchName = "crossapp_study",
+      cfg_directoryBIDS = after_setup_save$directoryBIDS,
+      cfg_displayDimensionX_mm = 611,
+      cfg_displayDimensionY_mm = 411,
+      qc_threshold_valid_pct = 90,
+      qc_threshold_robust_pct = 85,
+      qc_threshold_interp_pct = 10
+    )
+
+    session$setInputs(save_config = list(
+      root = "Home", path = shared_segments, name = "shared.yaml", type = "yaml"
+    ))
+    expect_true(config_io_status()$ok)
+  })
+
+  after_analyze_save <- read_batch_config(shared_path)
+  expect_equal(after_analyze_save$qcThresholds$valid_pct, 90)
+  expect_equal(after_analyze_save$qcThresholds$robust_pct, 85)
+  expect_equal(after_analyze_save$qcThresholds$interp_pct, 10)
+  # Setup app's own fields must be exactly what step 1 wrote, unaffected by
+  # the Analyze app's resave.
+  expect_equal(after_analyze_save$layout, "glob")
+  expect_equal(after_analyze_save$pathPattern, "**/*.tsv")
+  expect_equal(after_analyze_save$excludePattern_regex, "deriv")
+  expect_equal(after_analyze_save$modalityPattern_regex, "gaze")
+  expect_equal(after_analyze_save$eyeSelection_method, "Strict")
+  expect_equal(after_analyze_save$validityThreshold, 0.6)
+  expect_equal(after_analyze_save$batchName, "crossapp_study")
+
+  # --- Step 3: Setup app re-loads the same file; its own fields survive ---
+  shiny::testServer(setup_app_dir_p1007, {
+    session$setInputs(load_config_file = data.frame(
+      name = "shared.yaml",
+      datapath = shared_path,
+      stringsAsFactors = FALSE
+    ))
+
+    reload_status <- config_io_status()
+    expect_true(reload_status$ok)
+
+    extra <- loaded_config_extra()
+    expect_equal(extra$layout, "glob")
+    expect_equal(extra$pathPattern, "**/*.tsv")
+    expect_equal(extra$excludePattern_regex, "deriv")
+    expect_equal(extra$modalityPattern_regex, "gaze")
+    expect_equal(extra$eyeSelection_method, "Strict")
+    expect_equal(extra$validityThreshold, 0.6)
+    expect_equal(extra$batchName, "crossapp_study")
+    expect_equal(extra$displayDimensionX_mm, 611)
+    expect_equal(extra$displayDimensionY_mm, 411)
+    # the Analyze app's qcThresholds edits are still present in the config
+    # this app doesn't itself expose a form for, unaffected by this reload
+    expect_equal(extra$qcThresholds$valid_pct, 90)
+  })
+})

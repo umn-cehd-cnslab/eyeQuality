@@ -503,3 +503,108 @@ load_plot_data <- function(qcsummary_path) {
     }
   )
 }
+
+# ---------------------------------------------------------------------------
+# P10-07: save/load QC thresholds via the same batch_config.yaml the Setup
+# app (P9-04) reads/writes -- one shared config file per study covering both
+# run parameters and QC thresholds, not a second, fragmented config format.
+# ---------------------------------------------------------------------------
+
+# recognized_qc_threshold_ids: qc_threshold_config's unique threshold_id
+# values -- the single source of truth for which qcThresholds keys this app
+# (and R/batchConfig.R's validate_batch_config(), which sources this exact
+# file via .known_qc_threshold_ids() to build the same list) recognizes. A
+# thin wrapper around qc_threshold_config (defined above) so nothing here
+# duplicates that definition.
+recognized_qc_threshold_ids <- function() {
+  unique(qc_threshold_config$threshold_id)
+}
+
+# blank_to_null / null_to_blank: the same "blank field <-> NULL" convention
+# the Setup app's helpers.R (P9-04) uses for its own optional text/numeric
+# fields. Duplicated here rather than shared -- each app's helpers.R is
+# already a self-contained, independently sourced file (see this file's own
+# header comment), and these two converters are simple enough that
+# duplication carries no real drift risk.
+blank_to_null <- function(x) {
+  if (is.null(x) || length(x) == 0) {
+    return(NULL)
+  }
+  if (length(x) == 1 && is.na(x)) {
+    return(NULL)
+  }
+  if (is.character(x) && length(x) == 1 && !nzchar(trimws(x))) {
+    return(NULL)
+  }
+  x
+}
+
+null_to_blank <- function(x) {
+  if (is.null(x)) "" else x
+}
+
+# qc_thresholds_to_percent: convert a named list of 0-1 fractions keyed by
+# threshold_id (the shape app.R's qc_thresholds() reactive produces, and
+# compute_qc_flags() consumes) to the 0-100 percentage scale
+# batch_config.yaml's qcThresholds section is stored on -- the same unit
+# qc_threshold_config$default_percent and the numericInput controls
+# themselves use, so a saved config's numbers read back exactly what a user
+# typed rather than an internal fraction.
+qc_thresholds_to_percent <- function(thresholds) {
+  stats::setNames(
+    lapply(thresholds, function(v) if (is.null(v) || is.na(v)) NA_real_ else v * 100),
+    names(thresholds)
+  )
+}
+
+# filter_recognized_qc_thresholds: drop any qcThresholds entry (as read from
+# a batch_config.yaml, percent-scale) whose key isn't a currently recognized
+# threshold_id, or whose value isn't a sane 0-100 percentage -- e.g. a config
+# hand-edited with a typo, or written by a future eyeQuality version that
+# supports a QC metric this version doesn't (P10-07's forward-compatibility
+# requirement).
+#
+# Unlike R/batchConfig.R's validate_batch_config(), which treats either
+# problem as a hard error (the right behavior when a config is about to be
+# programmatically relied on or explicitly re-saved as-is), the Analyze
+# app's own "Load config" flow needs to tolerate this instead: a stray or
+# future threshold entry in an otherwise-fine batch_config.yaml shouldn't
+# block loading the rest of that file (its run parameters, carried forward
+# via app.R's loaded_config_extra, or its still-recognized threshold
+# entries) into the app. That's why app.R's load handler reads via
+# read_batch_config(path, validate = FALSE) and calls this function itself,
+# rather than relying on validate_batch_config() to have already screened
+# qcThresholds.
+#
+# qcThresholds: NULL, or a named list/vector as read from a batch_config.yaml
+#   (percent-scale, per validate_batch_config()'s convention). A config with
+#   no qcThresholds section at all (every config written before this field
+#   existed, or one written by the Setup app alone) reads back as NULL here
+#   too, via read_batch_config()'s default-filling -- handled the same as an
+#   empty list, not an error.
+#
+# Returns a list: kept (named list of only the recognized, sane-valued
+# entries, possibly empty), dropped (character vector of the entry names
+# that were dropped, possibly empty).
+filter_recognized_qc_thresholds <- function(qcThresholds) {
+  if (is.null(qcThresholds) || length(qcThresholds) == 0) {
+    return(list(kept = list(), dropped = character(0)))
+  }
+
+  known_ids <- recognized_qc_threshold_ids()
+  is_sane_percent <- function(v) {
+    is.numeric(v) && length(v) == 1 && !is.na(v) && v >= 0 && v <= 100
+  }
+  entry_names <- names(qcThresholds)
+  if (is.null(entry_names)) {
+    entry_names <- rep("", length(qcThresholds))
+  }
+  keep_flags <- vapply(seq_along(qcThresholds), function(i) {
+    nzchar(entry_names[i]) && entry_names[i] %in% known_ids && is_sane_percent(qcThresholds[[i]])
+  }, logical(1))
+
+  list(
+    kept = qcThresholds[keep_flags],
+    dropped = entry_names[!keep_flags]
+  )
+}

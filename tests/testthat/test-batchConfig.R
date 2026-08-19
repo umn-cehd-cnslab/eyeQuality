@@ -268,6 +268,123 @@ test_that("read_batch_config errors on a nonexistent file", {
 
 # --- template file ---------------------------------------------------------
 
+# --- qcThresholds (P10-07) ------------------------------------------------
+
+test_that("default_batch_config includes qcThresholds = NULL", {
+  cfg <- default_batch_config()
+  expect_true("qcThresholds" %in% names(cfg))
+  expect_null(cfg$qcThresholds)
+})
+
+test_that(".known_qc_threshold_ids matches the Analyze app's qc_threshold_config exactly (single source of truth)", {
+  helpers_path <- system.file("shiny-apps", "analyze", "helpers.R", package = "eyeQuality")
+  expect_true(nzchar(helpers_path))
+
+  helpers_env <- new.env()
+  source(helpers_path, local = helpers_env)
+  expected_ids <- unique(helpers_env$qc_threshold_config$threshold_id)
+
+  expect_setequal(.known_qc_threshold_ids(), expected_ids)
+  # pin the concrete values too, so a change to qc_threshold_config's ids is
+  # visible here even if this test's helper-sourcing somehow drifted
+  expect_setequal(.known_qc_threshold_ids(), c("valid_pct", "robust_pct", "interp_pct"))
+})
+
+test_that("validate_batch_config treats a config with no qcThresholds section as fully valid (backward compat)", {
+  cfg <- minimal_valid_config()
+  expect_null(cfg$qcThresholds)
+  expect_true(validate_batch_config(cfg))
+})
+
+test_that("validate_batch_config accepts recognized qcThresholds ids with in-range values", {
+  cfg <- minimal_valid_config(list(qcThresholds = list(valid_pct = 75, robust_pct = 60, interp_pct = 15)))
+  expect_true(validate_batch_config(cfg))
+})
+
+test_that("validate_batch_config accepts qcThresholds boundary values 0 and 100 (inclusive range)", {
+  cfg_zero <- minimal_valid_config(list(qcThresholds = list(valid_pct = 0)))
+  cfg_hundred <- minimal_valid_config(list(qcThresholds = list(valid_pct = 100)))
+  expect_true(validate_batch_config(cfg_zero))
+  expect_true(validate_batch_config(cfg_hundred))
+})
+
+test_that("validate_batch_config errors on a qcThresholds value just outside the 0-100 range", {
+  cfg_neg <- minimal_valid_config(list(qcThresholds = list(valid_pct = -1)))
+  cfg_over <- minimal_valid_config(list(qcThresholds = list(valid_pct = 101)))
+
+  expect_error(validate_batch_config(cfg_neg), "qcThresholds.*valid_pct.*between 0 and 100")
+  expect_error(validate_batch_config(cfg_over), "qcThresholds.*valid_pct.*between 0 and 100")
+})
+
+test_that("validate_batch_config errors on an unrecognized qcThresholds threshold_id", {
+  cfg <- minimal_valid_config(list(qcThresholds = list(made_up_metric = 50)))
+  expect_error(validate_batch_config(cfg), "qcThresholds.*unrecognized threshold_id.*made_up_metric")
+})
+
+test_that("validate_batch_config errors when qcThresholds is not a named list", {
+  cfg_unnamed <- minimal_valid_config(list(qcThresholds = list(50, 60)))
+  cfg_not_list <- minimal_valid_config(list(qcThresholds = "not a list"))
+
+  expect_error(validate_batch_config(cfg_unnamed), "qcThresholds.*must all be named")
+  expect_error(validate_batch_config(cfg_not_list), "qcThresholds.*must be NULL or a named list")
+})
+
+test_that("validate_batch_config errors when a qcThresholds value is non-numeric", {
+  cfg <- minimal_valid_config(list(qcThresholds = list(valid_pct = "eighty")))
+  expect_error(validate_batch_config(cfg), "qcThresholds.*valid_pct.*between 0 and 100")
+})
+
+test_that("qcThresholds validation fails open (does not block an unrecognized id) when the id list can't be sourced", {
+  # Reproduces the "helpers.R can't be located" branch of .known_qc_threshold_ids()
+  # without touching the filesystem: stub the internal id-lookup to return
+  # character(0), the exact value that function returns when system.file()
+  # can't find inst/shiny-apps/analyze/helpers.R (e.g. an unusual install).
+  # validate_batch_config() must treat that as "can't verify, don't block"
+  # rather than rejecting every qcThresholds entry as unrecognized.
+  testthat::local_mocked_bindings(
+    .known_qc_threshold_ids = function() character(0)
+  )
+
+  cfg <- minimal_valid_config(list(qcThresholds = list(anything_at_all = 50)))
+  expect_true(validate_batch_config(cfg))
+
+  # a value still out of range must still be caught even when ids can't be verified
+  cfg_bad_value <- minimal_valid_config(list(qcThresholds = list(anything_at_all = 150)))
+  expect_error(validate_batch_config(cfg_bad_value), "between 0 and 100")
+})
+
+test_that("write_batch_config/read_batch_config round-trips qcThresholds", {
+  path <- tempfile("batchconfig_qcthresholds_", fileext = ".yaml")
+  on.exit(unlink(path), add = TRUE)
+
+  cfg <- minimal_valid_config(list(qcThresholds = list(valid_pct = 72, robust_pct = 65, interp_pct = 18)))
+  write_batch_config(cfg, path)
+  loaded <- read_batch_config(path)
+
+  expect_equal(loaded$qcThresholds$valid_pct, 72)
+  expect_equal(loaded$qcThresholds$robust_pct, 65)
+  expect_equal(loaded$qcThresholds$interp_pct, 18)
+})
+
+test_that("write_batch_config/read_batch_config round-trips a config predating qcThresholds as NULL (forward-compat, no section written)", {
+  path <- tempfile("batchconfig_no_qcthresholds_", fileext = ".yaml")
+  on.exit(unlink(path), add = TRUE)
+
+  # a config saved with no qcThresholds key at all -- as every config written
+  # before this field existed would be
+  yaml::write_yaml(list(
+    schemaVersion = 1,
+    batchName = "predates_qcthresholds",
+    directoryBIDS = "/data/pre",
+    displayDimensionX_mm = 200,
+    displayDimensionY_mm = 200
+  ), path)
+
+  loaded <- read_batch_config(path)
+  expect_null(loaded$qcThresholds)
+  expect_true(validate_batch_config(loaded))
+})
+
 test_that("the bundled batch_config_template.yaml parses and validates cleanly", {
   template_path <- system.file("templates", "batch_config_template.yaml", package = "eyeQuality")
   expect_true(nzchar(template_path))

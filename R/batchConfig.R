@@ -65,8 +65,43 @@ default_batch_config <- function() {
     eyeSelection_method = "Maximize",
     validityThreshold = NULL,
     outputDir = NULL,
-    numberCores = NULL
+    numberCores = NULL,
+    qcThresholds = NULL
   )
+}
+
+# .known_qc_threshold_ids: the qcThresholds keys validate_batch_config()
+# below recognizes, read directly from the Analyze app's qc_threshold_config
+# (inst/shiny-apps/analyze/helpers.R, P10-02) rather than duplicated here --
+# that object (and its own comment explaining what each threshold_id means
+# and why those particular metrics were chosen) is the single source of
+# truth for which QC metrics are thresholdable, and this function exists
+# purely so validate_batch_config() doesn't have to keep a second id list in
+# sync with it by hand. Sourced fresh into an isolated environment (parented
+# to baseenv(), not the caller's search path) on every call -- helpers.R is
+# a tiny, dependency-free file (its top-level statements only define
+# functions and one data.frame() literal; every package/other-file call
+# inside those function bodies is fully namespace-qualified, so it neither
+# needs nor picks up anything from the caller's environment) with no
+# meaningful cost to re-source, so this avoids a stale in-memory copy rather
+# than trading correctness for a cache.
+#
+# Returns a character vector of unique threshold_id values, or character(0)
+# if inst/shiny-apps/analyze/helpers.R can't be located (e.g. an unusual
+# install without the Shiny apps present) -- validate_batch_config() treats
+# that as "can't verify, don't block" rather than rejecting every
+# qcThresholds entry as unrecognized.
+.known_qc_threshold_ids <- function() {
+  helpers_path <- system.file("shiny-apps", "analyze", "helpers.R", package = "eyeQuality")
+  if (!nzchar(helpers_path)) {
+    return(character(0))
+  }
+  env <- new.env(parent = baseenv())
+  source(helpers_path, local = env)
+  if (!exists("qc_threshold_config", envir = env, inherits = FALSE)) {
+    return(character(0))
+  }
+  unique(env$qc_threshold_config$threshold_id)
 }
 
 #' Validate a `batch_config.yaml`-shaped list
@@ -198,6 +233,41 @@ validate_batch_config <- function(config) {
     add_problem("`numberCores` must be NULL or a single positive integer")
   }
 
+  # --- qcThresholds (P10-07, optional) ---------------------------------
+  # Analyze app (P10-02) QC threshold overrides, saved alongside a batch
+  # run's own parameters in the same file rather than a second config
+  # format. NULL -- what every config written before this field existed
+  # reads back as, via default_batch_config()'s fill-in in
+  # read_batch_config()/write_batch_config() -- is valid: thresholds simply
+  # stay at the Analyze app's own defaults. When present, each entry is
+  # keyed by a threshold_id and must be a recognized one (.known_qc_threshold_ids(),
+  # sourced from the Analyze app's qc_threshold_config so this can't drift
+  # out of sync with it) with a sane 0-100 percentage value.
+  qcThresholds <- config[["qcThresholds"]]
+  if (!is.null(qcThresholds)) {
+    if (!is.list(qcThresholds)) {
+      add_problem("`qcThresholds` must be NULL or a named list mapping threshold_id -> percent (0-100)")
+    } else if (length(qcThresholds) > 0 && (is.null(names(qcThresholds)) || any(!nzchar(names(qcThresholds))))) {
+      add_problem("`qcThresholds` entries must all be named (each name a threshold_id)")
+    } else if (length(qcThresholds) > 0) {
+      known_threshold_ids <- .known_qc_threshold_ids()
+      for (threshold_id in names(qcThresholds)) {
+        threshold_value <- qcThresholds[[threshold_id]]
+        if (length(known_threshold_ids) > 0 && !(threshold_id %in% known_threshold_ids)) {
+          add_problem(
+            "`qcThresholds` has an unrecognized threshold_id: '", threshold_id, "' (known: ",
+            paste(known_threshold_ids, collapse = ", "), ")"
+          )
+        } else if (!is_scalar_numeric(threshold_value) || threshold_value < 0 || threshold_value > 100) {
+          add_problem(
+            "`qcThresholds[[\"", threshold_id, "\"]]` must be a single number between 0 and 100 (a percentage), got: ",
+            paste(deparse(threshold_value), collapse = "")
+          )
+        }
+      }
+    }
+  }
+
   if (length(problems) > 0) {
     stop(
       "validate_batch_config: invalid batch_config:\n  - ",
@@ -304,6 +374,15 @@ write_batch_config <- function(config, path) {
 #'       `eyeQualityBatch(outputDir =)`.}
 #'     \item{`numberCores`}{positive integer or `NULL`, passed to
 #'       `eyeQualityBatch(numberCores =)`.}
+#'     \item{`qcThresholds`}{named list or `NULL` (P10-07). Optional QC
+#'       threshold overrides from the Analyze app's threshold controls
+#'       (`inst/shiny-apps/analyze/helpers.R`'s `qc_threshold_config`), keyed
+#'       by `threshold_id` with each value a 0-100 percentage. Lets one
+#'       `batch_config.yaml` cover both a study's run parameters (Setup app)
+#'       and its QC flagging settings (Analyze app) instead of splitting
+#'       into two files. Absent entirely in any config written before this
+#'       field existed -- `NULL` is the correct, fully backward-compatible
+#'       reading for that case.}
 #'   }
 #' @importFrom utils modifyList
 #' @export
