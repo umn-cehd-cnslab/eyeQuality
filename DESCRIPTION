@@ -58,7 +58,8 @@ Imports:
     tibble,
     stats,
     tools,
-    utils
+    utils,
+    yaml
 Depends: 
     R (>= 2.10)
 VignetteBuilder: knitr
