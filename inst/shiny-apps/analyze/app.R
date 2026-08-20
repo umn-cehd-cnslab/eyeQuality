@@ -111,6 +111,15 @@ ui <- fluidPage(
           br(),
           p("Click a row to view that recording's plots in the \"Plots\" tab."),
           uiOutput("qc_flag_summary"),
+          # P10-05: export every recording currently flagged by any
+          # configured threshold (qc_table_flagged()'s own qc_flag, the same
+          # source of truth the highlighting above reads) as a CSV, for
+          # handing off to a colleague or using as an exclusion/re-review
+          # list. See build_flagged_export_table() (helpers.R) and the
+          # downloadHandler below for why "flagged by any threshold" is the
+          # default rather than a single metric.
+          downloadButton("download_flagged_csv", "Export flagged for review (CSV)"),
+          br(), br(),
           DTOutput("qc_table")
         ),
         tabPanel(
@@ -270,15 +279,59 @@ server <- function(input, output, session) {
     tbl
   })
 
-  # P10-05 hook: distinct recordings with >=1 currently-flagged qc_metric
-  # row, for a future "export flagged file list" feature to consume
-  # directly rather than recomputing threshold-crossing logic itself. Not
-  # rendered to any output here -- P10-02's scope is the flagging mechanism,
-  # not the export UI.
+  # Distinct recordings with >=1 currently-flagged qc_metric row -- used
+  # below purely for the qc_flag_summary count ("N recordings"). P10-05's
+  # actual CSV export (download_flagged_csv below) doesn't wrap this
+  # reactive: it needs the per-metric detail (which metric(s), what value)
+  # this narrower recording-only shape doesn't carry, so it calls
+  # build_flagged_export_table() directly against qc_table_flagged() instead
+  # -- see that function's own comment (helpers.R) for why.
   flagged_recordings <- reactive({
     tbl <- qc_table_flagged()
     unique(tbl[tbl$qc_flag, c("recording", "batch_name", "source_file"), drop = FALSE])
   })
+
+  # P10-05: export the currently flagged recordings as a CSV.
+  #
+  # downloadButton/downloadHandler (rather than shinySaveButton, unlike this
+  # app's own P10-07 config save and the Setup app's P9-04 save) -- this
+  # export's whole point is to hand a file to a colleague or use as a local
+  # exclusion/re-review list, not to write back into the server-local output
+  # directory this app read qcsummary.tsv files from, so a browser download
+  # matches the actual use case better than a server-side save-as picker.
+  # It's also safe against downloadHandler's usual failure mode (an
+  # unhandled content() error producing a generic error page): with no data
+  # loaded or nothing flagged, build_flagged_export_table() returns NULL and
+  # content() below just writes a header-only CSV instead of erroring, so
+  # there's no invalid-input case left for content() to throw on.
+  #
+  # "Flagged by any configured threshold" (qc_table_flagged()'s qc_flag
+  # column, the same one the QC table's row highlighting and
+  # flagged_recordings() above already read) rather than a single metric --
+  # the most useful default for a triage/exclusion list is "does this
+  # recording need a second look for any reason," not one threshold at a
+  # time; a reviewer who only cares about one metric can already isolate
+  # that in the QC table's own filter row before deciding whether to trust
+  # this export.
+  output$download_flagged_csv <- downloadHandler(
+    filename = function() {
+      paste0("flagged_for_review_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
+    },
+    content = function(file) {
+      tbl <- build_flagged_export_table(qc_table_flagged())
+      if (is.null(tbl)) {
+        tbl <- data.frame(
+          recording = character(0),
+          batch_name = character(0),
+          source_file = character(0),
+          n_flagged_metrics = integer(0),
+          flagged_metrics = character(0),
+          flagged_values = character(0)
+        )
+      }
+      utils::write.csv(tbl, file, row.names = FALSE)
+    }
+  )
 
   output$qc_flag_summary <- renderUI({
     tbl <- qc_table_flagged()

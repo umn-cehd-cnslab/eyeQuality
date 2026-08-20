@@ -771,3 +771,62 @@ build_qc_comparison_table <- function(table, metrics) {
     values_fn = function(x) x[1]
   )
 }
+
+# --- P10-05: export "flagged for review" file list ---
+#
+# build_flagged_export_table: per-recording rollup of the currently flagged
+# rows in table_flagged, shaped for a triage handoff -- a colleague opening
+# the exported CSV can see which recordings were flagged, by how many
+# metrics, and which metrics/values tripped them, without cross-referencing
+# the full long QC table. Deliberately "flagged by any configured threshold"
+# rather than a single metric -- see app.R's download handler for why that's
+# the more useful default for an exclusion/re-review list.
+#
+# Reuses table_flagged's own qc_flag column (compute_qc_flags(), the same
+# source of truth every other P10-02/P10-04 view already reads) rather than
+# recomputing threshold-crossing logic a third time -- this function only
+# filters and reshapes rows compute_qc_flags() already flagged. It also
+# doesn't duplicate app.R's own flagged_recordings() reactive (a distinct-
+# recordings list with no per-metric detail, built as a P10-05 hook back in
+# P10-02) -- that reactive is a fine "how many recordings" summary, but this
+# function's row-per-recording-with-detail shape is what actually belongs in
+# an exported file, so it's built directly off table_flagged instead of
+# wrapping that narrower reactive.
+#
+# table_flagged: the combined qcsummary table with a "qc_flag" column already
+#   attached (app.R's qc_table_flagged() reactive). NULL, 0-row, or missing
+#   any of the required columns returns NULL (nothing to export).
+#
+# Returns a data.frame with one row per recording that has >=1 flagged
+# qc_metric row, columns:
+#   recording, batch_name, source_file: the same identifying columns every
+#     other view in this app keys on.
+#   n_flagged_metrics: count of flagged qc_metric rows for that recording.
+#   flagged_metrics: comma-separated qc_metric names that were flagged, so a
+#     reviewer opening the CSV can see *why* without reopening this app.
+#   flagged_values: comma-separated percent values, converted to the 0-100
+#     scale the sidebar's numericInput thresholds already use (matching
+#     qc_thresholds_to_percent()'s convention), in the same order as
+#     flagged_metrics.
+# Or NULL if table_flagged has no usable rows, or none are currently flagged.
+build_flagged_export_table <- function(table_flagged) {
+  required_cols <- c("recording", "batch_name", "source_file", "qc_metric", "percent", "qc_flag")
+  if (is.null(table_flagged) || nrow(table_flagged) == 0 || !all(required_cols %in% names(table_flagged))) {
+    return(NULL)
+  }
+
+  flagged_rows <- table_flagged[table_flagged$qc_flag, required_cols, drop = FALSE]
+  if (nrow(flagged_rows) == 0) {
+    return(NULL)
+  }
+
+  flagged_rows %>%
+    dplyr::group_by(recording, batch_name, source_file) %>%
+    dplyr::summarise(
+      n_flagged_metrics = dplyr::n(),
+      flagged_metrics = paste(qc_metric, collapse = ", "),
+      flagged_values = paste(round(percent * 100, 1), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    as.data.frame()
+}
