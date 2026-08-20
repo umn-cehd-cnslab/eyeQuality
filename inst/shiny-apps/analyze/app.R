@@ -146,10 +146,19 @@ ui <- fluidPage(
         tabPanel(
           "QC flags",
           br(),
+          # width = "100%": without an explicit width, long BIDS-style
+          # recording labels (e.g. "sub-01_ses-1_recording-eyetracking_physio")
+          # were getting cut off in the field -- selectize.js's dropdown
+          # popup matches this control's own rendered width, so widening the
+          # control also widens the dropdown list, not just the closed box.
+          # Typing to filter already works via selectizeInput's own default
+          # behavior (no restrictive `options` here disable it) -- this was
+          # only ever a visibility problem, not a missing-feature one.
           selectizeInput(
             "qcflags_file_selector", "Select file",
             choices = character(0),
-            options = list(placeholder = "Select a file...")
+            options = list(placeholder = "Select a file..."),
+            width = "100%"
           ),
           h4("Major QC metrics (all files)"),
           p(
@@ -195,15 +204,20 @@ ui <- fluidPage(
           "Plots",
           br(),
           fluidRow(
+            # 8/4 rather than 6/6: a half-width column was cutting off long
+            # BIDS-style recording labels in the field; the badges next to
+            # it don't need as much room as the selector (and its dropdown
+            # popup, which matches the control's own rendered width) does.
             column(
-              6,
+              8,
               selectizeInput(
                 "plots_file_selector", "Select file",
                 choices = character(0),
-                options = list(placeholder = "Select a file...")
+                options = list(placeholder = "Select a file..."),
+                width = "100%"
               )
             ),
-            column(6, uiOutput("plots_major_metrics_ui"))
+            column(4, uiOutput("plots_major_metrics_ui"))
           ),
           uiOutput("plot_status_ui"),
           conditionalPanel(
@@ -231,15 +245,18 @@ ui <- fluidPage(
           "Gaze Explorer",
           br(),
           fluidRow(
+            # 8/4 rather than 6/6: same reasoning as the "Plots" tab's own
+            # selector column above.
             column(
-              6,
+              8,
               selectizeInput(
                 "gaze_file_selector", "Select file",
                 choices = character(0),
-                options = list(placeholder = "Select a file...")
+                options = list(placeholder = "Select a file..."),
+                width = "100%"
               )
             ),
-            column(6, uiOutput("gaze_major_metrics_ui"))
+            column(4, uiOutput("gaze_major_metrics_ui"))
           ),
           uiOutput("gaze_status_ui"),
           conditionalPanel(
