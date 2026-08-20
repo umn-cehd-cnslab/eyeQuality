@@ -3072,3 +3072,884 @@ test_that("the app-level wiring passes the untrimmed filtered_trajectory() to co
     expect_equal(result$n_inside, 1) # would be 0 if wired against the thinned copy instead
   })
 })
+
+# ---------------------------------------------------------------------------
+# Shared file selector / notes / Compare-files scatterplot redesign
+# (helpers.R + app.R) -- Shiny-free unit tests first, live shiny::testServer()
+# coverage further down.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# build_file_selector_choices()
+# ---------------------------------------------------------------------------
+
+test_that("build_file_selector_choices returns character(0) for NULL, 0-row, or a table missing a required identity column", {
+  expect_equal(build_file_selector_choices(NULL), character(0))
+
+  tbl <- data.frame(recording = character(0), batch_name = character(0), source_file = character(0))
+  expect_equal(build_file_selector_choices(tbl), character(0))
+
+  missing_col <- data.frame(recording = "rec-1", source_file = "/d/f1.tsv", stringsAsFactors = FALSE)
+  expect_equal(build_file_selector_choices(missing_col), character(0))
+})
+
+test_that("build_file_selector_choices labels an unambiguous recording with its plain recording id and sorts by label", {
+  tbl <- data.frame(
+    recording = c("rec-b", "rec-a"),
+    batch_name = c("runA", "runA"),
+    source_file = c("/d/b.tsv", "/d/a.tsv"),
+    stringsAsFactors = FALSE
+  )
+  choices <- build_file_selector_choices(tbl)
+
+  expect_equal(names(choices), c("rec-a", "rec-b"))
+  expect_equal(unname(choices), c("/d/a.tsv", "/d/b.tsv"))
+})
+
+test_that("build_file_selector_choices disambiguates a recording spanning more than one batch_name with a '[batch_name]' suffix, including the NA batch_name case", {
+  tbl <- data.frame(
+    recording = c("rec-1", "rec-1", "rec-2"),
+    batch_name = c(NA_character_, "runB", "runA"),
+    source_file = c("/d/f1.tsv", "/d/f2.tsv", "/d/f3.tsv"),
+    stringsAsFactors = FALSE
+  )
+  choices <- build_file_selector_choices(tbl)
+
+  expect_equal(names(choices), c("rec-1 [NA]", "rec-1 [runB]", "rec-2"))
+  expect_equal(unname(choices), c("/d/f1.tsv", "/d/f2.tsv", "/d/f3.tsv"))
+})
+
+# ---------------------------------------------------------------------------
+# major_qc_metrics() / build_major_metrics_summary()
+# ---------------------------------------------------------------------------
+
+test_that("major_qc_metrics returns exactly the 4 qc_metric values major_qc_metric_display_labels covers", {
+  expect_setequal(
+    major_qc_metrics(),
+    c(
+      "valid_raw_data", "robustness_proportion_valid_data_to_all_data",
+      "interpolated_LeftEye", "interpolated_RightEye"
+    )
+  )
+  expect_length(major_qc_metrics(), 4)
+})
+
+test_that("build_major_metrics_summary returns only the major-metric rows for the requested file, correctly labeled and flagged, excluding a non-major metric present for the same file", {
+  tbl <- data.frame(
+    source_file = c("f1", "f1", "f1", "f1", "f1", "f2"),
+    qc_metric = c(
+      "valid_raw_data", "robustness_proportion_valid_data_to_all_data",
+      "interpolated_LeftEye", "interpolated_RightEye", "blinks_BothEyes",
+      "valid_raw_data"
+    ),
+    percent = c(0.9, 0.8, 0.05, 0.06, 0.2, 0.99),
+    qc_flag = c(FALSE, FALSE, FALSE, TRUE, FALSE, FALSE),
+    stringsAsFactors = FALSE
+  )
+
+  result <- build_major_metrics_summary(tbl, "f1")
+
+  expect_equal(nrow(result), 4)
+  by_label <- setNames(result$percent, result$label)
+  expect_equal(by_label[["Valid raw data"]], 0.9)
+  expect_equal(by_label[["Robust data"]], 0.8)
+  expect_equal(by_label[["Interpolated (L)"]], 0.05)
+  expect_equal(by_label[["Interpolated (R)"]], 0.06)
+
+  flag_by_label <- setNames(result$qc_flag, result$label)
+  expect_true(flag_by_label[["Interpolated (R)"]])
+  expect_false(flag_by_label[["Interpolated (L)"]])
+})
+
+test_that("build_major_metrics_summary returns NULL for a NULL table, NULL/empty-string source_file, or a file with no matching major-metric rows", {
+  tbl <- data.frame(
+    source_file = "f1", qc_metric = "valid_raw_data", percent = 0.9, qc_flag = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  expect_null(build_major_metrics_summary(NULL, "f1"))
+  expect_null(build_major_metrics_summary(tbl, NULL))
+  expect_null(build_major_metrics_summary(tbl, ""))
+  expect_null(build_major_metrics_summary(tbl, "not-a-real-file"))
+})
+
+# ---------------------------------------------------------------------------
+# build_qc_comparison_scatter()
+# ---------------------------------------------------------------------------
+#
+# find_vline_layer: the geom_vline() counterpart to this file's own
+# find_hline_layer() (P10-04, above) -- geom_vline(xintercept = ...)'s value
+# is likewise stored on the layer's own `data` slot, not as a mapped
+# aesthetic.
+find_vline_layer <- function(plot) {
+  for (l in plot$layers) {
+    if (inherits(l$geom, "GeomVline")) {
+      return(l)
+    }
+  }
+  NULL
+}
+
+# scatter_test_table: 4 files, each reporting both valid_raw_data and
+# robustness_proportion_valid_data_to_all_data -- rec-1 flagged on neither,
+# rec-2 flagged only on the x metric, rec-3 flagged only on the y metric,
+# rec-4 flagged on both, covering every comparison_status combination
+# build_qc_comparison_scatter()'s "flagged on EITHER metric" rule needs to
+# get right.
+scatter_test_table <- function() {
+  data.frame(
+    recording = rep(c("rec-1", "rec-2", "rec-3", "rec-4"), each = 2),
+    batch_name = "test_batch",
+    source_file = rep(c("/d/rec-1.tsv", "/d/rec-2.tsv", "/d/rec-3.tsv", "/d/rec-4.tsv"), each = 2),
+    qc_metric = rep(
+      c("valid_raw_data", "robustness_proportion_valid_data_to_all_data"),
+      times = 4
+    ),
+    percent = c(0.9, 0.95, 0.5, 0.95, 0.9, 0.55, 0.5, 0.55),
+    qc_flag = c(FALSE, FALSE, TRUE, FALSE, FALSE, TRUE, TRUE, TRUE),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("build_qc_comparison_scatter returns one point per file with the correct x/y values", {
+  tbl <- scatter_test_table()
+  plot <- build_qc_comparison_scatter(
+    tbl, "valid_raw_data", "robustness_proportion_valid_data_to_all_data", default_qc_thresholds()
+  )
+
+  expect_s3_class(plot, "ggplot")
+  expect_equal(nrow(plot$data), 4)
+
+  by_recording <- setNames(seq_len(4), plot$data$recording)
+  expect_equal(plot$data$valid_raw_data[by_recording[["rec-2"]]], 0.5)
+  expect_equal(plot$data$robustness_proportion_valid_data_to_all_data[by_recording[["rec-2"]]], 0.95)
+})
+
+test_that("build_qc_comparison_scatter colors a point Flagged if EITHER of the two plotted metrics is flagged for that file, OK only when neither is", {
+  tbl <- scatter_test_table()
+  plot <- build_qc_comparison_scatter(
+    tbl, "valid_raw_data", "robustness_proportion_valid_data_to_all_data", default_qc_thresholds()
+  )
+
+  by_recording <- setNames(as.character(plot$data$comparison_status), plot$data$recording)
+  expect_equal(by_recording[["rec-1"]], "OK")
+  expect_equal(by_recording[["rec-2"]], "Flagged")
+  expect_equal(by_recording[["rec-3"]], "Flagged")
+  expect_equal(by_recording[["rec-4"]], "Flagged")
+})
+
+test_that("build_qc_comparison_scatter draws a dashed threshold reference line only on the axis with a configured, non-NA threshold", {
+  tbl <- scatter_test_table()
+  thresholds <- default_qc_thresholds()
+  thresholds$valid_pct <- 0.7
+  thresholds$robust_pct <- NA
+
+  plot <- build_qc_comparison_scatter(
+    tbl, "valid_raw_data", "robustness_proportion_valid_data_to_all_data", thresholds
+  )
+
+  vline <- find_vline_layer(plot)
+  expect_false(is.null(vline))
+  expect_equal(vline$data$xintercept, 0.7)
+  expect_true(is.null(find_hline_layer(plot)))
+})
+
+test_that("build_qc_comparison_scatter draws both dashed threshold reference lines when both axes have a configured threshold", {
+  tbl <- scatter_test_table()
+  thresholds <- default_qc_thresholds()
+  thresholds$valid_pct <- 0.7
+  thresholds$robust_pct <- 0.6
+
+  plot <- build_qc_comparison_scatter(
+    tbl, "valid_raw_data", "robustness_proportion_valid_data_to_all_data", thresholds
+  )
+
+  expect_equal(find_vline_layer(plot)$data$xintercept, 0.7)
+  expect_equal(find_hline_layer(plot)$data$yintercept, 0.6)
+})
+
+test_that("build_qc_comparison_scatter returns NULL for identical metric_x/metric_y, a NULL table, or a metric absent from the table", {
+  tbl <- scatter_test_table()
+
+  expect_null(build_qc_comparison_scatter(tbl, "valid_raw_data", "valid_raw_data", default_qc_thresholds()))
+  expect_null(build_qc_comparison_scatter(
+    NULL, "valid_raw_data", "robustness_proportion_valid_data_to_all_data", default_qc_thresholds()
+  ))
+  expect_null(build_qc_comparison_scatter(
+    tbl, "valid_raw_data", "some_metric_not_in_table", default_qc_thresholds()
+  ))
+})
+
+# ---------------------------------------------------------------------------
+# Per-file review notes: empty_notes_table() / load_notes_table() /
+# save_notes_table() / resolve_notes_path()
+# ---------------------------------------------------------------------------
+
+test_that("load_notes_table returns empty_notes_table() when no notes file exists yet in the directory", {
+  dir <- tempfile("p10notes_missing_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  expect_equal(load_notes_table(dir), empty_notes_table())
+})
+
+test_that("save_notes_table then load_notes_table round-trips note rows exactly, including a genuinely NA batch_name", {
+  dir <- tempfile("p10notes_roundtrip_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  notes <- data.frame(
+    recording = c("rec-1", "rec-2"),
+    batch_name = c("runA", NA_character_),
+    note = c("first note", "second note"),
+    updated_at = c("2026-01-01T00:00:00+0000", "2026-01-02T00:00:00+0000"),
+    stringsAsFactors = FALSE
+  )
+  save_notes_table(notes, dir)
+  expect_true(file.exists(resolve_notes_path(dir)))
+
+  reloaded <- load_notes_table(dir)
+  expect_equal(reloaded$recording, notes$recording)
+  expect_true(is.na(reloaded$batch_name[2]))
+  expect_equal(reloaded$batch_name[1], "runA")
+  expect_equal(reloaded$note, notes$note)
+})
+
+test_that("load_notes_table degrades to empty_notes_table(), not an error, for a wrong-shape file missing the expected columns", {
+  dir <- tempfile("p10notes_wrongshape_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  readr::write_tsv(data.frame(foo = 1:2, bar = c("a", "b")), resolve_notes_path(dir))
+
+  expect_equal(load_notes_table(dir), empty_notes_table())
+})
+
+test_that("load_notes_table degrades to empty_notes_table(), not an error, for a genuinely unparseable file", {
+  dir <- tempfile("p10notes_corrupt_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  writeBin(as.raw(sample(0:255, 200, replace = TRUE)), resolve_notes_path(dir))
+
+  expect_error(load_notes_table(dir), NA)
+  expect_equal(load_notes_table(dir), empty_notes_table())
+})
+
+# ---------------------------------------------------------------------------
+# upsert_note()
+# ---------------------------------------------------------------------------
+
+test_that("upsert_note inserts a new row for a recording that has no note yet", {
+  result <- upsert_note(empty_notes_table(), "rec-1", "runA", "hello")
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$recording, "rec-1")
+  expect_equal(result$batch_name, "runA")
+  expect_equal(result$note, "hello")
+})
+
+test_that("upsert_note updates an existing row in place rather than duplicating it", {
+  notes <- upsert_note(empty_notes_table(), "rec-1", "runA", "first")
+  updated <- upsert_note(notes, "rec-1", "runA", "second, revised")
+
+  expect_equal(nrow(updated), 1)
+  expect_equal(updated$note, "second, revised")
+})
+
+test_that("upsert_note with a blank or whitespace-only note removes the existing row instead of saving empty text", {
+  notes <- upsert_note(empty_notes_table(), "rec-1", "runA", "will be cleared")
+  cleared_blank <- upsert_note(notes, "rec-1", "runA", "")
+  expect_equal(nrow(cleared_blank), 0)
+
+  notes2 <- upsert_note(empty_notes_table(), "rec-1", "runA", "will be cleared again")
+  cleared_ws <- upsert_note(notes2, "rec-1", "runA", "   \n\t  ")
+  expect_equal(nrow(cleared_ws), 0)
+})
+
+test_that("upsert_note matches an existing NA-batch_name row via is.na(), not plain ==, when replacing that recording's note", {
+  # Regression guard for the specific bug class upsert_note()'s is.na()
+  # branch (helpers.R) exists to prevent: notes_df$batch_name == NA
+  # evaluates to NA (never TRUE) for every row, so `same_recording` would be
+  # NA rather than TRUE for the row that should be replaced, and subsetting
+  # a data.frame with a logical index containing NA produces a row of NAs
+  # instead of dropping it. Confirmed directly (not just asserted) that
+  # replacing the is.na() branch with `==` reproduces exactly this: the
+  # existing row survives as an all-NA row alongside the newly rbind()ed
+  # replacement, i.e. nrow() becomes 2 with a corrupted first row, rather
+  # than the correct nrow() == 1 clean replacement asserted below.
+  existing <- data.frame(
+    recording = "rec-1", batch_name = NA_character_, note = "old note",
+    updated_at = "2026-01-01T00:00:00+0000", stringsAsFactors = FALSE
+  )
+  updated <- upsert_note(existing, "rec-1", NA_character_, "new note")
+
+  expect_equal(nrow(updated), 1)
+  expect_true(is.na(updated$batch_name[1]))
+  expect_equal(updated$note[1], "new note")
+  expect_false(is.na(updated$recording[1]))
+})
+
+test_that("upsert_note treats two different recordings that both have NA batch_name as distinct rows, keyed by recording, not merged", {
+  notes <- upsert_note(empty_notes_table(), "rec-1", NA_character_, "note for rec-1")
+  notes <- upsert_note(notes, "rec-2", NA_character_, "note for rec-2")
+  expect_equal(nrow(notes), 2)
+
+  # Updating rec-1's note must not touch rec-2's row.
+  notes <- upsert_note(notes, "rec-1", NA_character_, "updated note for rec-1")
+  expect_equal(nrow(notes), 2)
+
+  by_recording <- setNames(notes$note, notes$recording)
+  expect_equal(by_recording[["rec-1"]], "updated note for rec-1")
+  expect_equal(by_recording[["rec-2"]], "note for rec-2")
+})
+
+# ---------------------------------------------------------------------------
+# note_for_recording()
+# ---------------------------------------------------------------------------
+
+test_that("note_for_recording returns the saved note text for a matching recording/batch_name pair", {
+  notes <- data.frame(
+    recording = c("rec-1", "rec-2"), batch_name = c("runA", "runB"),
+    note = c("note one", "note two"), updated_at = c("t1", "t2"), stringsAsFactors = FALSE
+  )
+  expect_equal(note_for_recording(notes, "rec-2", "runB"), "note two")
+})
+
+test_that("note_for_recording returns '' for a recording with no saved note", {
+  notes <- data.frame(
+    recording = "rec-1", batch_name = "runA", note = "only note", updated_at = "t1",
+    stringsAsFactors = FALSE
+  )
+  expect_equal(note_for_recording(notes, "rec-2", "runA"), "")
+})
+
+test_that("note_for_recording matches a NA batch_name row correctly rather than just the plain recording", {
+  notes <- data.frame(
+    recording = c("rec-1", "rec-1"), batch_name = c(NA_character_, "runB"),
+    note = c("na-batch note", "runB note"), updated_at = c("t1", "t2"), stringsAsFactors = FALSE
+  )
+  expect_equal(note_for_recording(notes, "rec-1", NA_character_), "na-batch note")
+  expect_equal(note_for_recording(notes, "rec-1", "runB"), "runB note")
+})
+
+test_that("note_for_recording returns '' for a NULL notes_df, NULL recording, or a 0-row table, rather than erroring", {
+  notes <- data.frame(
+    recording = "rec-1", batch_name = "runA", note = "x", updated_at = "t", stringsAsFactors = FALSE
+  )
+
+  expect_equal(note_for_recording(NULL, "rec-1", "runA"), "")
+  expect_equal(note_for_recording(empty_notes_table(), "rec-1", "runA"), "")
+  expect_equal(note_for_recording(notes, NULL, "runA"), "")
+})
+
+# ---------------------------------------------------------------------------
+# build_flagged_export_table(..., notes = NULL) -- new optional parameter
+# ---------------------------------------------------------------------------
+
+test_that("build_flagged_export_table with notes = NULL (the default) still returns the original 6-column shape, backward compatible with every existing 1-argument call", {
+  tbl <- flagged_export_test_table(
+    recording = "rec-1", batch_name = "test_batch", source_file = "/data/rec-1_qcsummary.tsv",
+    qc_metric = "valid_raw_data", percent = 0.5, qc_flag = TRUE
+  )
+  result <- build_flagged_export_table(tbl)
+
+  expect_equal(
+    colnames(result),
+    c("recording", "batch_name", "source_file", "n_flagged_metrics", "flagged_metrics", "flagged_values")
+  )
+  expect_false("note" %in% colnames(result))
+})
+
+test_that("build_flagged_export_table with a notes table adds a correctly matched note column, blank for a flagged file with no saved note", {
+  tbl <- rbind(
+    flagged_export_test_table(
+      recording = "rec-1", batch_name = "runA", source_file = "/data/rec-1_qcsummary.tsv",
+      qc_metric = "valid_raw_data", percent = 0.5, qc_flag = TRUE
+    ),
+    flagged_export_test_table(
+      recording = "rec-2", batch_name = "runA", source_file = "/data/rec-2_qcsummary.tsv",
+      qc_metric = "valid_raw_data", percent = 0.4, qc_flag = TRUE
+    )
+  )
+  notes <- data.frame(
+    recording = "rec-1", batch_name = "runA", note = "excessive blinking", updated_at = "t1",
+    stringsAsFactors = FALSE
+  )
+
+  result <- build_flagged_export_table(tbl, notes = notes)
+
+  expect_true("note" %in% colnames(result))
+  by_recording <- setNames(result$note, result$recording)
+  expect_equal(by_recording[["rec-1"]], "excessive blinking")
+  expect_equal(by_recording[["rec-2"]], "")
+})
+
+test_that("build_flagged_export_table's notes join matches a genuinely NA batch_name row correctly", {
+  tbl <- flagged_export_test_table(
+    recording = "rec-1", batch_name = NA_character_, source_file = "/data/rec-1_qcsummary.tsv",
+    qc_metric = "valid_raw_data", percent = 0.5, qc_flag = TRUE
+  )
+  notes <- data.frame(
+    recording = "rec-1", batch_name = NA_character_, note = "no-batchName run note",
+    updated_at = "t1", stringsAsFactors = FALSE
+  )
+
+  result <- build_flagged_export_table(tbl, notes = notes)
+  expect_equal(result$note, "no-batchName run note")
+})
+
+# ---------------------------------------------------------------------------
+# Live shiny::testServer() coverage: shared file selector, notes, Compare
+# files 1-vs-2-metric branch, Plots/Gaze Explorer badges.
+# ---------------------------------------------------------------------------
+
+test_that("selecting a file via one file selector reflects into selected_source_file() and pushes the same selection to the other two selector widgets, and a QC table row click does the same", {
+  skip_on_cran()
+
+  dir <- tempfile("p10fileselector_sync_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-selA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-b_ses-1_desc-selB_preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+
+    tbl <- current_load_result()$table
+    file_a <- unique(tbl$source_file[grepl("selA", tbl$source_file)])
+    file_b <- unique(tbl$source_file[grepl("selB", tbl$source_file)])
+    expect_length(file_a, 1)
+    expect_length(file_b, 1)
+
+    session$setInputs(qcflags_file_selector = file_a)
+    expect_equal(selected_source_file(), file_a)
+
+    plots_calls <- get("plots_file_selector", envir = cs$calls)
+    expect_equal(plots_calls[[length(plots_calls)]]$value, file_a)
+    gaze_calls <- get("gaze_file_selector", envir = cs$calls)
+    expect_equal(gaze_calls[[length(gaze_calls)]]$value, file_a)
+
+    # a DIFFERENT selector's own change becomes the new shared selection...
+    session$setInputs(gaze_file_selector = file_b)
+    expect_equal(selected_source_file(), file_b)
+    qcflags_calls <- get("qcflags_file_selector", envir = cs$calls)
+    expect_equal(qcflags_calls[[length(qcflags_calls)]]$value, file_b)
+
+    # ...and a QC table row click (P10-03) is reflected the same way.
+    idx_a <- which(tbl$source_file == file_a)[1]
+    session$setInputs(qc_table_rows_selected = idx_a)
+    expect_equal(selected_source_file(), file_a)
+    plots_calls2 <- get("plots_file_selector", envir = cs$calls)
+    expect_equal(plots_calls2[[length(plots_calls2)]]$value, file_a)
+  }, session = cs$session)
+})
+
+test_that("output$qc_major_table renders without error on a real load, and the same build_qc_comparison_table(tbl, major_qc_metrics()) pipeline it uses internally produces the correct major-metric values, excluding a non-major metric", {
+  # output$qc_major_table's DT::datatable() call doesn't pass server = FALSE
+  # (unlike output$qc_table's own deliberate opt-out, see that render's own
+  # comment on why it embeds data for testability) -- it defaults to the
+  # same server = TRUE DT::renderDT() default output$compare_table already
+  # accepts uninspected elsewhere in this file, so the rendered widget's
+  # underlying row data isn't embedded in session$getOutput()'s JSON the way
+  # output$qc_table's is. Confirmed directly (not assumed) via a scratch
+  # comparison against output$qc_table's own embedded-data behavior before
+  # writing this test this way, rather than assuming either shape. This test
+  # therefore checks the render doesn't error against a real load (the part
+  # session$getOutput() genuinely exercises), and separately calls the exact
+  # same helper pipeline (build_qc_comparison_table(tbl, major_qc_metrics()))
+  # output$qc_major_table's own render body uses, against the live
+  # current_load_result()$table, to confirm the values that pipeline
+  # produces are correct.
+  skip_on_cran()
+
+  dir <- tempfile("p10qcmajor_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(
+      qc_metric = c(
+        "valid_raw_data", "robustness_proportion_valid_data_to_all_data",
+        "interpolated_LeftEye", "interpolated_RightEye", "blinks_BothEyes"
+      ),
+      percent = c(0.876, 0.654, 0.321, 0.048, 0.999)
+    ),
+    file.path(dir, "sub-m_ses-1_desc-majortbl_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+
+    expect_error(session$getOutput("qc_major_table"), NA)
+
+    major_tbl <- build_qc_comparison_table(current_load_result()$table, major_qc_metrics())
+    expect_equal(nrow(major_tbl), 1)
+    expect_false("blinks_BothEyes" %in% names(major_tbl))
+    expect_equal(major_tbl$valid_raw_data[1], 0.876)
+    expect_equal(major_tbl$robustness_proportion_valid_data_to_all_data[1], 0.654)
+    expect_equal(major_tbl$interpolated_LeftEye[1], 0.321)
+    expect_equal(major_tbl$interpolated_RightEye[1], 0.048)
+  })
+})
+
+test_that("typing and saving a note for the selected file persists it to eyeQuality_analyze_notes.tsv in the loaded directory", {
+  skip_on_cran()
+
+  dir <- tempfile("p10notes_save_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-n_ses-1_desc-notesave_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+
+    tbl <- current_load_result()$table
+    file_path <- unique(tbl$source_file)[1]
+    session$setInputs(qcflags_file_selector = file_path)
+
+    session$setInputs(qcflags_note_text = "excessive blinking, re-run recommended")
+    session$setInputs(qcflags_save_note = 1)
+
+    notes_path <- file.path(dir, "eyeQuality_analyze_notes.tsv")
+    expect_true(file.exists(notes_path))
+
+    on_disk <- readr::read_tsv(notes_path, show_col_types = FALSE)
+    expect_equal(nrow(on_disk), 1)
+    expect_equal(on_disk$note[1], "excessive blinking, re-run recommended")
+    expect_equal(on_disk$recording[1], unique(tbl$recording)[1])
+
+    status_html <- renderui_html(session$getOutput("qcflags_note_status"))
+    expect_match(status_html, "Note saved.", fixed = TRUE)
+  })
+})
+
+test_that("switching the selected file updates the notes textarea to THAT file's own note, not a carried-over value from the previous file", {
+  skip_on_cran()
+
+  dir <- tempfile("p10notes_switch_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-x_ses-1_desc-switchA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-y_ses-1_desc-switchB_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+
+    tbl <- current_load_result()$table
+    file_a <- unique(tbl$source_file[grepl("switchA", tbl$source_file)])
+    file_b <- unique(tbl$source_file[grepl("switchB", tbl$source_file)])
+
+    session$setInputs(qcflags_file_selector = file_a)
+    session$setInputs(qcflags_note_text = "note only for file A")
+    session$setInputs(qcflags_save_note = 1)
+
+    # switch to file B, which has no saved note
+    session$setInputs(qcflags_file_selector = file_b)
+    calls <- get("qcflags_note_text", envir = cs$calls)
+    expect_equal(calls[[length(calls)]]$value, "")
+
+    # switch back to file A: its own note must reappear
+    session$setInputs(qcflags_file_selector = file_a)
+    calls2 <- get("qcflags_note_text", envir = cs$calls)
+    expect_equal(calls2[[length(calls2)]]$value, "note only for file A")
+  }, session = cs$session)
+})
+
+test_that("reloading the same directory in a fresh app session repopulates a previously saved note, including into the notes textarea once that file is selected", {
+  skip_on_cran()
+
+  dir <- tempfile("p10notes_reload_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-r_ses-1_desc-reload_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  # First app instance: save a note, then let it end -- standing in for an
+  # app restart / a different reviewer opening this directory later.
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    tbl <- current_load_result()$table
+    session$setInputs(qcflags_file_selector = unique(tbl$source_file)[1])
+    session$setInputs(qcflags_note_text = "saved before restart")
+    session$setInputs(qcflags_save_note = 1)
+  })
+
+  cs <- capturing_update_session()
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+
+    reloaded_notes <- notes_store()
+    expect_equal(nrow(reloaded_notes), 1)
+    expect_equal(reloaded_notes$note[1], "saved before restart")
+
+    tbl <- current_load_result()$table
+    session$setInputs(qcflags_file_selector = unique(tbl$source_file)[1])
+
+    calls <- get("qcflags_note_text", envir = cs$calls)
+    expect_equal(calls[[length(calls)]]$value, "saved before restart")
+  }, session = cs$session)
+})
+
+test_that("clearing the note text and saving removes that file's row from notes.tsv rather than leaving a blank note behind", {
+  skip_on_cran()
+
+  dir <- tempfile("p10notes_clear_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-c_ses-1_desc-clearnote_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    tbl <- current_load_result()$table
+    session$setInputs(qcflags_file_selector = unique(tbl$source_file)[1])
+
+    session$setInputs(qcflags_note_text = "will be cleared")
+    session$setInputs(qcflags_save_note = 1)
+    notes_path <- file.path(dir, "eyeQuality_analyze_notes.tsv")
+    expect_equal(nrow(readr::read_tsv(notes_path, show_col_types = FALSE)), 1)
+
+    session$setInputs(qcflags_note_text = "")
+    session$setInputs(qcflags_save_note = 2)
+
+    on_disk <- readr::read_tsv(notes_path, show_col_types = FALSE)
+    expect_equal(nrow(on_disk), 0)
+    expect_equal(nrow(notes_store()), 0)
+  })
+})
+
+test_that("the flagged-for-review CSV export's note column reflects the currently saved note for a flagged file", {
+  skip_on_cran()
+
+  dir <- tempfile("p10notes_export_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  # valid_raw_data at 0.5 crosses the default 80% min threshold -> flagged.
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-e_ses-1_desc-notesexport_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    tbl <- current_load_result()$table
+    session$setInputs(qcflags_file_selector = unique(tbl$source_file)[1])
+    session$setInputs(qcflags_note_text = "flagged for low validity")
+    session$setInputs(qcflags_save_note = 1)
+
+    downloaded_path <- session$getOutput("download_flagged_csv")
+    result <- utils::read.csv(downloaded_path, stringsAsFactors = FALSE)
+
+    expect_equal(nrow(result), 1)
+    expect_true("note" %in% names(result))
+    expect_equal(result$note[1], "flagged for low validity")
+  })
+})
+
+test_that("selecting exactly 1 Compare-files metric still renders the original per-file bar-chart height formula, unchanged by the new 2-metric scatterplot option", {
+  skip_on_cran()
+
+  dir <- tempfile("p10compare_bar_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  n_files <- 20
+  for (i in seq_len(n_files)) {
+    readr::write_tsv(
+      data.frame(
+        qc_metric = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data"),
+        percent = c(0.9, 0.8)
+      ),
+      file.path(dir, sprintf("sub-%02d_ses-1_desc-cmpbar_preproc_qcsummary.tsv", i))
+    )
+  }
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(
+      compare_batch_name_filter = "cmpbar",
+      compare_metric_plot = "valid_raw_data",
+      compare_metrics_table = "valid_raw_data"
+    )
+
+    expect_equal(session$getOutput("compare_plot")$height, n_files * 28 + 120)
+  })
+})
+
+test_that("selecting 2 Compare-files metrics switches to the fixed-height scatterplot instead of scaling with file count", {
+  skip_on_cran()
+
+  dir <- tempfile("p10compare_scatter_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  n_files <- 20
+  for (i in seq_len(n_files)) {
+    readr::write_tsv(
+      data.frame(
+        qc_metric = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data"),
+        percent = c(0.9, 0.8)
+      ),
+      file.path(dir, sprintf("sub-%02d_ses-1_desc-cmpscatter_preproc_qcsummary.tsv", i))
+    )
+  }
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(
+      compare_batch_name_filter = "cmpscatter",
+      compare_metric_plot = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data"),
+      compare_metrics_table = "valid_raw_data"
+    )
+
+    # Would equal n_files * 28 + 120 = 680 if this still (incorrectly) took
+    # the bar-chart branch instead of switching to the scatterplot's fixed
+    # height once a second metric is selected.
+    expect_equal(session$getOutput("compare_plot")$height, 550)
+  })
+})
+
+test_that("output$compare_plot renders nothing (not a crash) if input$compare_metric_plot somehow holds more than 2 values, bypassing the UI's client-side maxItems = 2 cap", {
+  skip_on_cran()
+
+  dir <- tempfile("p10compare_guard_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(
+      qc_metric = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data", "interpolated_LeftEye"),
+      percent = c(0.9, 0.8, 0.05)
+    ),
+    file.path(dir, "sub-g_ses-1_desc-guard_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(
+      compare_batch_name_filter = "guard",
+      compare_metric_plot = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data", "interpolated_LeftEye")
+    )
+
+    plot_output <- tryCatch(
+      session$getOutput("compare_plot"),
+      shiny.silent.error = function(e) "guarded",
+      validation = function(e) "guarded"
+    )
+    expect_equal(plot_output, "guarded")
+  })
+})
+
+test_that("the Plots and Gaze Explorer tabs' major-metrics badges show the correct file's values and switch when the selected file changes", {
+  skip_on_cran()
+
+  dir <- tempfile("p10badges_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(
+      qc_metric = c(
+        "valid_raw_data", "robustness_proportion_valid_data_to_all_data",
+        "interpolated_LeftEye", "interpolated_RightEye"
+      ),
+      percent = c(0.95, 0.9, 0.02, 0.02)
+    ),
+    file.path(dir, "sub-p_ses-1_desc-badgeA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      qc_metric = c(
+        "valid_raw_data", "robustness_proportion_valid_data_to_all_data",
+        "interpolated_LeftEye", "interpolated_RightEye"
+      ),
+      percent = c(0.5, 0.4, 0.5, 0.5)
+    ),
+    file.path(dir, "sub-q_ses-1_desc-badgeB_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    tbl <- current_load_result()$table
+    file_a <- unique(tbl$source_file[grepl("badgeA", tbl$source_file)])
+    file_b <- unique(tbl$source_file[grepl("badgeB", tbl$source_file)])
+
+    session$setInputs(plots_file_selector = file_a)
+    badges_a <- renderui_html(session$getOutput("plots_major_metrics_ui"))
+    expect_match(badges_a, "95.0%", fixed = TRUE)
+    expect_match(badges_a, "label-success", fixed = TRUE)
+    expect_false(grepl("label-danger", badges_a, fixed = TRUE))
+
+    session$setInputs(plots_file_selector = file_b)
+    badges_b <- renderui_html(session$getOutput("plots_major_metrics_ui"))
+    expect_match(badges_b, "50.0%", fixed = TRUE)
+    expect_match(badges_b, "label-danger", fixed = TRUE) # valid_raw_data 0.5 crosses the default 80% min threshold
+
+    # Gaze Explorer's own badge output mirrors the same shared selection.
+    gaze_badges_b <- renderui_html(session$getOutput("gaze_major_metrics_ui"))
+    expect_match(gaze_badges_b, "50.0%", fixed = TRUE)
+  })
+})
