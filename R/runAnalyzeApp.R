@@ -5,11 +5,13 @@
 #' `eyeQualityBatch()`'s output naming convention) into a single
 #' sortable/filterable table.
 #'
-#' This app requires the `shiny`, `shinyFiles`, and `DT` packages, which are
-#' not installed automatically with this package (see `Suggests` in
+#' This app requires the `shiny`, `shinyFiles`, `DT`, and `plotly` packages,
+#' which are not installed automatically with this package (see `Suggests` in
 #' `DESCRIPTION`) since they're only needed for this optional interface, not
 #' the core preprocessing pipeline. Install them separately to use this
-#' function.
+#' function. `plotly` backs the "Gaze Explorer" tab's interactive
+#' trajectory/AOI view specifically -- every other tab only needs the first
+#' three.
 #'
 #' @param initialDirectory optional path to pre-populate the output
 #'   directory field with on startup (e.g. the directory a Setup app
@@ -34,11 +36,12 @@
 runAnalyzeApp <- function(initialDirectory = NULL, ...) {
   if (!requireNamespace("shiny", quietly = TRUE) ||
     !requireNamespace("shinyFiles", quietly = TRUE) ||
-    !requireNamespace("DT", quietly = TRUE)) {
+    !requireNamespace("DT", quietly = TRUE) ||
+    !requireNamespace("plotly", quietly = TRUE)) {
     stop(
-      "runAnalyzeApp() requires the 'shiny', 'shinyFiles', and 'DT' ",
+      "runAnalyzeApp() requires the 'shiny', 'shinyFiles', 'DT', and 'plotly' ",
       "packages, which are not installed. Install them with ",
-      'install.packages(c("shiny", "shinyFiles", "DT")).',
+      'install.packages(c("shiny", "shinyFiles", "DT", "plotly")).',
       call. = FALSE
     )
   }

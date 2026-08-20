@@ -39,7 +39,8 @@ Suggests:
     future,
     promises (>= 1.3.3),
     later,
-    DT
+    DT,
+    plotly
 Config/testthat/edition: 3
 Imports:
     rlang,

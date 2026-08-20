@@ -10,6 +10,7 @@
 library(shiny)
 library(shinyFiles)
 library(DT)
+library(plotly)
 
 source("helpers.R", local = TRUE)
 
@@ -153,6 +154,50 @@ ui <- fluidPage(
             plotOutput("plot_gaze_heatmap", height = "450px"),
             h4("Smoothed gaze position timecourse"),
             plotOutput("plot_gaze_timecourse", height = "350px")
+          )
+        ),
+        # "Gaze Explorer": distinct from both "QC table" (metrics, not raw
+        # gaze samples) and "Plots" (fixed, pre-built ggplot outputs for the
+        # WHOLE recording) -- this tab is an interactive, single-file view
+        # over a user-chosen TIME RANGE of that recording's raw gaze
+        # trajectory, plus a live AOI (area-of-interest) percentage for
+        # whatever range is currently selected. Positioned right after
+        # "Plots" (both are single-file views, unlike "Compare files" below,
+        # which is cross-file) and reuses that tab's own selected_source_file()
+        # gating pattern (see plot_status_ui/plot_ready above, and this
+        # tab's own gaze_status_ui/gaze_ready below) so both tabs always
+        # agree on which recording is currently in view.
+        tabPanel(
+          "Gaze Explorer",
+          br(),
+          uiOutput("gaze_status_ui"),
+          conditionalPanel(
+            condition = "output.gaze_ready == true",
+            p(
+              class = "text-muted",
+              "Drag the time-range slider below to isolate a trial or portion of the recording -- ",
+              "the trajectory plot and AOI percentage both update live as you drag. If this ",
+              "recording has logged event markers, jump to one first as a convenient starting ",
+              "point, then widen or narrow the range freely from there -- the slider is never ",
+              "locked to exact event boundaries."
+            ),
+            uiOutput("gaze_event_marker_ui"),
+            sliderInput(
+              "gaze_time_range", "Time range (ms)",
+              min = 0, max = 1, value = c(0, 1), step = 1, width = "100%"
+            ),
+            hr(),
+            fluidRow(
+              column(
+                3,
+                h4("AOI"),
+                actionButton("gaze_define_aoi", "Define AOI..."),
+                actionButton("gaze_clear_aoi", "Clear AOI"),
+                br(), br(),
+                uiOutput("gaze_aoi_status")
+              ),
+              column(9, plotlyOutput("gaze_trajectory_plot", height = "600px"))
+            )
           )
         ),
         # P10-04: cross-file comparison, distinct from the two views above --
@@ -810,6 +855,249 @@ server <- function(input, output, session) {
     result <- plot_result()
     req(result, result$ok)
     result$plots[[3]]
+  })
+
+  # --- "Gaze Explorer" tab: interactive time-range + AOI exploration ---
+  #
+  # Reuses selected_source_file() (defined above, P10-03) as this tab's own
+  # file-selection source of truth, exactly like plot_result() above does for
+  # the "Plots" tab -- both tabs always agree on which recording is currently
+  # in view rather than tracking two independent notions of "the selected
+  # file".
+
+  # gaze_traj_result: load_gaze_trajectory_data()'s (helpers.R) return value
+  # for whatever file is currently selected, or NULL when nothing is
+  # selected yet -- same "NULL means nothing selected, non-NULL always has
+  # an $ok" contract plot_result() above uses, so gaze_status_ui/gaze_ready
+  # below can be built the same way plot_status_ui/plot_ready already are.
+  gaze_traj_result <- reactive({
+    sf <- selected_source_file()
+    if (is.null(sf)) {
+      return(NULL)
+    }
+    load_gaze_trajectory_data(sf)
+  })
+
+  output$gaze_ready <- reactive({
+    result <- gaze_traj_result()
+    isTRUE(!is.null(result) && result$ok)
+  })
+  outputOptions(output, "gaze_ready", suspendWhenHidden = FALSE)
+
+  output$gaze_status_ui <- renderUI({
+    result <- gaze_traj_result()
+    if (is.null(result)) {
+      return(div(class = "alert alert-info", "Select a row in the QC table tab to explore its gaze trajectory here."))
+    }
+    if (!result$ok) {
+      return(div(class = "alert alert-danger", strong("Could not load trajectory data: "), result$error))
+    }
+    div(class = "alert alert-success", sprintf("Exploring: %s", result$preproc_path))
+  })
+
+  # gaze_event_windows: derive_event_marker_windows()'s (helpers.R) output
+  # for the currently loaded file's events, or NULL if that file has no
+  # usable event markers -- a real, expected case (head-mounted adapters
+  # with no stimulus-marker integration, or any recording that simply had
+  # no logged events -- see load_gaze_trajectory_data()'s own comment on
+  # this graceful degradation).
+  gaze_event_windows <- reactive({
+    result <- gaze_traj_result()
+    if (is.null(result) || !isTRUE(result$ok)) {
+      return(NULL)
+    }
+    derive_event_marker_windows(result$events)
+  })
+
+  # aoi_polygon: the currently defined AOI (list(x = ..., y = ...), the
+  # shape compute_aoi_percent()/build_gaze_trajectory_plot() expect), or
+  # NULL before one has been defined. A plain reactiveVal, set only by the
+  # modal's own "Set AOI" submit handler and the "Clear AOI" button below --
+  # deliberately NOT derived directly from the modal's numericInputs, since
+  # those exist and hold values (0, by default) the entire time the modal is
+  # open but not yet submitted; deriving straight from them would make an
+  # AOI editing session redraw the trajectory plot and recompute the AOI
+  # percentage on every single keystroke, against a still-incomplete
+  # polygon, instead of only once the user has finished specifying all 4
+  # corners and clicked "Set AOI".
+  aoi_polygon <- reactiveVal(NULL)
+
+  # Resets every piece of this tab's per-file state -- the time-range
+  # slider's bounds and any previously defined AOI -- the instant a
+  # DIFFERENT file becomes selected (default ignoreNULL = TRUE: this simply
+  # doesn't fire while nothing is selected yet, or on a deselect back to
+  # NULL, since the whole tab is hidden via conditionalPanel(output.gaze_ready)
+  # in either of those states anyway -- nothing to reset for). Without this,
+  # switching from one recording to another would silently carry over the
+  # previous recording's slider bounds (meaningless against a new file's own
+  # timestamp range) and, worse, its AOI polygon -- drawn in one recording's
+  # gaze-coordinate space, silently reapplied as if it still meant something
+  # against a different recording's data.
+  observeEvent(selected_source_file(), {
+    aoi_polygon(NULL)
+
+    result <- gaze_traj_result()
+    ts <- if (!is.null(result) && isTRUE(result$ok)) {
+      result$data$recordingTimestamp_ms[!is.na(result$data$recordingTimestamp_ms)]
+    } else {
+      numeric(0)
+    }
+
+    if (length(ts) == 0) {
+      updateSliderInput(session, "gaze_time_range", min = 0, max = 1, value = c(0, 1))
+    } else {
+      updateSliderInput(session, "gaze_time_range", min = min(ts), max = max(ts), value = c(min(ts), max(ts)))
+    }
+  })
+
+  # gaze_event_marker_ui: an event-marker "jump to" selector, only rendered
+  # when the current file actually has usable event markers -- a file with
+  # none (gaze_event_windows() returns NULL) gets a plain explanatory
+  # message instead of an empty/disabled dropdown, so it's immediately
+  # obvious this particular file has no markers to snap to (P10-06-style
+  # adapter-aware degradation, surfaced directly in the UI here rather than
+  # only in a QC column).
+  output$gaze_event_marker_ui <- renderUI({
+    windows <- gaze_event_windows()
+    if (is.null(windows) || nrow(windows) == 0) {
+      return(div(
+        class = "text-muted",
+        "No event markers found for this recording -- use the free time-range slider below."
+      ))
+    }
+    choices <- stats::setNames(
+      windows$event,
+      sprintf(
+        "%s (%d occurrence%s, %.0f–%.0f ms)",
+        windows$event, windows$n_occurrences,
+        ifelse(windows$n_occurrences == 1, "", "s"),
+        windows$start_ms, windows$end_ms
+      )
+    )
+    fluidRow(
+      column(8, selectInput("gaze_event_marker", "Jump to event marker", choices = choices)),
+      column(4, br(), actionButton("gaze_snap_to_marker", "Snap slider to this marker"))
+    )
+  })
+
+  # Snapping sets the slider's CURRENT value to the selected marker's
+  # [start_ms, end_ms] window (that event label's first-to-last occurrence,
+  # per derive_event_marker_windows()) without touching the slider's min/max
+  # BOUNDS -- the user can immediately drag either handle wider or narrower
+  # from there, never constrained back to only this exact window. This is
+  # what satisfies this tab's "snap as a convenient default, but never lock
+  # the range to exact event boundaries" requirement: sliderInput itself
+  # imposes no such constraint once its value is set this way, it's a
+  # perfectly ordinary drag-both-ways range control from this point on.
+  observeEvent(input$gaze_snap_to_marker, {
+    windows <- gaze_event_windows()
+    req(windows, input$gaze_event_marker)
+    row <- windows[windows$event == input$gaze_event_marker, , drop = FALSE]
+    req(nrow(row) == 1)
+    updateSliderInput(session, "gaze_time_range", value = c(row$start_ms[1], row$end_ms[1]))
+  })
+
+  # filtered_trajectory: the loaded preproc data.frame narrowed to the
+  # slider's current [start, end] -- the single reactive both the trajectory
+  # plot and the AOI percentage readout below are built from, so they can
+  # never show two different time ranges out of sync with each other. Note:
+  # right after a file switch, this may transiently evaluate against the
+  # PREVIOUS file's slider value for one reactive flush (updateSliderInput()
+  # above is a client round-trip, not synchronous) -- self-corrects as soon
+  # as the browser echoes the new bounds back, same as any other
+  # updateSliderInput()-driven reset in a Shiny app.
+  filtered_trajectory <- reactive({
+    result <- gaze_traj_result()
+    req(result, result$ok)
+    rng <- input$gaze_time_range
+    req(rng)
+    data <- result$data
+    ts <- data$recordingTimestamp_ms
+    data[!is.na(ts) & ts >= rng[1] & ts <= rng[2], , drop = FALSE]
+  })
+
+  output$gaze_trajectory_plot <- renderPlotly({
+    df <- filtered_trajectory()
+    validate(need(nrow(df) > 0, "No gaze samples in the current time range."))
+    plot <- build_gaze_trajectory_plot(df, aoi_polygon())
+    validate(need(!is.null(plot), "No usable (non-missing) gaze coordinates in the current time range."))
+    plot
+  })
+
+  # gaze_aoi_result: compute_aoi_percent()'s (helpers.R) output for the
+  # CURRENT time-range selection -- recomputed on every slider move (via
+  # filtered_trajectory()) and every AOI define/clear, so the readout below
+  # always describes the exact same rows the trajectory plot is showing.
+  gaze_aoi_result <- reactive({
+    compute_aoi_percent(filtered_trajectory(), aoi_polygon())
+  })
+
+  output$gaze_aoi_status <- renderUI({
+    aoi <- aoi_polygon()
+    if (is.null(aoi)) {
+      return(div(class = "text-muted", "No AOI defined yet."))
+    }
+    result <- gaze_aoi_result()
+    if (is.null(result)) {
+      return(div(class = "text-muted", "No gaze samples in the current time range to test against the AOI."))
+    }
+    div(
+      class = "alert alert-info",
+      sprintf(
+        "%d of %d gaze point(s) in the current time range (%.1f%%) fall inside the AOI.",
+        result$n_inside, result$n_total, result$pct * 100
+      )
+    )
+  })
+
+  # AOI definition modal: 4 numeric (x, y) corner inputs -- the simplest
+  # workable v1, closest to app_lana.R's own reference implementation of
+  # this same idea (see that file's own header comment for why it's kept as
+  # an unintegrated reference rather than reused directly). A plotly
+  # click-to-draw interaction would read nicer, but plotly's click/relayout
+  # event payloads for a hand-drawn shape aren't a stable, first-class Shiny
+  # input the way e.g. plotly_click point-selection already is, and building
+  # that reliably was judged not worth it for a v1 whose main job is proving
+  # out the underlying AOI machinery (compute_aoi_percent()/
+  # points_in_polygon(), helpers.R) end to end -- swapping this modal for a
+  # click-to-draw interaction later would only touch this UI, not that
+  # machinery.
+  observeEvent(input$gaze_define_aoi, {
+    showModal(modalDialog(
+      title = "Define the AOI's corners (in the same gaze coordinate units as the plot)",
+      fluidRow(
+        column(6, numericInput("gaze_aoi1x", "Corner 1 x", value = 0)),
+        column(6, numericInput("gaze_aoi1y", "Corner 1 y", value = 0))
+      ),
+      fluidRow(
+        column(6, numericInput("gaze_aoi2x", "Corner 2 x", value = 0)),
+        column(6, numericInput("gaze_aoi2y", "Corner 2 y", value = 0))
+      ),
+      fluidRow(
+        column(6, numericInput("gaze_aoi3x", "Corner 3 x", value = 0)),
+        column(6, numericInput("gaze_aoi3y", "Corner 3 y", value = 0))
+      ),
+      fluidRow(
+        column(6, numericInput("gaze_aoi4x", "Corner 4 x", value = 0)),
+        column(6, numericInput("gaze_aoi4y", "Corner 4 y", value = 0))
+      ),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("gaze_aoi_submit", "Set AOI")
+      )
+    ))
+  })
+
+  observeEvent(input$gaze_aoi_submit, {
+    aoi_polygon(list(
+      x = c(input$gaze_aoi1x, input$gaze_aoi2x, input$gaze_aoi3x, input$gaze_aoi4x),
+      y = c(input$gaze_aoi1y, input$gaze_aoi2y, input$gaze_aoi3y, input$gaze_aoi4y)
+    ))
+    removeModal()
+  })
+
+  observeEvent(input$gaze_clear_aoi, {
+    aoi_polygon(NULL)
   })
 
   # --- P10-04: cross-file QC metric comparison view ---

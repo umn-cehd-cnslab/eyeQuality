@@ -948,3 +948,475 @@ build_flagged_export_table <- function(table_flagged) {
     ) %>%
     as.data.frame()
 }
+
+# ---------------------------------------------------------------------------
+# "Gaze Explorer" tab: interactive time-range slider + AOI (area-of-interest)
+# exploration for a single selected file.
+#
+# Distinct from the "Plots" tab (P10-03/load_plot_data() above): that tab
+# renders generateEyeTrackingPlots()'s 3 fixed, server-rendered ggplot
+# outputs for the whole recording, reused as-is per this app's scope (this
+# task does not touch that function or that tab). This section instead backs
+# a NEW view: pick a time range (freely, or snapped to a real event marker as
+# a starting point) and see that range's gaze trajectory and what fraction of
+# it falls inside a user-drawn AOI polygon, both updating live as the range
+# changes. Closest in spirit to the old, unintegrated app_lana.R reference
+# script's own "Gaze Explorer" tab (plotly heatmap + AOI-percentage modal),
+# but rebuilt here as testable, Shiny-free helpers (this section) plus thin
+# reactive wiring in app.R, rather than the monolithic, un-package-integrated
+# original.
+# ---------------------------------------------------------------------------
+
+# resolve_events_data_path: given a qcsummary.tsv output's full path, return
+# the full path of its sibling *_events.tsv file -- the event-marker data
+# saveFiles() writes alongside preproc.tsv and qcsummary.tsv (see
+# R/saveFiles.R).
+#
+# Unlike qcsummary.tsv (a SUFFIX variant of preproc.tsv -- see
+# resolve_preproc_data_path()'s own comment: same stem, "_qcsummary"
+# appended before ".tsv"), events.tsv is a SIBLING built off a genuinely
+# different stem. R/saveFiles.R constructs both independently from the same
+# batchName:
+#   eventdesc    <- "_desc-<batchName>_events"   (or "_desc-events" if NULL)
+#   preprocdesc  <- "_desc-<batchName>_preproc"  (or "_desc-preproc" if NULL)
+# -- i.e. they share only the common "_desc-<batchName>_" prefix, then
+# diverge into "events" vs. "preproc" as two entirely separate words, not one
+# derived from the other by suffixing. That means the correct derivation from
+# a preproc.tsv path is to swap the trailing "preproc" segment for "events"
+# immediately before ".tsv" -- NOT to strip/append a suffix the way
+# resolve_preproc_data_path() does for qcsummary.tsv. Verified directly
+# against a real eyeQualityBatch() output directory (both the batchName-
+# present and batchName-NULL naming forms): a real run's derivatives/
+# folder contains, alongside each *_preproc.tsv and *_preproc_qcsummary.tsv,
+# a sibling *_events.tsv whose stem is otherwise identical -- confirming the
+# substitution below recovers the exact real filename, not just an inferred
+# one from reading saveFiles()'s source alone.
+#
+# Deliberately built on top of resolve_preproc_data_path() (not a second,
+# independent regex against qcsummary_path directly) so this never drifts
+# from that function's own qcsummary -> preproc derivation -- there is
+# exactly one place that regex lives.
+#
+# Returns a single character string. The returned path may not exist on disk
+# -- see load_gaze_trajectory_data() below, which treats a missing/unusable
+# events.tsv as "no event markers available" (a real, expected case -- see
+# that function's own comment) rather than an error, unlike
+# resolve_preproc_data_path()'s sibling being missing (load_plot_data()'s own
+# hard failure case).
+resolve_events_data_path <- function(qcsummary_path) {
+  preproc_path <- resolve_preproc_data_path(qcsummary_path)
+  sub("preproc\\.tsv$", "events.tsv", preproc_path)
+}
+
+# load_gaze_trajectory_data: resolve a selected qc_table row's source_file to
+# its sibling preproc data file (the same file load_plot_data() itself loads
+# -- see resolve_preproc_data_path()) and its sibling events data file (see
+# resolve_events_data_path()), for the Gaze Explorer tab's own interactive
+# trajectory/time-range/AOI view.
+#
+# Deliberately a NEW, independent loader rather than an extension of
+# load_plot_data(): that function already has an established, tested return
+# contract (ok/preproc_path/data/plots/error) consumed both by app.R's
+# existing "Plots" tab and by test-runAnalyzeApp.R's own regression suite;
+# widening its return shape to also carry a second sibling file (events.tsv)
+# that view has no use for would couple two independently-evolving tabs'
+# data needs into one loader. preproc.tsv is small enough (one row per
+# sample, already read once per "Plots" tab render today) that reading it a
+# second time here, rather than threading a shared cache through both call
+# sites, is not worth that coupling.
+#
+# Unlike load_plot_data(), which treats a missing sibling preproc.tsv as a
+# hard failure (ok = FALSE), this function treats an events.tsv problem as a
+# DEGRADE-not-fail condition throughout (see the `events` field below):
+# adapter-aware graceful degradation, since some adapters (e.g. head-mounted
+# geometry types with no stimulus-marker integration) legitimately never
+# produce event markers at all, and even a Tobii adapter's own events.tsv is
+# frequently 0 rows whenever a given recording simply had no logged events
+# (confirmed directly: a real eyeQualityBatch() run against this repo's own
+# test fixtures produces exactly that -- a real, 20-column events.tsv with 0
+# data rows). Neither case should block this tab's time-range/trajectory/AOI
+# view, which works fine over the whole recording's free time range with no
+# event-snapping offered instead -- see app.R's own gating on
+# derive_event_marker_windows()'s NULL return for this same degradation.
+#
+# qcsummary_path: full path to a qcsummary.tsv output (as stored in the
+#   combined table's source_file column).
+#
+# Returns a list:
+#   ok: TRUE/FALSE -- FALSE only when the trajectory data itself (the
+#     sibling preproc.tsv, or its required columns) can't be loaded; a
+#     missing/unreadable/empty/malformed events.tsv never sets this FALSE.
+#   preproc_path / events_path: the resolved sibling paths (always
+#     populated, even when ok == FALSE, so callers can surface them in an
+#     error message).
+#   data: the loaded preproc data.frame (only when ok == TRUE).
+#   events: the loaded events data.frame if a usable one was found (file
+#     exists, parses, has >= 1 row, and has both "event" and
+#     "recordingTimestamp_ms" columns), or NULL otherwise -- callers
+#     (app.R, derive_event_marker_windows()) already treat NULL as "no
+#     event markers available" uniformly, regardless of which of those
+#     reasons produced it.
+#   error: human-readable string (only when ok == FALSE).
+load_gaze_trajectory_data <- function(qcsummary_path) {
+  preproc_path <- resolve_preproc_data_path(qcsummary_path)
+  events_path <- resolve_events_data_path(qcsummary_path)
+
+  if (!file.exists(preproc_path)) {
+    return(list(
+      ok = FALSE,
+      preproc_path = preproc_path,
+      events_path = events_path,
+      error = sprintf(
+        paste0(
+          "The preprocessed data file the Gaze Explorer tab depends on is missing: %s. ",
+          "It should sit alongside %s (the qcsummary.tsv this row was loaded from) in the ",
+          "same derivatives/eyeQuality-v1/ folder -- it may have been moved, renamed, or ",
+          "deleted since the batch run completed."
+        ),
+        preproc_path, basename(qcsummary_path)
+      )
+    ))
+  }
+
+  loaded <- tryCatch(
+    {
+      data <- readr::read_tsv(preproc_path, show_col_types = FALSE, progress = FALSE)
+      # gazeX.preprocessed_px/gazeY.preprocessed_px/recordingTimestamp_ms are
+      # the three columns this tab's trajectory plot and AOI test actually
+      # read (build_gaze_trajectory_plot()/compute_aoi_percent() below) --
+      # checked explicitly, and up front, so a mismatched/corrupted preproc
+      # file fails clearly here rather than plotly silently rendering an
+      # empty or nonsensical trace further downstream.
+      required_cols <- c("recordingTimestamp_ms", "gazeX.preprocessed_px", "gazeY.preprocessed_px")
+      missing_cols <- setdiff(required_cols, names(data))
+      if (length(missing_cols) > 0) {
+        stop(sprintf("missing required column(s) for the Gaze Explorer tab: %s", paste(missing_cols, collapse = ", ")))
+      }
+      list(ok = TRUE, data = data)
+    },
+    error = function(e) list(ok = FALSE, error = conditionMessage(e))
+  )
+
+  if (!isTRUE(loaded$ok)) {
+    return(list(
+      ok = FALSE,
+      preproc_path = preproc_path,
+      events_path = events_path,
+      error = sprintf("Failed to load %s: %s", preproc_path, loaded$error)
+    ))
+  }
+
+  # Deliberately swallows every events.tsv failure mode into a plain NULL
+  # (missing file, unreadable/corrupted file, or a file that IS readable but
+  # has 0 rows or lacks the columns this tab needs) -- none of them should
+  # ever surface as an error here, per this function's own header comment on
+  # graceful degradation.
+  events <- tryCatch(
+    {
+      if (!file.exists(events_path)) {
+        NULL
+      } else {
+        ev <- readr::read_tsv(events_path, show_col_types = FALSE, progress = FALSE)
+        if (nrow(ev) == 0 || !all(c("event", "recordingTimestamp_ms") %in% names(ev))) {
+          NULL
+        } else {
+          ev
+        }
+      }
+    },
+    error = function(e) NULL
+  )
+
+  list(
+    ok = TRUE,
+    preproc_path = preproc_path,
+    events_path = events_path,
+    data = loaded$data,
+    events = events
+  )
+}
+
+# derive_event_marker_windows: collapse a raw events data.frame (one row per
+# logged event occurrence -- see ?eyeQuality-schema's "event"/"eventValue"/
+# "recordingTimestamp_ms" columns, and R/getEventTimes.R for the same
+# first-occurrence/last-occurrence idea this reuses) down to one row per
+# DISTINCT event label, giving that label's first-to-last occurrence window
+# -- the Gaze Explorer tab's "jump to event marker" preset choices.
+#
+# One row per distinct label (not one row per individual occurrence)
+# deliberately: an event label logged once per trial (e.g. "TrialStart"
+# logged N times across N trials) would otherwise produce N near-identical,
+# hard-to-tell-apart dropdown entries; collapsing to first-to-last per label
+# instead gives a single, immediately useful "jump to every occurrence of
+# this label, start to end" default the user can then freely narrow from by
+# dragging the slider -- exactly this tab's "snap as a *starting point*, not
+# a hard constraint" requirement. This mirrors getEventTimes()'s own
+# first-occurrence/last-occurrence semantics (there, for two DIFFERENT event
+# labels supplied by a caller who already knows which pair delimits a range
+# of interest); here, with no such caller-supplied pairing available, using
+# the SAME label's own first and last occurrence is the one derivation that
+# needs no assumption about study-specific event-naming conventions (e.g.
+# that a "TrialStart"/"TrialEnd" naming pattern exists at all) to still
+# produce a sensible window for ANY event label.
+#
+# events: a data.frame with at least "event" and "recordingTimestamp_ms"
+#   columns (as load_gaze_trajectory_data() already filters for before ever
+#   returning a non-NULL `events`), or NULL/anything not shaped that way.
+#
+# Returns NULL if `events` isn't usable (missing, wrong shape, 0 rows after
+# dropping NA event labels/timestamps), or a data.frame with columns event,
+# n_occurrences, start_ms, end_ms -- one row per distinct event label,
+# sorted by label.
+derive_event_marker_windows <- function(events) {
+  required_cols <- c("event", "recordingTimestamp_ms")
+  if (is.null(events) || !is.data.frame(events) || !all(required_cols %in% names(events))) {
+    return(NULL)
+  }
+
+  ev <- events[!is.na(events$event) & !is.na(events$recordingTimestamp_ms), required_cols, drop = FALSE]
+  if (nrow(ev) == 0) {
+    return(NULL)
+  }
+
+  ev %>%
+    dplyr::group_by(event) %>%
+    dplyr::summarise(
+      n_occurrences = dplyr::n(),
+      start_ms = min(recordingTimestamp_ms),
+      end_ms = max(recordingTimestamp_ms),
+      .groups = "drop"
+    ) %>%
+    dplyr::arrange(event) %>%
+    as.data.frame(stringsAsFactors = FALSE)
+}
+
+# points_in_polygon: point-in-polygon test via the standard even-odd
+# ("ray casting") rule -- for every (x[i], y[i]), count how many edges of the
+# polygon (poly_x/poly_y, in vertex order, implicitly closed from the last
+# vertex back to the first) a horizontal ray cast rightward from that point
+# crosses; an odd crossing count means the point is inside.
+#
+# A small, self-contained, pure-R implementation, rather than reaching for
+# sf::st_within() (as the old, unintegrated app_lana.R reference script did)
+# or sp::point.in.polygon(): sf in particular pulls in a real system-library
+# dependency (GDAL/GEOS/PROJ) that's a genuine installation headache for an
+# end user of an R *package* -- unlike app_lana.R's own single-analyst-
+# machine, install-once context, where that cost was basically never felt. A
+# rectangular/quadrilateral AOI test needs none of sf's actual geospatial
+# machinery (map projections, geodesic distance, spatial indexing) -- it's a
+# handful of lines of arithmetic -- so pulling in either heavier package here
+# would trade a real install-time cost for no real capability this app
+# needs. Not restricted to exactly 4 corners despite the AOI-definition UI
+# (app.R) only ever offering 4 -- works for any simple (non-self-
+# intersecting) polygon with >= 3 vertices, so a future richer AOI-drawing
+# interaction isn't blocked by this function's own design.
+#
+# x, y: numeric vectors of equal length -- the points to test.
+# poly_x, poly_y: numeric vectors of equal length (>= 3) -- the polygon's
+#   vertices in order; the polygon is implicitly closed (an edge from the
+#   last vertex back to the first is included even though poly_x/poly_y
+#   don't repeat the first vertex at the end).
+#
+# Returns a logical vector, same length as x/y. NA in x or y at a given
+# index yields NA (not FALSE) at that index -- callers that only want
+# complete points considered are expected to subset x/y (and any companion
+# columns) to non-NA pairs before calling this, since only they know which
+# companion columns matter for that filtering (see compute_aoi_percent()
+# below, which does exactly that).
+points_in_polygon <- function(x, y, poly_x, poly_y) {
+  n <- length(poly_x)
+  if (n != length(poly_y) || n < 3) {
+    stop("points_in_polygon: poly_x/poly_y must be equal-length vectors of at least 3 vertices")
+  }
+  if (length(x) != length(y)) {
+    stop("points_in_polygon: x and y must be equal-length vectors")
+  }
+
+  na_point <- is.na(x) | is.na(y)
+  inside <- rep(FALSE, length(x))
+
+  # j starts as the "previous" vertex (the last one, since the polygon wraps
+  # around) and walks forward alongside i; each (poly_x[j], poly_y[j]) ->
+  # (poly_x[i], poly_y[i]) edge is tested for whether a rightward ray from
+  # (x, y) crosses it, toggling `inside` (logical XOR, via `!inside[toggle]`)
+  # once per crossing. Looping over polygon vertices (n, always small -- 4
+  # for this tab's own AOI UI) rather than over points (x/y, potentially
+  # thousands of gaze samples) keeps every per-edge operation below fully
+  # vectorized across all points at once.
+  j <- n
+  for (i in seq_len(n)) {
+    xi <- poly_x[i]
+    yi <- poly_y[i]
+    xj <- poly_x[j]
+    yj <- poly_y[j]
+
+    crosses <- (yi > y) != (yj > y)
+    # suppressWarnings(): a horizontal edge (yi == yj) can produce a 0/0
+    # NaN here, but `crosses` is deterministically FALSE for any such edge
+    # (yi > y and yj > y can only differ when yi != yj), and R's `&`
+    # short-circuits `FALSE & NA`/`FALSE & NaN`-comparisons to plain FALSE
+    # -- so this NaN is always discarded, never propagated into `toggle`,
+    # and the warning it would otherwise print is just noise.
+    x_intersect <- suppressWarnings(xj + (xi - xj) * (y - yj) / (yi - yj))
+    toggle <- crosses & (x < x_intersect)
+    toggle[is.na(toggle)] <- FALSE
+    inside[toggle] <- !inside[toggle]
+
+    j <- i
+  }
+
+  inside[na_point] <- NA
+  inside
+}
+
+# compute_aoi_percent: what fraction of a data.frame's non-missing gaze
+# points fall inside a rectangular/quadrilateral AOI -- the Gaze Explorer
+# tab's live AOI readout. Recomputed against whatever subset of rows the
+# caller hands in (app.R hands in the current time-range-filtered trajectory
+# data), so the percentage always reflects the SAME rows the trajectory plot
+# itself is currently showing, not the whole recording.
+#
+# df: a data.frame with at least x_col/y_col numeric columns.
+# aoi: NULL (no AOI defined yet -- returns NULL, not an error or a zero), or
+#   a list(x = <numeric vector, >= 3>, y = <numeric vector, same length>) of
+#   polygon vertices in the same units as x_col/y_col (see app.R's AOI
+#   definition modal).
+# x_col, y_col: column names in df to test (default the standard
+#   preprocessed gaze columns every adapter's schema populates).
+#
+# Returns NULL if aoi is NULL, df is NULL/missing the required columns, or
+# df has 0 usable (non-NA-coordinate) rows; otherwise a list: n_total (usable
+# rows considered), n_inside, pct (0-1 fraction, n_inside / n_total).
+compute_aoi_percent <- function(df, aoi, x_col = "gazeX.preprocessed_px", y_col = "gazeY.preprocessed_px") {
+  if (is.null(aoi) || is.null(df) || !all(c(x_col, y_col) %in% names(df))) {
+    return(NULL)
+  }
+  x <- df[[x_col]]
+  y <- df[[y_col]]
+  usable <- !is.na(x) & !is.na(y)
+  x <- x[usable]
+  y <- y[usable]
+  if (length(x) == 0) {
+    return(NULL)
+  }
+
+  inside <- points_in_polygon(x, y, aoi$x, aoi$y)
+  n_inside <- sum(inside, na.rm = TRUE)
+  list(n_total = length(x), n_inside = n_inside, pct = n_inside / length(x))
+}
+
+# gaze_trajectory_display_cap: the maximum number of gaze-sample points this
+# tab ever hands to plotly for the trajectory trace itself -- a real
+# high-frequency recording's selected time range can span tens of thousands
+# of samples, and handing plotly's client-side JS that many points/DOM
+# elements at once is what actually makes an interactive plot like this one
+# visibly stutter or hang in a browser tab (unlike the static, server-
+# rendered ggplot outputs in the "Plots" tab, which don't have this problem
+# the same way). This caps the DISPLAYED trace only -- compute_aoi_percent()
+# above always runs against the full, untrimmed filtered data.frame, never
+# this thinned-for-display copy, so the reported AOI percentage is never
+# silently wrong because of a rendering-only optimization.
+gaze_trajectory_display_cap <- 5000L
+
+# thin_for_display: evenly subsample df down to at most `cap` rows by row
+# position -- purely a rendering-performance measure, see
+# gaze_trajectory_display_cap's own comment. Assumes df is already sorted by
+# time (build_gaze_trajectory_plot() below sorts before calling this), so an
+# evenly-spaced positional subsample is also evenly spaced in time, not a
+# biased sample from one portion of the range. Returns df unchanged when
+# nrow(df) is already at or under the cap.
+thin_for_display <- function(df, cap = gaze_trajectory_display_cap) {
+  n <- nrow(df)
+  if (n <= cap) {
+    return(df)
+  }
+  idx <- unique(round(seq(1, n, length.out = cap)))
+  df[idx, , drop = FALSE]
+}
+
+# build_gaze_trajectory_plot: an interactive plotly scatter/line of gaze
+# position over time, with the current AOI (if any) overlaid as a filled
+# polygon trace -- the Gaze Explorer tab's main view.
+#
+# A plotly, not ggplot2, output: unlike the ggplot-based "Plots" tab, this
+# view needs live pan/zoom/hover on a scatter that's reactively rebuilt on
+# every time-range slider move, and app_lana.R (the old, unintegrated
+# reference script this tab's design is closest to) already established
+# plotly as the right tool for exactly that interaction (this task's own
+# scope decision).
+#
+# Colored (not just ordered) by time, via a continuous colorscale on the
+# marker trace, plus connecting line segments in time order -- an animated,
+# plotly-native frame-by-frame slider was considered and rejected as
+# over-engineering here: the sliderInput this tab already has IS the
+# time-range control, and stacking a second, plotly-native animation slider
+# on top of it inside the same view would be a confusing double control for
+# a modest gain over a static-but-interactive color gradient, which already
+# makes directionality legible (color progression plus connecting lines)
+# without needing to click/drag through frames.
+#
+# df: the (already time-range-filtered) trajectory data.frame -- see app.R's
+#   filtered_trajectory() reactive. Must have time_col/x_col/y_col.
+# aoi: NULL, or list(x = ..., y = ...) as compute_aoi_percent() expects --
+#   overlaid as a semi-transparent filled polygon trace when present.
+#
+# Returns a plotly object, or NULL if df is NULL/missing the required
+# columns, or has 0 usable (non-NA coordinate) rows -- callers should
+# validate()/req() around that rather than handing plotly an empty trace.
+build_gaze_trajectory_plot <- function(
+    df, aoi = NULL,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px") {
+  if (is.null(df) || !all(c(time_col, x_col, y_col) %in% names(df))) {
+    return(NULL)
+  }
+  usable <- !is.na(df[[x_col]]) & !is.na(df[[y_col]]) & !is.na(df[[time_col]])
+  df <- df[usable, , drop = FALSE]
+  if (nrow(df) == 0) {
+    return(NULL)
+  }
+  df <- df[order(df[[time_col]]), , drop = FALSE]
+  plot_df <- thin_for_display(df)
+
+  p <- plotly::plot_ly()
+  p <- plotly::add_trace(
+    p,
+    x = plot_df[[x_col]], y = plot_df[[y_col]],
+    type = "scatter", mode = "lines+markers",
+    line = list(color = "rgba(120,120,120,0.35)", width = 1),
+    marker = list(
+      size = 6,
+      color = plot_df[[time_col]],
+      colorscale = "Viridis",
+      showscale = TRUE,
+      colorbar = list(title = "Time (ms)")
+    ),
+    text = paste0("t = ", round(plot_df[[time_col]]), " ms"),
+    hoverinfo = "text+x+y",
+    name = "Gaze path"
+  )
+
+  # AOI overlay: a second trace tracing the polygon's corners back to its
+  # own first corner (closing it), filled ("toself") so the region itself is
+  # visually obvious, not just its outline -- works the same way for any
+  # simple polygon this tab hands in, not just a rectangle, matching
+  # points_in_polygon()'s own not-rectangle-specific design.
+  if (!is.null(aoi) && length(aoi$x) >= 3 && length(aoi$x) == length(aoi$y)) {
+    p <- plotly::add_trace(
+      p,
+      x = c(aoi$x, aoi$x[1]), y = c(aoi$y, aoi$y[1]),
+      type = "scatter", mode = "lines",
+      fill = "toself", fillcolor = "rgba(220,20,60,0.15)",
+      line = list(color = "crimson", width = 2),
+      name = "AOI", hoverinfo = "skip"
+    )
+  }
+
+  plotly::layout(
+    p,
+    xaxis = list(title = paste(x_col)),
+    yaxis = list(title = paste(y_col)),
+    showlegend = TRUE
+  )
+}
