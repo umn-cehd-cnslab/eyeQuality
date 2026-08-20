@@ -1577,3 +1577,49 @@ test_that("build_flagged_export_table excludes unflagged rows from the count/met
   expect_false(grepl("interpolated_LeftEye", result$flagged_metrics, fixed = TRUE))
   expect_equal(result$flagged_values, "50, 60")
 })
+
+# ---------------------------------------------------------------------------
+# P10-05 regression: output$download_flagged_csv's content() must not throw
+# when no directory has ever been loaded.
+# ---------------------------------------------------------------------------
+#
+# The bug this guards against: qc_table_flagged() (app.R) does req(result$table)
+# internally, which throws a shiny.silent.error/validation condition -- not
+# returns NULL -- before any `load` click. That's normally invisible because
+# render contexts swallow the condition, but downloadHandler's content()
+# runs outside that flush cycle (only when the download URL is actually hit),
+# so an unguarded call from content() into qc_table_flagged() surfaces as a
+# broken download rather than the header-only-CSV fallback the surrounding
+# code otherwise provides for "loaded, nothing flagged".
+#
+# session$getOutput() is the shiny::testServer() technique that reproduces
+# this: for a downloadHandler, it evaluates the registered render function
+# (which calls registerDownload() and, per MockShinySession's download
+# support, immediately executes content() against a real temp file and
+# returns that file's path) -- i.e. it exercises content() itself, not just
+# the button/reactive wiring around it, which is exactly where the bug lived
+# and exactly what the unit tests for build_flagged_export_table() above
+# (which only ever see the helper in isolation, never app.R's reactive
+# chain) couldn't catch.
+test_that("output$download_flagged_csv's content() does not throw and produces a clean header-only CSV when triggered before any directory has been loaded", {
+  skip_on_cran()
+
+  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  expect_true(nzchar(app_dir))
+
+  shiny::testServer(app_dir, {
+    # No session$setInputs(load = ...) here -- qc_table_flagged()'s
+    # req(result$table) has never been satisfied, matching the verifier's
+    # exact repro (calling qc_table_flagged() before `load` has ever fired).
+    downloaded_path <- session$getOutput("download_flagged_csv")
+    expect_true(nzchar(downloaded_path))
+    expect_true(file.exists(downloaded_path))
+
+    result <- utils::read.csv(downloaded_path, stringsAsFactors = FALSE)
+    expect_equal(nrow(result), 0)
+    expect_setequal(
+      names(result),
+      c("recording", "batch_name", "source_file", "n_flagged_metrics", "flagged_metrics", "flagged_values")
+    )
+  })
+})

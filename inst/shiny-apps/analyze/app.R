@@ -303,7 +303,14 @@ server <- function(input, output, session) {
   # unhandled content() error producing a generic error page): with no data
   # loaded or nothing flagged, build_flagged_export_table() returns NULL and
   # content() below just writes a header-only CSV instead of erroring, so
-  # there's no invalid-input case left for content() to throw on.
+  # there's no invalid-input case left for content() to throw on. Note that
+  # qc_table_flagged() itself does req(result$table), which throws a
+  # shiny.silent.error/validation condition (rather than returning NULL) if
+  # no directory has ever been loaded yet -- fine inside a render context
+  # (Shiny swallows it), but downloadHandler's content() runs outside that
+  # flush cycle, so an uncaught version of that condition here would surface
+  # as a broken download. The tryCatch below normalizes that case to the
+  # same NULL that "loaded, nothing flagged" already produces.
   #
   # "Flagged by any configured threshold" (qc_table_flagged()'s qc_flag
   # column, the same one the QC table's row highlighting and
@@ -318,7 +325,12 @@ server <- function(input, output, session) {
       paste0("flagged_for_review_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".csv")
     },
     content = function(file) {
-      tbl <- build_flagged_export_table(qc_table_flagged())
+      flagged_tbl <- tryCatch(
+        qc_table_flagged(),
+        shiny.silent.error = function(e) NULL,
+        validation = function(e) NULL
+      )
+      tbl <- build_flagged_export_table(flagged_tbl)
       if (is.null(tbl)) {
         tbl <- data.frame(
           recording = character(0),
