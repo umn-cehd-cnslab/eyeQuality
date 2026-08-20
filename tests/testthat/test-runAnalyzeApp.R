@@ -493,17 +493,18 @@ test_that("row selection resolves distinct qc_table_rows_selected indices to the
   # shinyFiles::parseDirPath() resolves an input$directory value of
   # list(root = <name>, path = <segments>) as
   # path(roots[[root]], paste0(path, collapse = "/")). tempfile() dirs sit
-  # under the OS temp dir, which is itself under the user's home directory on
-  # this platform, so `dir`'s path relative to fs::path_home() is a real,
-  # resolvable shinyDirChoose()-style selection -- not a mocked-out
-  # selected_dir(), but the actual shinyFiles resolution path app.R uses.
-  home <- fs::path_home()
-  expect_true(startsWith(normalizePath(dir, winslash = "/"), normalizePath(home, winslash = "/")))
-  rel <- sub(
-    paste0("^", normalizePath(home, winslash = "/"), "/?"),
-    "",
-    normalizePath(dir, winslash = "/")
+  # under the OS temp dir, which is under the user's home directory on some
+  # platforms but not others (e.g. /tmp is not under $HOME on many Linux/Mac
+  # setups), so this is a real, resolvable shinyDirChoose()-style selection
+  # -- not a mocked-out selected_dir() -- only where that happens to hold;
+  # skipped below otherwise.
+  home <- normalizePath(fs::path_home(), winslash = "/")
+  dir_norm <- normalizePath(dir, winslash = "/")
+  skip_if_not(
+    startsWith(dir_norm, home),
+    "test tempdir is not under fs::path_home(); shinyFiles root-relative simulation would not resolve"
   )
+  rel <- sub(paste0("^", home, "/?"), "", dir_norm)
   path_segments <- as.list(strsplit(rel, "/")[[1]])
 
   shiny::testServer(app_dir, {
@@ -746,8 +747,12 @@ test_that("changing a QC threshold numericInput live changes qc_thresholds() and
     file.path(dir, "sub-t_ses-1_recording-eyetracking_physio_desc-p1002ts_preproc_qcsummary.tsv")
   )
 
-  home <- fs::path_home()
-  rel <- sub(paste0("^", normalizePath(home, winslash = "/"), "/?"), "", dir)
+  home <- normalizePath(fs::path_home(), winslash = "/")
+  skip_if_not(
+    startsWith(dir, home),
+    "test tempdir is not under fs::path_home(); shinyFiles root-relative simulation would not resolve"
+  )
+  rel <- sub(paste0("^", home, "/?"), "", dir)
   path_segments <- as.list(strsplit(rel, "/")[[1]])
 
   shiny::testServer(app_dir, {
