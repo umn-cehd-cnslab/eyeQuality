@@ -2476,3 +2476,599 @@ test_that("narrowing the Compare files batch_name filter narrows output$compare_
     expect_true(nzchar(session$getOutput("compare_table")))
   }, session = cs$session)
 })
+
+# ---------------------------------------------------------------------------
+# "Gaze Explorer" tab: resolve_events_data_path(), load_gaze_trajectory_data(),
+# derive_event_marker_windows(), points_in_polygon(), compute_aoi_percent(),
+# thin_for_display(), and the live app.R reactive wiring around all of the
+# above (helpers.R additions committed alongside b746f87).
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# resolve_events_data_path()
+# ---------------------------------------------------------------------------
+
+test_that("resolve_events_data_path swaps the trailing preproc segment for events immediately before .tsv, for both the batchName-present and batchName-NULL naming forms", {
+  # Mirrors resolve_preproc_data_path()'s own two-form coverage above --
+  # saveFiles() builds preproc.tsv and events.tsv off two different words
+  # ("preproc" vs "events") sharing only the "_desc-<batchName>_" prefix, not
+  # one derived from the other by suffixing (see this function's own header
+  # comment in helpers.R), so this needs its own dedicated test rather than
+  # inheriting correctness from resolve_preproc_data_path()'s.
+  expect_equal(
+    resolve_events_data_path("/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-mybatch_preproc_qcsummary.tsv"),
+    "/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-mybatch_events.tsv"
+  )
+  expect_equal(
+    resolve_events_data_path("/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-preproc_qcsummary.tsv"),
+    "/data/derivatives/eyeQuality-v1/sub-01_ses-1_desc-events.tsv"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# load_gaze_trajectory_data()
+# ---------------------------------------------------------------------------
+
+test_that("load_gaze_trajectory_data returns ok = TRUE with real trajectory data and a NULL events result for a real batch run's genuine 0-row events.tsv", {
+  skip_on_cran()
+
+  dir <- copy_bids_fixture_tree()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  eyeQualityBatch(dir, batchName = "p10gaze1", numberCores = 1)
+
+  found <- discover_qcsummary_files(dir, recursive = TRUE)
+  expect_length(found, 4)
+
+  result <- load_gaze_trajectory_data(found[1])
+
+  expect_true(result$ok)
+  expect_equal(result$preproc_path, resolve_preproc_data_path(found[1]))
+  expect_equal(result$events_path, resolve_events_data_path(found[1]))
+  expect_true(file.exists(result$events_path)) # the events.tsv genuinely exists...
+  expect_s3_class(result$data, "data.frame")
+  expect_true(all(c("recordingTimestamp_ms", "gazeX.preprocessed_px", "gazeY.preprocessed_px") %in% names(result$data)))
+  expect_null(result$events) # ...but with 0 rows, degrades to NULL rather than an empty data.frame
+})
+
+test_that("load_gaze_trajectory_data returns ok = FALSE with a clear, non-crashing error when the sibling preproc file is missing", {
+  qcsummary_path <- file.path(tempdir(), "sub-x_ses-1_desc-gazegone_preproc_qcsummary.tsv")
+  # deliberately don't create the sibling *_preproc.tsv file
+
+  result <- load_gaze_trajectory_data(qcsummary_path)
+
+  expect_false(result$ok)
+  expect_equal(result$preproc_path, resolve_preproc_data_path(qcsummary_path))
+  expect_equal(result$events_path, resolve_events_data_path(qcsummary_path))
+  expect_true(is.character(result$error) && nzchar(result$error))
+  expect_match(result$error, "should sit alongside", fixed = TRUE)
+  expect_null(result$data)
+})
+
+test_that("load_gaze_trajectory_data returns ok = FALSE with a clear error (not a crash) when the preproc file exists but is missing this tab's required trajectory columns", {
+  dir <- tempfile("p10gaze_badcols_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  qcsummary_path <- file.path(dir, "sub-y_ses-1_desc-gazebadcols_preproc_qcsummary.tsv")
+  preproc_path <- file.path(dir, "sub-y_ses-1_desc-gazebadcols_preproc.tsv")
+  file.create(qcsummary_path)
+  # has recordingTimestamp_ms but is missing gazeX.preprocessed_px/gazeY.preprocessed_px
+  readr::write_tsv(data.frame(recordingTimestamp_ms = 1:3), preproc_path)
+
+  result <- load_gaze_trajectory_data(qcsummary_path)
+
+  expect_false(result$ok)
+  expect_true(is.character(result$error) && nzchar(result$error))
+  expect_match(result$error, "gazeX.preprocessed_px", fixed = TRUE)
+  expect_match(result$error, "gazeY.preprocessed_px", fixed = TRUE)
+  expect_null(result$data)
+})
+
+# ---------------------------------------------------------------------------
+# derive_event_marker_windows()
+# ---------------------------------------------------------------------------
+
+test_that("derive_event_marker_windows collapses multiple occurrences of distinct event labels to one first-to-last window each", {
+  events <- data.frame(
+    event = c("A", "A", "B", "C", "A"),
+    recordingTimestamp_ms = c(10, 20, 5, 100, 30)
+  )
+
+  result <- derive_event_marker_windows(events)
+
+  expect_equal(result$event, c("A", "B", "C"))
+  expect_equal(result$n_occurrences, c(3, 1, 1))
+  expect_equal(result$start_ms, c(10, 5, 100))
+  expect_equal(result$end_ms, c(30, 5, 100))
+})
+
+test_that("derive_event_marker_windows produces a zero-width window for an event label that occurs only once", {
+  events <- data.frame(event = "OnlyOnce", recordingTimestamp_ms = 42)
+
+  result <- derive_event_marker_windows(events)
+
+  expect_equal(result$n_occurrences, 1)
+  expect_equal(result$start_ms, 42)
+  expect_equal(result$end_ms, 42)
+})
+
+test_that("derive_event_marker_windows returns NULL (not an empty data.frame) for NULL events, wrong-shaped events, or events with 0 usable rows", {
+  expect_null(derive_event_marker_windows(NULL))
+  expect_null(derive_event_marker_windows(data.frame(a = 1))) # missing required columns
+  expect_null(derive_event_marker_windows(data.frame(event = character(0), recordingTimestamp_ms = numeric(0))))
+  expect_null(derive_event_marker_windows(data.frame(event = NA_character_, recordingTimestamp_ms = NA_real_)))
+})
+
+# ---------------------------------------------------------------------------
+# points_in_polygon()
+# ---------------------------------------------------------------------------
+
+test_that("points_in_polygon correctly classifies clearly-inside and clearly-outside points against a simple square", {
+  square_x <- c(0, 10, 10, 0)
+  square_y <- c(0, 0, 10, 10)
+
+  expect_true(points_in_polygon(5, 5, square_x, square_y))
+  expect_false(points_in_polygon(20, 20, square_x, square_y))
+})
+
+test_that("points_in_polygon's boundary behavior on a vertex is the standard half-open ray-casting rule (bottom/left edges in, top/right edges out) -- documented as empirically verified, not assumed", {
+  # Verified directly (not just asserted): the bottom-left vertex/edges of
+  # this square classify as inside, the top-right vertex/edges as outside.
+  # This is standard ray-casting boundary behavior (a point exactly on an
+  # edge can go either way depending on the specific edge, this pins down
+  # which way THIS implementation goes), not a design requirement this tab
+  # depends on -- AOI edges are user-drawn approximate regions, not exact
+  # trial boundaries, so this test exists to catch an accidental algorithm
+  # change, not to assert a specific edge behavior is "correct".
+  square_x <- c(0, 10, 10, 0)
+  square_y <- c(0, 0, 10, 10)
+
+  expect_true(points_in_polygon(0, 0, square_x, square_y)) # bottom-left vertex
+  expect_false(points_in_polygon(10, 10, square_x, square_y)) # top-right vertex
+  expect_true(points_in_polygon(5, 0, square_x, square_y)) # bottom edge midpoint
+  expect_true(points_in_polygon(0, 5, square_x, square_y)) # left edge midpoint
+  expect_false(points_in_polygon(10, 5, square_x, square_y)) # right edge midpoint
+})
+
+test_that("points_in_polygon returns NA (not FALSE) for a point with NA x or NA y", {
+  square_x <- c(0, 10, 10, 0)
+  square_y <- c(0, 0, 10, 10)
+
+  expect_true(is.na(points_in_polygon(NA, 5, square_x, square_y)))
+  expect_true(is.na(points_in_polygon(5, NA, square_x, square_y)))
+
+  # vectorized: NA at one index must not corrupt neighboring indices' results
+  result <- points_in_polygon(c(5, NA, 20), c(5, 5, 20), square_x, square_y)
+  expect_equal(result, c(TRUE, NA, FALSE))
+})
+
+test_that("points_in_polygon correctly classifies points against a non-convex L-shaped polygon, not just rectangles", {
+  # An L-shape: a 10x10 square with a 5x5 notch cut out of its top-right
+  # corner. Confirms the ray-casting implementation isn't accidentally
+  # rectangle-only despite the AOI-definition UI only ever offering 4 corners.
+  lx <- c(0, 10, 10, 5, 5, 0)
+  ly <- c(0, 0, 5, 5, 10, 10)
+
+  expect_true(points_in_polygon(2, 2, lx, ly)) # in the main body
+  expect_false(points_in_polygon(7, 7, lx, ly)) # in the notched-out area
+  expect_true(points_in_polygon(7, 2, lx, ly)) # in the lower-right leg
+})
+
+test_that("points_in_polygon correctly classifies points against a triangle", {
+  tx <- c(0, 10, 5)
+  ty <- c(0, 0, 10)
+
+  expect_true(points_in_polygon(5, 3, tx, ty)) # inside, near centroid
+  expect_false(points_in_polygon(9, 9, tx, ty)) # outside
+})
+
+test_that("points_in_polygon errors on fewer than 3 polygon vertices", {
+  expect_error(
+    points_in_polygon(1, 1, c(0, 1), c(0, 1)),
+    "at least 3 vertices"
+  )
+})
+
+test_that("points_in_polygon errors on mismatched x/y vector lengths", {
+  square_x <- c(0, 10, 10, 0)
+  square_y <- c(0, 0, 10, 10)
+
+  expect_error(
+    points_in_polygon(c(1, 2), 1, square_x, square_y),
+    "x and y must be equal-length"
+  )
+})
+
+test_that("points_in_polygon errors on mismatched poly_x/poly_y vector lengths", {
+  expect_error(
+    points_in_polygon(1, 1, c(0, 10, 10), c(0, 0)),
+    "at least 3 vertices"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# compute_aoi_percent()
+# ---------------------------------------------------------------------------
+
+test_that("compute_aoi_percent computes n_total/n_inside/pct correctly for a small hand-computed data.frame and square AOI", {
+  # AOI: unit square [0, 10] x [0, 10].
+  # Rows, by hand: (1,1) inside, (5,5) inside, (20,20) outside, row 4/5 have
+  # an NA in one coordinate (excluded from n_total entirely), row 6 has NA in
+  # both (also excluded).
+  # -> n_total = 3 usable rows, n_inside = 2 ((1,1) and (5,5)), pct = 2/3.
+  df <- data.frame(
+    gazeX.preprocessed_px = c(1, 5, 20, NA, 3, NA),
+    gazeY.preprocessed_px = c(1, 5, 20, 3, NA, NA)
+  )
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+
+  result <- compute_aoi_percent(df, aoi)
+
+  expect_equal(result$n_total, 3)
+  expect_equal(result$n_inside, 2)
+  expect_equal(result$pct, 2 / 3)
+})
+
+test_that("compute_aoi_percent returns NULL for a NULL aoi", {
+  df <- data.frame(gazeX.preprocessed_px = 5, gazeY.preprocessed_px = 5)
+  expect_null(compute_aoi_percent(df, NULL))
+})
+
+test_that("compute_aoi_percent returns NULL when x_col or y_col is missing from df", {
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+  expect_null(compute_aoi_percent(data.frame(gazeX.preprocessed_px = 5), aoi))
+  expect_null(compute_aoi_percent(data.frame(a = 1), aoi))
+  expect_null(compute_aoi_percent(NULL, aoi))
+})
+
+test_that("compute_aoi_percent returns NULL when every row has NA coordinates (0 usable rows)", {
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+  df <- data.frame(
+    gazeX.preprocessed_px = c(NA, NA),
+    gazeY.preprocessed_px = c(NA, NA)
+  )
+  expect_null(compute_aoi_percent(df, aoi))
+})
+
+test_that("compute_aoi_percent excludes rows with only one of x/y missing, not just fully-NA rows", {
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+  df <- data.frame(
+    gazeX.preprocessed_px = c(5, NA, 5),
+    gazeY.preprocessed_px = c(5, 5, NA)
+  )
+  result <- compute_aoi_percent(df, aoi)
+  expect_equal(result$n_total, 1) # only row 1 has both coordinates present
+  expect_equal(result$n_inside, 1)
+})
+
+# ---------------------------------------------------------------------------
+# thin_for_display()
+# ---------------------------------------------------------------------------
+
+test_that("thin_for_display returns df unchanged when nrow(df) is at or under the cap", {
+  df_under <- data.frame(x = 1:100)
+  expect_identical(thin_for_display(df_under, cap = 5000L), df_under)
+
+  df_at_cap <- data.frame(x = 1:5000)
+  expect_identical(thin_for_display(df_at_cap, cap = 5000L), df_at_cap)
+})
+
+test_that("thin_for_display evenly subsamples down to exactly the cap when nrow(df) exceeds it", {
+  df <- data.frame(x = 1:12000)
+  thinned <- thin_for_display(df, cap = 5000L)
+  expect_equal(nrow(thinned), 5000L)
+  # first and last rows of the original range are preserved by an
+  # evenly-spaced seq(1, n, length.out = cap) subsample.
+  expect_equal(thinned$x[1], 1)
+  expect_equal(thinned$x[nrow(thinned)], 12000)
+})
+
+test_that("compute_aoi_percent() against the full untrimmed data can give a different (and always the CORRECT, non-silently-substituted) answer than against thin_for_display()'s output, when the AOI-relevant point falls at a row position the thinned subsample drops", {
+  # 6000 rows, cap = 5000: thin_for_display()'s evenly-spaced
+  # unique(round(seq(1, 6000, length.out = 5000))) subsample is confirmed
+  # (checked directly) to drop row 4 -- placing the ONLY AOI-inside point
+  # there means the full data's AOI percentage and the thinned copy's AOI
+  # percentage are guaranteed to disagree, proving thin_for_display()'s
+  # output is never silently an acceptable substitute for the untrimmed data
+  # a correctness-sensitive computation like compute_aoi_percent() needs.
+  n <- 6000L
+  x <- rep(100, n)
+  y <- rep(100, n)
+  x[4] <- 5
+  y[4] <- 5
+  df <- data.frame(gazeX.preprocessed_px = x, gazeY.preprocessed_px = y)
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+
+  full_result <- compute_aoi_percent(df, aoi)
+  thinned_result <- compute_aoi_percent(thin_for_display(df, cap = 5000L), aoi)
+
+  expect_equal(full_result$n_total, 6000)
+  expect_equal(full_result$n_inside, 1)
+
+  expect_equal(thinned_result$n_total, 5000)
+  expect_equal(thinned_result$n_inside, 0)
+
+  expect_false(identical(full_result$pct, thinned_result$pct))
+})
+
+# ---------------------------------------------------------------------------
+# "Gaze Explorer" tab: live app.R reactive wiring (shiny::testServer())
+# ---------------------------------------------------------------------------
+
+# build_gaze_explorer_fixture: a hand-built (NOT eyeQualityBatch()-run) pair
+# of qcsummary/preproc/[events] file trios, one per "file", giving full
+# control over gaze coordinates/timestamps/event labels for the
+# hand-computable AOI-percentage and time-range assertions below -- unlike a
+# real batch run's own fixture output, whose gaze coordinates are near-
+# constant across the whole recording and can't be hand-designed to land a
+# known fraction of points inside/outside a given AOI (see the real-batch-run
+# load_gaze_trajectory_data() tests above, which use eyeQualityBatch() output
+# instead specifically because those only need real file *layout*, not
+# specific gaze values).
+#
+# File A: has real event markers (one label, "Trial1", occurring twice) and
+#   10 gaze samples over recordingTimestamp_ms 0-90, with coordinates chosen
+#   so a [0,10] x [0,10] square AOI classifies a hand-computable 5 of 8
+#   usable rows as inside (see the AOI-readout test below for the arithmetic).
+# File B: no events.tsv sibling at all (a real, expected "no markers"
+#   degradation case -- see load_gaze_trajectory_data()'s own header comment)
+#   and a wholly different, non-overlapping recordingTimestamp_ms range from
+#   file A -- lets the row-switch reset tests below confirm BOTH the slider
+#   bounds and any AOI defined against file A are actually reset, not just
+#   assumed to be.
+#
+# discover_qcsummary_files()'s sort() means file A ("sub-a...") always
+# resolves to combined-table row 1 and file B ("sub-b...") to row 2.
+build_gaze_explorer_fixture <- function() {
+  dir <- tempfile("p10_gaze_explorer_")
+  dir.create(dir)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-fileA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      recordingTimestamp_ms = c(0, 10, 20, 30, 40, 50, 60, 70, 80, 90),
+      gazeX.preprocessed_px = c(5, 5, 20, 5, NA, 5, 0, 10, -5, 3),
+      gazeY.preprocessed_px = c(5, 5, 20, 5, 5, NA, 0, 10, -5, 3)
+    ),
+    file.path(dir, "sub-a_ses-1_desc-fileA_preproc.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      event = c("Trial1", "Trial1"),
+      recordingTimestamp_ms = c(10, 50)
+    ),
+    file.path(dir, "sub-a_ses-1_desc-fileA_events.tsv")
+  )
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-b_ses-1_desc-fileB_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      recordingTimestamp_ms = c(1000, 1010, 1020),
+      gazeX.preprocessed_px = c(50, 50, 50),
+      gazeY.preprocessed_px = c(50, 50, 50)
+    ),
+    file.path(dir, "sub-b_ses-1_desc-fileB_preproc.tsv")
+  )
+  # deliberately no sub-b...events.tsv at all
+
+  normalizePath(dir, winslash = "/", mustWork = TRUE)
+}
+
+test_that("selecting a QC-table row for a file with real event markers populates the event-marker selector; a file without any shows the degraded 'no markers' message instead", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_explorer_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+
+    session$setInputs(qc_table_rows_selected = 1) # file A, has events
+    marker_ui_a <- renderui_html(session$getOutput("gaze_event_marker_ui"))
+    expect_match(marker_ui_a, "Trial1", fixed = TRUE)
+    expect_match(marker_ui_a, "Jump to event marker", fixed = TRUE)
+    windows_a <- gaze_event_windows()
+    expect_equal(windows_a$event, "Trial1")
+    expect_equal(windows_a$n_occurrences, 2)
+
+    session$setInputs(qc_table_rows_selected = 2) # file B, no events.tsv at all
+    marker_ui_b <- renderui_html(session$getOutput("gaze_event_marker_ui"))
+    expect_match(marker_ui_b, "No event markers found for this recording", fixed = TRUE)
+    expect_null(gaze_event_windows())
+  })
+})
+
+test_that("switching the selected row from file A to file B resets the time-range slider to file B's own bounds and clears any AOI defined for file A", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_explorer_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  # updateSliderInput()'s sendInputMessage() call is a documented no-op on a
+  # bare MockShinySession (input$gaze_time_range itself never reflects it --
+  # see capturing_update_session()'s own comment above), so this asserts on
+  # the actual min/max/value the server told the (simulated) browser to set
+  # instead, the same technique this file's existing Compare-files
+  # batch_name-filter tests already use for the same reason.
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+
+    session$setInputs(qc_table_rows_selected = 1) # file A: recordingTimestamp_ms 0-90
+    calls_a <- get("gaze_time_range", envir = cs$calls)
+    last_call_a <- calls_a[[length(calls_a)]]
+    expect_equal(as.numeric(last_call_a$min), 0)
+    expect_equal(as.numeric(last_call_a$max), 90)
+    expect_equal(as.numeric(last_call_a$value), c(0, 90))
+
+    # Reflect that reset the way a real browser would (see the comment
+    # above) so filtered_trajectory()/gaze_aoi_result() below have a real
+    # rng to work from, then define an AOI while file A is selected.
+    session$setInputs(gaze_time_range = c(0, 90))
+    session$setInputs(gaze_define_aoi = 1)
+    session$setInputs(
+      gaze_aoi1x = 0, gaze_aoi1y = 0,
+      gaze_aoi2x = 10, gaze_aoi2y = 0,
+      gaze_aoi3x = 10, gaze_aoi3y = 10,
+      gaze_aoi4x = 0, gaze_aoi4y = 10
+    )
+    session$setInputs(gaze_aoi_submit = 1)
+    expect_false(is.null(aoi_polygon()))
+
+    # switch to file B: recordingTimestamp_ms 1000-1020, a wholly different
+    # (non-overlapping) range from file A's own 0-90
+    session$setInputs(qc_table_rows_selected = 2)
+    calls_b <- get("gaze_time_range", envir = cs$calls)
+    last_call_b <- calls_b[[length(calls_b)]]
+    expect_equal(as.numeric(last_call_b$min), 1000)
+    expect_equal(as.numeric(last_call_b$max), 1020)
+    expect_equal(as.numeric(last_call_b$value), c(1000, 1020))
+    expect_null(aoi_polygon())
+  }, session = cs$session)
+})
+
+test_that("defining an AOI via the modal's 4 corner inputs produces an n_inside/n_total/pct readout matching a hand-computed expectation", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_explorer_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1) # file A
+
+    # updateSliderInput()'s reset (observeEvent(selected_source_file(), ...)
+    # in app.R) is a no-op on input$gaze_time_range itself under a bare
+    # MockShinySession (see capturing_update_session()'s own comment
+    # elsewhere in this file) -- reflect the real browser echo of file A's
+    # own [0, 90] bounds by hand so filtered_trajectory() has a real rng.
+    session$setInputs(gaze_time_range = c(0, 90))
+
+    session$setInputs(gaze_define_aoi = 1)
+    session$setInputs(
+      gaze_aoi1x = 0, gaze_aoi1y = 0,
+      gaze_aoi2x = 10, gaze_aoi2y = 0,
+      gaze_aoi3x = 10, gaze_aoi3y = 10,
+      gaze_aoi4x = 0, gaze_aoi4y = 10
+    )
+    session$setInputs(gaze_aoi_submit = 1)
+
+    result <- gaze_aoi_result()
+    # Hand-computed against file A's 10 gaze rows and the [0,10] x [0,10]
+    # square: rows 5/6 have one NA coordinate each (excluded), leaving 8
+    # usable rows -- (5,5) x3 inside, (20,20) outside, (0,0) vertex inside,
+    # (10,10) vertex outside, (-5,-5) outside, (3,3) inside -> 5 of 8 inside.
+    expect_equal(result$n_total, 8)
+    expect_equal(result$n_inside, 5)
+    expect_equal(result$pct, 5 / 8)
+
+    status_html <- renderui_html(session$getOutput("gaze_aoi_status"))
+    expect_match(status_html, "5 of 8", fixed = TRUE)
+  })
+})
+
+test_that("narrowing the time range to a window with 0 gaze samples shows the documented empty-range message instead of erroring", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_explorer_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1) # file A: samples at 0,10,20,...,90
+
+    # narrow to a sub-range of file A's own [0, 90] slider bounds that
+    # contains no actual sample timestamps at all.
+    session$setInputs(gaze_time_range = c(2, 8))
+
+    plot_output <- tryCatch(
+      session$getOutput("gaze_trajectory_plot"),
+      shiny.silent.error = function(e) conditionMessage(e),
+      validation = function(e) conditionMessage(e)
+    )
+    expect_match(plot_output, "No gaze samples in the current time range.", fixed = TRUE)
+  })
+})
+
+test_that("the app-level wiring passes the untrimmed filtered_trajectory() to compute_aoi_percent(), never the display-thinned copy", {
+  # A live-app-level version of the thin_for_display() unit test above:
+  # reads app.R's actual reactive graph (gaze_aoi_result() -> filtered_trajectory(),
+  # NOT the thinned copy build_gaze_trajectory_plot() computes internally for
+  # rendering) rather than assuming helpers.R's own docstrings are honored by
+  # the caller.
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- tempfile("p10_gaze_explorer_thinguarantee_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+
+  n <- 6000L
+  x <- rep(100, n)
+  y <- rep(100, n)
+  # thin_for_display()'s evenly-spaced cap=5000 subsample of a 6000-row df is
+  # confirmed (see the Shiny-free unit test above) to drop row 4 -- placing
+  # the ONLY AOI-inside point there means the app-level AOI readout can only
+  # show 1 inside point if it's computed against the FULL, untrimmed data.
+  x[4] <- 5
+  y[4] <- 5
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-c_ses-1_desc-fileC_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      recordingTimestamp_ms = seq_len(n),
+      gazeX.preprocessed_px = x,
+      gazeY.preprocessed_px = y
+    ),
+    file.path(dir, "sub-c_ses-1_desc-fileC_preproc.tsv")
+  )
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+
+    # updateSliderInput()'s reset is a no-op on input$gaze_time_range itself
+    # under a bare MockShinySession (see capturing_update_session()'s own
+    # comment elsewhere in this file) -- reflect the real browser echo of
+    # this file's own full [1, 6000] bounds by hand.
+    session$setInputs(gaze_time_range = c(1, n))
+
+    session$setInputs(gaze_define_aoi = 1)
+    session$setInputs(
+      gaze_aoi1x = 0, gaze_aoi1y = 0,
+      gaze_aoi2x = 10, gaze_aoi2y = 0,
+      gaze_aoi3x = 10, gaze_aoi3y = 10,
+      gaze_aoi4x = 0, gaze_aoi4y = 10
+    )
+    session$setInputs(gaze_aoi_submit = 1)
+
+    result <- gaze_aoi_result()
+    expect_equal(result$n_total, 6000)
+    expect_equal(result$n_inside, 1) # would be 0 if wired against the thinned copy instead
+  })
+})
