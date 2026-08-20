@@ -1903,3 +1903,576 @@ test_that("Analyze app with no analyze_initialDirectory shinyOption set: selecte
     expect_equal(session$getOutput("selected_directory"), "No directory selected yet.")
   })
 })
+
+# ---------------------------------------------------------------------------
+# Live auto-refresh polling: current_load_result()/manual_load_trigger()/
+# has_loaded_once()/auto_refresh_interval_ms(), and the observe() block that
+# ties them together (app.R). Exercised via shiny::testServer()'s
+# session$elapse(millis) -- MockShinySession$elapse() (confirmed directly
+# against shiny's own R6 source) advances the mock session's simulated timer
+# and runs any reactives/observers invalidateLater() scheduled along the way,
+# synchronously and deterministically, rather than needing a real wall-clock
+# wait for a periodic reactive under test.
+#
+# One quirk this file's tests below all account for: the observe() block
+# itself does an immediate poll (if input$autoRefresh and has_loaded_once()
+# are both already TRUE) the very first time it's invalidated -- e.g. right
+# when input$autoRefresh flips to TRUE -- not only after the first
+# invalidateLater() interval elapses; invalidateLater() only governs when the
+# *next* tick after that happens. Confirmed directly with a minimal
+# reproduction before relying on it here.
+# ---------------------------------------------------------------------------
+
+# renderui_html: shiny::testServer()'s session$getOutput() returns a
+# renderUI() output as a list(html = <character>, deps = <list>) in this
+# harness, not a bare character string (confirmed directly -- every state of
+# output$auto_refresh_status returns this same shape, unlike renderText()'s
+# output$selected_directory elsewhere in this file, which really is plain
+# character). Unwrapped here once so the tests below can still assert against
+# a plain string.
+renderui_html <- function(x) {
+  if (is.list(x) && !is.null(x$html)) x$html else x
+}
+
+test_that("checking Auto-refresh before any directory has ever been loaded does nothing: no polling occurs, and auto_refresh_status shows the not-yet-eligible state", {
+  skip_on_cran()
+
+  shiny::testServer(analyze_app_dir, {
+    expect_match(renderui_html(session$getOutput("auto_refresh_status")), "Auto-refresh is off", fixed = TRUE)
+
+    session$setInputs(autoRefresh = TRUE)
+    expect_match(
+      renderui_html(session$getOutput("auto_refresh_status")),
+      "will begin once you load a directory",
+      fixed = TRUE
+    )
+    expect_false(has_loaded_once())
+    expect_null(current_load_result())
+
+    # Advancing simulated time well past the (5s default) interval must
+    # produce no update at all -- the observe() block's early return (gated
+    # on has_loaded_once()) means invalidateLater() is never even reached, so
+    # there's nothing scheduled to elapse into in the first place.
+    session$elapse(20000)
+    expect_null(current_load_result())
+    expect_equal(manual_load_trigger(), 0L)
+  })
+})
+
+test_that("checking Auto-refresh after a real manual load re-polls the loaded directory on a timer tick, updating current_load_result() with fresh data without bumping manual_load_trigger()", {
+  skip_on_cran()
+
+  dir <- tempfile("p10_autorefresh_tick_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-tickrun_preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+
+    expect_true(has_loaded_once())
+    expect_equal(manual_load_trigger(), 1L)
+    expect_equal(current_load_result()$n_files, 1L)
+
+    session$setInputs(autoRefresh = TRUE)
+
+    # Add a new qcsummary.tsv to the SAME directory between the load and the
+    # next scheduled tick -- exactly what a user pointing this app at a
+    # Setup app run's in-progress output directory is meant to see picked up
+    # without another manual "Load qcsummary files" click.
+    readr::write_tsv(
+      data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+      file.path(dir, "sub-b_ses-1_desc-tickrun_preproc_qcsummary.tsv")
+    )
+
+    session$elapse(6000) # past the default 5s interval
+
+    expect_equal(current_load_result()$n_files, 2L)
+    # The tick's own current_load_result() update must NOT also bump
+    # manual_load_trigger() -- that's output$qc_table's OWN rebuild trigger,
+    # and bumping it on every tick would rebuild the whole DT widget (and
+    # reset a user's sort/filter/page state) every few seconds, exactly the
+    # UX regression auto-refresh exists to avoid.
+    expect_equal(manual_load_trigger(), 1L)
+  })
+})
+
+test_that("unchecking Auto-refresh mid-session stops further polling", {
+  skip_on_cran()
+
+  dir <- tempfile("p10_autorefresh_stop_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-stoprun_preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+    expect_equal(current_load_result()$n_files, 1L)
+
+    session$setInputs(autoRefresh = TRUE)
+
+    readr::write_tsv(
+      data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+      file.path(dir, "sub-b_ses-1_desc-stoprun_preproc_qcsummary.tsv")
+    )
+    session$elapse(6000)
+    expect_equal(current_load_result()$n_files, 2L) # picked up while still checked
+
+    session$setInputs(autoRefresh = FALSE)
+
+    readr::write_tsv(
+      data.frame(qc_metric = "valid_raw_data", percent = 0.1),
+      file.path(dir, "sub-c_ses-1_desc-stoprun_preproc_qcsummary.tsv")
+    )
+    session$elapse(6000)
+
+    # Polling has stopped: this third file must NOT be picked up.
+    expect_equal(current_load_result()$n_files, 2L)
+  })
+})
+
+test_that("auto_refresh_interval_ms() reflects autoRefreshIntervalSec and falls back to its documented 5s default for NULL/NA/below-1 values", {
+  skip_on_cran()
+
+  shiny::testServer(analyze_app_dir, {
+    # No input set yet (MockShinySession starts every input NULL, unlike a
+    # real browser session which would already report the numericInput's UI
+    # default of 5) -- this is itself the NULL-fallback case.
+    expect_equal(auto_refresh_interval_ms(), 5000)
+
+    session$setInputs(autoRefreshIntervalSec = 10)
+    expect_equal(auto_refresh_interval_ms(), 10000)
+
+    session$setInputs(autoRefreshIntervalSec = NA)
+    expect_equal(auto_refresh_interval_ms(), 5000)
+
+    session$setInputs(autoRefreshIntervalSec = 0)
+    expect_equal(auto_refresh_interval_ms(), 5000)
+
+    session$setInputs(autoRefreshIntervalSec = -5)
+    expect_equal(auto_refresh_interval_ms(), 5000)
+  })
+})
+
+test_that("selected_source_file() survives an auto-refresh tick where a new file sorts ahead of the previously selected row, shifting every subsequent row's index", {
+  skip_on_cran()
+
+  dir <- tempfile("p10_selection_shift_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-b_ses-1_desc-shiftrun_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-c_ses-1_desc-shiftrun_preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+
+    result <- current_load_result()
+    expect_equal(nrow(result$table), 2)
+    # row 2 (alphabetically) is sub-c
+    expect_match(result$table$source_file[2], "sub-c_ses-1")
+
+    session$setInputs(qc_table_rows_selected = 2)
+    expect_match(selected_source_file(), "sub-c_ses-1")
+
+    session$setInputs(autoRefresh = TRUE)
+
+    # A new file that sorts BEFORE sub-b -- once auto-refresh reloads the
+    # directory, every row after it (including the originally selected
+    # sub-c) shifts down by one numeric index.
+    readr::write_tsv(
+      data.frame(qc_metric = "valid_raw_data", percent = 0.1),
+      file.path(dir, "sub-a_ses-1_desc-shiftrun_preproc_qcsummary.tsv")
+    )
+
+    session$elapse(6000)
+
+    new_result <- current_load_result()
+    expect_equal(nrow(new_result$table), 3)
+    # what NOW sits at row index 2 is sub-b, not the originally selected sub-c
+    expect_match(new_result$table$source_file[2], "sub-b_ses-1")
+
+    # The stash-at-click-time design must still resolve to the ORIGINALLY
+    # selected file (sub-c), not whatever now happens to sit at index 2
+    # (sub-b) -- this is the specific "wrong file, no crash, no warning"
+    # failure mode this design exists to prevent.
+    expect_match(selected_source_file(), "sub-c_ses-1")
+    expect_false(grepl("sub-b_ses-1", selected_source_file(), fixed = TRUE))
+  })
+})
+
+test_that("selected_source_file() clears (rather than pointing at a nonexistent file) when an auto-refresh tick's reload no longer contains the previously selected file", {
+  skip_on_cran()
+
+  dir <- tempfile("p10_selection_delete_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  path_a <- file.path(dir, "sub-a_ses-1_desc-delrun_preproc_qcsummary.tsv")
+  readr::write_tsv(data.frame(qc_metric = "valid_raw_data", percent = 0.9), path_a)
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-b_ses-1_desc-delrun_preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+
+    session$setInputs(qc_table_rows_selected = 1)
+    expect_match(selected_source_file(), "sub-a_ses-1")
+
+    session$setInputs(autoRefresh = TRUE)
+
+    unlink(path_a)
+
+    session$elapse(6000)
+
+    new_result <- current_load_result()
+    expect_equal(nrow(new_result$table), 1)
+    expect_null(selected_source_file())
+  })
+})
+
+test_that("output$auto_refresh_status shows the actively-polling state with a last-updated timestamp once a directory is loaded and Auto-refresh is checked", {
+  skip_on_cran()
+
+  dir <- tempfile("p10_autorefresh_status_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-statusrun_preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+    session$setInputs(autoRefresh = TRUE)
+
+    status <- renderui_html(session$getOutput("auto_refresh_status"))
+    expect_match(status, "Auto-refreshing every", fixed = TRUE)
+    expect_false(grepl("will begin once", status, fixed = TRUE))
+    expect_false(grepl("Auto-refresh is off", status, fixed = TRUE))
+  })
+})
+
+# ---------------------------------------------------------------------------
+# "Compare files" tab: batch_name (run) filter -- Shiny-free helpers first
+# (batch_name_none_sentinel(), compare_batch_name_choices(),
+# filter_by_batch_name()), then the live app.R wiring (default selection,
+# narrowing output$compare_plot/output$compare_table, and the interaction
+# with auto-refresh) via shiny::testServer().
+# ---------------------------------------------------------------------------
+
+# batch_name_filter_test_table: a minimal table carrying only the columns
+# compare_batch_name_choices()/filter_by_batch_name() actually read
+# (batch_name, plus the identifying/metric columns the two Compare-tab
+# builder functions need so the same table can double as their input where
+# useful).
+batch_name_filter_test_table <- function(batch_names) {
+  n <- length(batch_names)
+  data.frame(
+    recording = paste0("rec-", seq_len(n)),
+    batch_name = batch_names,
+    source_file = paste0("/data/rec-", seq_len(n), "_qcsummary.tsv"),
+    qc_metric = "valid_raw_data",
+    percent = seq(0.9, by = -0.05, length.out = n),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("batch_name_none_sentinel returns the literal '(none)' string", {
+  expect_equal(batch_name_none_sentinel(), "(none)")
+})
+
+test_that("compare_batch_name_choices returns sorted distinct batch_name values with a single trailing '(none)' entry for NA rows", {
+  tbl <- batch_name_filter_test_table(c("runB", "runA", NA, "runA"))
+  expect_equal(compare_batch_name_choices(tbl), c("runA", "runB", "(none)"))
+})
+
+test_that("compare_batch_name_choices omits the '(none)' entry entirely when there are no NA batch_name rows", {
+  tbl <- batch_name_filter_test_table(c("runB", "runA"))
+  expect_equal(compare_batch_name_choices(tbl), c("runA", "runB"))
+})
+
+test_that("compare_batch_name_choices returns character(0) for a NULL table or one missing the batch_name column", {
+  expect_equal(compare_batch_name_choices(NULL), character(0))
+
+  tbl <- batch_name_filter_test_table("runA")
+  tbl$batch_name <- NULL
+  expect_equal(compare_batch_name_choices(tbl), character(0))
+})
+
+test_that("filter_by_batch_name keeps only the matching rows for a real multi-batch_name table", {
+  tbl <- batch_name_filter_test_table(c("runA", "runB", "runA"))
+  result <- filter_by_batch_name(tbl, "runA")
+
+  expect_equal(nrow(result), 2)
+  expect_true(all(result$batch_name == "runA"))
+})
+
+test_that("filter_by_batch_name honors '(none)' in selected as a stand-in for keeping the NA batch_name rows", {
+  tbl <- batch_name_filter_test_table(c("runA", NA, "runB", NA))
+  result <- filter_by_batch_name(tbl, batch_name_none_sentinel())
+
+  expect_equal(nrow(result), 2)
+  expect_true(all(is.na(result$batch_name)))
+})
+
+test_that("filter_by_batch_name returns a 0-row subset -- not the unfiltered table -- for a NULL or zero-length selected", {
+  # Deliberate, easy-to-get-backwards design choice (see filter_by_batch_name()'s
+  # own comment in helpers.R): a user who has cleared every selection has
+  # asked to see nothing, not everything.
+  tbl <- batch_name_filter_test_table(c("runA", "runB"))
+
+  result_null <- filter_by_batch_name(tbl, NULL)
+  expect_equal(nrow(result_null), 0)
+  expect_equal(colnames(result_null), colnames(tbl))
+
+  result_empty <- filter_by_batch_name(tbl, character(0))
+  expect_equal(nrow(result_empty), 0)
+})
+
+test_that("filter_by_batch_name returns the input unchanged for a NULL table or one missing the batch_name column", {
+  expect_null(filter_by_batch_name(NULL, "runA"))
+
+  tbl <- batch_name_filter_test_table("runA")
+  tbl$batch_name <- NULL
+  expect_identical(filter_by_batch_name(tbl, "runA"), tbl)
+})
+
+# capturing_update_session: a MockShinySession whose sendInputMessage() --
+# a documented no-op in a bare MockShinySession (see e.g. this file's earlier
+# comment on cfg_batchName/cfg_directoryBIDS not reflecting update*Input()
+# calls in this harness) -- instead records every update*Input() call's
+# inputId/message into `calls`, keyed by inputId. This lets a test assert on
+# what app.R's own observeEvent(manual_load_trigger(), ...) block actually
+# told the (simulated) browser to set for "compare_batch_name_filter" --
+# specifically that `selected` defaults to every currently loaded
+# batch_name -- without needing input$compare_batch_name_filter itself to
+# reflect that value (which, per the no-op above, it never does here).
+capturing_update_session <- function() {
+  sess <- shiny::MockShinySession$new()
+  calls <- new.env(parent = emptyenv())
+  sess$sendInputMessage <- function(inputId, message) {
+    existing <- calls[[inputId]]
+    if (is.null(existing)) {
+      existing <- list()
+    }
+    existing[[length(existing) + 1]] <- message
+    calls[[inputId]] <- existing
+    invisible()
+  }
+  list(session = sess, calls = calls)
+}
+
+test_that("Compare files batch_name filter defaults to every loaded batch_name selected (including the '(none)' case) on a real manual load", {
+  skip_on_cran()
+
+  dir <- tempfile("p1004_batchfilter_default_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-batchA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-b_ses-1_desc-batchB_preproc_qcsummary.tsv")
+  )
+  # eyeQuality()'s single-file (batchName == NULL) naming form -- the "(none)" case.
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.6),
+    file.path(dir, "sub-c_ses-1_desc-preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+
+    calls <- get("compare_batch_name_filter", envir = cs$calls)
+    expect_length(calls, 1)
+    expect_setequal(calls[[1]]$value, c("batchA", "batchB", "(none)"))
+  }, session = cs$session)
+})
+
+test_that("narrowing the Compare files batch_name filter narrows output$compare_plot/output$compare_table, and a later auto-refresh tick does not reset that narrowed selection back to all", {
+  skip_on_cran()
+
+  dir <- tempfile("p1004_batchfilter_interaction_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  # One batchA file, and enough batchB files that the unfiltered (15-row) vs.
+  # narrowed-to-batchA-only (1-row) row counts push output$compare_plot's
+  # dynamic height() function (n * 28 + 120, floored at 500px -- see app.R)
+  # to two genuinely different values, rather than both landing on the same
+  # 500px floor.
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-batchA_preproc_qcsummary.tsv")
+  )
+  for (i in seq_len(14)) {
+    readr::write_tsv(
+      data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+      file.path(dir, sprintf("sub-b%02d_ses-1_desc-batchB_preproc_qcsummary.tsv", i))
+    )
+  }
+
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+    expect_equal(current_load_result()$n_files, 15L)
+
+    initial_calls <- get("compare_batch_name_filter", envir = cs$calls)
+    expect_length(initial_calls, 1)
+    expect_setequal(initial_calls[[1]]$value, c("batchA", "batchB"))
+
+    # Reflect the default "select all" state a real browser would now show
+    # (see capturing_update_session()'s own comment on why input$<id> doesn't
+    # do this automatically here), plus the metric selectors' own defaults,
+    # so output$compare_plot/output$compare_table have something to render.
+    session$setInputs(
+      compare_batch_name_filter = c("batchA", "batchB"),
+      compare_metric_plot = "valid_raw_data",
+      compare_metrics_table = "valid_raw_data"
+    )
+
+    expect_equal(session$getOutput("compare_plot")$height, 15 * 28 + 120)
+
+    # output$compare_table's own renderDT() uses DT::renderDT()'s default
+    # server = TRUE (server-side processing), unlike output$qc_table (which
+    # explicitly sets server = FALSE for exactly this reason -- see that
+    # render's own comment in app.R). Under server = TRUE, session$getOutput()
+    # returns only the initial widget shell/columns, never the actual row
+    # data (confirmed directly: DT registers its row-serving function via
+    # session$registerDataObj(), which -- like sendInputMessage() -- is a
+    # documented no-op on MockShinySession, so there's no real AJAX endpoint
+    # here to fetch filtered rows from). That rules out grepping recording
+    # labels out of the rendered widget the way the qc_table marker
+    # regression test above does. Instead, this test calls the exact same
+    # production helpers (filter_by_batch_name(), build_qc_comparison_table())
+    # against the exact same live reactive values (current_load_result(),
+    # input$compare_batch_name_filter/compare_metrics_table) that
+    # output$compare_table's render body itself reads and calls, which
+    # exercises the identical narrowing logic -- plus a getOutput() call to
+    # confirm the render pipeline still completes without error at each
+    # selection state.
+    compare_table_now <- function() {
+      filtered <- filter_by_batch_name(current_load_result()$table, input$compare_batch_name_filter)
+      build_qc_comparison_table(filtered, input$compare_metrics_table)
+    }
+
+    all_selected <- compare_table_now()
+    expect_equal(nrow(all_selected), 15)
+    expect_true("sub-a_ses-1" %in% all_selected$recording)
+    expect_true("sub-b01_ses-1" %in% all_selected$recording)
+    expect_true(nzchar(session$getOutput("compare_table")))
+
+    # --- deselect batchB: narrow to batchA only ---
+    session$setInputs(compare_batch_name_filter = "batchA")
+
+    expect_equal(session$getOutput("compare_plot")$height, 500) # 1*28+120=148, floored to 500
+    narrowed <- compare_table_now()
+    expect_equal(nrow(narrowed), 1)
+    expect_equal(narrowed$recording, "sub-a_ses-1")
+    expect_true(nzchar(session$getOutput("compare_table")))
+
+    # --- a later auto-refresh tick must NOT reset this narrowed selection ---
+    session$setInputs(autoRefresh = TRUE)
+
+    # A brand-new batch_name arriving mid-session -- app.R's own documented
+    # behavior is that this is never auto-selected into an already-narrowed
+    # filter (a user who wants to see it selects it manually).
+    readr::write_tsv(
+      data.frame(qc_metric = "valid_raw_data", percent = 0.3),
+      file.path(dir, "sub-c_ses-1_desc-batchC_preproc_qcsummary.tsv")
+    )
+
+    session$elapse(6000)
+
+    # The tick genuinely re-polled (proves this isn't a no-op tick)...
+    expect_equal(current_load_result()$n_files, 16L)
+
+    # ...but "compare_batch_name_filter"'s own updateSelectizeInput was never
+    # called a second time -- its repopulating observer is deliberately keyed
+    # on manual_load_trigger() only (never current_load_result(), which is
+    # what ticks actually change), matching the metric-selector observer's
+    # own reasoning in app.R.
+    expect_length(get("compare_batch_name_filter", envir = cs$calls), 1)
+
+    # ...and input$compare_batch_name_filter is still just "batchA" -- the
+    # tick never touched it -- so the same narrowing helpers still resolve to
+    # only the batchA row, not "every batch_name including the new one".
+    expect_equal(input$compare_batch_name_filter, "batchA")
+    post_tick <- compare_table_now()
+    expect_equal(nrow(post_tick), 1)
+    expect_equal(post_tick$recording, "sub-a_ses-1")
+    expect_equal(session$getOutput("compare_plot")$height, 500)
+    expect_true(nzchar(session$getOutput("compare_table")))
+  }, session = cs$session)
+})
