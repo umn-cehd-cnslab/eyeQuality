@@ -195,3 +195,52 @@ build_batch_config_from_form <- function(directoryBIDS,
   # same reasoning.
   utils::modifyList(extra, form_fields, keep.null = TRUE)
 }
+
+# --- P9-07: post-run summary linking to the Analyze app --------------------
+#
+# The Setup and Analyze apps are two separately-launched local Shiny
+# processes (each its own shiny::runApp() call), not tabs of one app -- a
+# running Shiny session can't safely launch a second, separate Shiny process
+# for itself. So "linking" here means: once a batch run finishes, tell the
+# user exactly where its outputs landed and hand them a ready-to-run
+# runAnalyzeApp() call (see R/runAnalyzeApp.R's `initialDirectory` argument)
+# to paste into a separate R console/session to review them, rather than
+# attempting any in-process app-to-app handoff.
+
+# resolve_analyze_directory: which directory the Analyze app should be
+# pointed at once a batch run finishes -- outputDir if the run used one, else
+# the run's own directoryBIDS, since eyeQualityBatch()'s default outputDir =
+# NULL writes each file's output into that file's own nested
+# derivatives/eyeQuality-v1/ subfolder underneath directoryBIDS rather than
+# one central location (same directoryBIDS-vs-outputDir convention
+# background_run.R's poll_batch_progress() already resolves against for its
+# own progress polling). The Analyze app's own load_qcsummary_table()
+# defaults to a recursive search, so either directory form this returns is
+# enough for it to find every qcsummary.tsv output from the run.
+#
+# outputDir: the run's outputDir value (possibly NULL/blank, meaning "not
+#   set" -- run through blank_to_null() here so a blank string and NULL are
+#   treated identically).
+# directoryBIDS: the run's directoryBIDS value (always required, the input
+#   data directory the run was launched against).
+resolve_analyze_directory <- function(outputDir, directoryBIDS) {
+  out <- blank_to_null(outputDir)
+  if (!is.null(out)) {
+    return(out)
+  }
+  directoryBIDS
+}
+
+# build_analyze_launch_command: a copy-pasteable eyeQuality::runAnalyzeApp()
+# call pre-pointed at `directory`, for the Setup app's post-run panel
+# (P9-07). Backslashes and double quotes are escaped so the printed call is a
+# valid R string literal to paste into a console verbatim, not just an
+# approximate display -- matters most for a raw Windows path
+# (backslash-separated); shinyFiles::parseDirPath()'s own paths are always
+# forward-slash and wouldn't need it, but directoryBIDS/outputDir can also
+# come from a hand-typed or loaded-config value.
+build_analyze_launch_command <- function(directory) {
+  escaped <- gsub("\\", "\\\\", directory, fixed = TRUE)
+  escaped <- gsub('"', '\\"', escaped, fixed = TRUE)
+  sprintf('eyeQuality::runAnalyzeApp(initialDirectory = "%s")', escaped)
+}

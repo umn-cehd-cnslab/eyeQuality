@@ -176,11 +176,30 @@ server <- function(input, output, session) {
   shinyFiles::shinyDirChoose(input, "directory", roots = volumes, session = session)
   shinyFiles::shinyFileSave(input, "save_config", roots = volumes, session = session)
 
+  # directory_override: P9-07's runAnalyzeApp(initialDirectory = ...) --
+  # typically a Setup app run's own output directory, so a user can go
+  # straight from "batch run finished" to "review it here" without
+  # re-navigating the directory picker. Same bridge pattern as the Setup
+  # app's own directory_override (P9-04's "Load config"): shinyDirButton has
+  # no supported way to programmatically set a selection (input$directory is
+  # a roots-relative path-segment list built entirely client-side by its JS
+  # picker, not a plain string an update*Input()-style call can set), so the
+  # initial value is tracked here and used as a fallback wherever the user
+  # hasn't (yet) made a real picker selection -- a real pick via the button
+  # always takes precedence. Pre-populates the field only; the user still
+  # clicks "Load qcsummary files" themselves (see runAnalyzeApp()'s own doc
+  # comment for why this doesn't auto-load).
+  directory_override <- reactiveVal(getShinyOption("analyze_initialDirectory", NULL))
+
   selected_dir <- reactive({
-    if (is.null(input$directory) || !is.list(input$directory)) {
-      return(character(0))
+    if (!is.null(input$directory) && is.list(input$directory)) {
+      return(shinyFiles::parseDirPath(volumes, input$directory))
     }
-    shinyFiles::parseDirPath(volumes, input$directory)
+    override <- directory_override()
+    if (!is.null(override) && nzchar(override)) {
+      return(override)
+    }
+    character(0)
   })
 
   output$selected_directory <- renderText({

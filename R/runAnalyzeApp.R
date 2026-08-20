@@ -11,6 +11,12 @@
 #' the core preprocessing pipeline. Install them separately to use this
 #' function.
 #'
+#' @param initialDirectory optional path to pre-populate the output
+#'   directory field with on startup (e.g. the directory a Setup app
+#'   (`runSetupApp()`) batch run just finished writing to). The user still
+#'   needs to click "Load qcsummary files" themselves -- this only saves them
+#'   re-navigating the directory picker, it does not auto-load. `NULL`
+#'   (default) leaves the field empty, same as launching with no argument.
 #' @param ... additional arguments passed through to `shiny::runApp()` (e.g.
 #'   `launch.browser`, `port`).
 #'
@@ -21,8 +27,11 @@
 #' @examples
 #' \dontrun{
 #' runAnalyzeApp()
+#'
+#' # pre-populated with a Setup app run's output directory
+#' runAnalyzeApp(initialDirectory = "/path/to/study/data")
 #' }
-runAnalyzeApp <- function(...) {
+runAnalyzeApp <- function(initialDirectory = NULL, ...) {
   if (!requireNamespace("shiny", quietly = TRUE) ||
     !requireNamespace("shinyFiles", quietly = TRUE) ||
     !requireNamespace("DT", quietly = TRUE)) {
@@ -33,6 +42,10 @@ runAnalyzeApp <- function(...) {
       call. = FALSE
     )
   }
+  if (!is.null(initialDirectory) &&
+    (!is.character(initialDirectory) || length(initialDirectory) != 1 || is.na(initialDirectory))) {
+    stop("runAnalyzeApp(): 'initialDirectory' must be NULL or a single path string.", call. = FALSE)
+  }
 
   app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
   if (!nzchar(app_dir)) {
@@ -41,6 +54,14 @@ runAnalyzeApp <- function(...) {
       call. = FALSE
     )
   }
+
+  # P9-07: the only way to hand a value into an app launched via runApp(appDir)
+  # (rather than a shinyApp(ui, server) object built directly here) is
+  # shiny::shinyOptions()/getShinyOption() -- a process-wide, not
+  # session-scoped, key-value store Shiny itself provides for exactly this
+  # kind of "parameterize an app directory launch" case. app.R reads this
+  # back via getShinyOption("analyze_initialDirectory", NULL).
+  shiny::shinyOptions(analyze_initialDirectory = initialDirectory)
 
   shiny::runApp(app_dir, ...)
 }

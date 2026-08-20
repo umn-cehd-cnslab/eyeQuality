@@ -4,9 +4,16 @@
 \alias{runAnalyzeApp}
 \title{Launch the Analyze / QC Explorer Shiny app}
 \usage{
-runAnalyzeApp(...)
+runAnalyzeApp(initialDirectory = NULL, ...)
 }
 \arguments{
+\item{initialDirectory}{optional path to pre-populate the output
+directory field with on startup (e.g. the directory a Setup app
+(\code{runSetupApp()}) batch run just finished writing to). The user still
+needs to click "Load qcsummary files" themselves -- this only saves them
+re-navigating the directory picker, it does not auto-load. \code{NULL}
+(default) leaves the field empty, same as launching with no argument.}
+
 \item{...}{additional arguments passed through to \code{shiny::runApp()} (e.g.
 \code{launch.browser}, \code{port}).}
 }
@@ -30,5 +37,8 @@ function.
 \examples{
 \dontrun{
 runAnalyzeApp()
+
+# pre-populated with a Setup app run's output directory
+runAnalyzeApp(initialDirectory = "/path/to/study/data")
 }
 }

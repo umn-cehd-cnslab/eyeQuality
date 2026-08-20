@@ -122,7 +122,8 @@ ui <- fluidPage(
       hr(),
       h4("Run"),
       uiOutput("launch_ui"),
-      uiOutput("run_status")
+      uiOutput("run_status"),
+      uiOutput("post_run_link")
     )
   )
 )
@@ -447,6 +448,43 @@ server <- function(input, output, session) {
   output$failed_files_table <- renderTable({
     req(progress_state$failed_detail)
     progress_state$failed_detail
+  })
+
+  # P9-07: post-run summary linking to the Analyze app. Shown only once
+  # progress_state$status reaches "done" -- i.e. eyeQualityBatch() itself ran
+  # to completion without a coarse, run-level error escaping it (see
+  # start_background_batch()'s own comment on that distinction from
+  # per-file failures) -- so there's real output on disk worth pointing the
+  # Analyze app at, even if some individual files failed and show up in the
+  # failed-files table above. Not shown for the "failed" (coarse) state,
+  # since that's typically an upfront validation error with nothing written.
+  #
+  # See helpers.R's resolve_analyze_directory()/build_analyze_launch_command()
+  # for why this can't be a literal "open it now" button: the Setup and
+  # Analyze apps are two separately-launched local Shiny processes, and a
+  # running Shiny session can't safely launch a second, separate Shiny
+  # process for itself. Instead this hands the user the exact output
+  # directory plus a ready-to-paste eyeQuality::runAnalyzeApp() call to run
+  # in a separate R console/session.
+  output$post_run_link <- renderUI({
+    if (!identical(progress_state$status, "done")) {
+      return(NULL)
+    }
+
+    analyze_dir <- resolve_analyze_directory(input$outputDir, run_info$directory)
+    cmd <- build_analyze_launch_command(analyze_dir)
+
+    div(
+      class = "alert alert-success",
+      h5("Review results in the Analyze app"),
+      p("Outputs from this run are under:"),
+      tags$pre(analyze_dir),
+      p(
+        "A Shiny app can't launch another Shiny app from within itself -- run this in a ",
+        "separate R console/session to open the Analyze app pointed at these results:"
+      ),
+      tags$pre(cmd)
+    )
   })
 
   # --- P9-04: save/load named batch_config.yaml configs -----------------
