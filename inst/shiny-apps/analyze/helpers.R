@@ -806,6 +806,90 @@ build_qc_comparison_table <- function(table, metrics) {
   )
 }
 
+# --- Compare files tab: batch_name (run) filter ---
+#
+# Field testing surfaced that the same subject/session sometimes gets
+# processed more than once under different batch_name values (a re-run with
+# different parameters, or a genuinely repeated recording -- see
+# build_qc_comparison_plot()'s own comment on the bar-stacking bug this
+# already caused). Nothing in the "Compare files" tab let a user narrow the
+# view down to one batch_name/run at a time -- unlike the QC table tab, which
+# already has this via DT's per-column filter = "top" search box -- so the
+# two helpers below back a batch_name multi-select filter that narrows the
+# table handed to build_qc_comparison_plot()/build_qc_comparison_table(),
+# without either of those functions needing any batch_name-filtering
+# awareness of their own.
+
+# batch_name_none_sentinel: the literal UI choice/selected value standing in
+# for the NA_character_ "no batchName" case derive_batch_name() documents as
+# a real, expected value (produced by eyeQuality()'s single-file, non-batch
+# naming form, "_desc-preproc_qcsummary.tsv"). selectizeInput's `choices`/
+# `selected` have to be plain strings -- NA itself can't round-trip through
+# them -- and a raw "NA" string in the filter dropdown reads as a data
+# problem rather than the documented, legitimate no-batch-name case, hence
+# this more legible display label instead.
+batch_name_none_sentinel <- function() {
+  "(none)"
+}
+
+# compare_batch_name_choices: every distinct batch_name value in the
+# currently loaded table, sorted, with any NA_character_ entries collapsed to
+# one trailing batch_name_none_sentinel() choice -- the same "sorted, NA
+# handled sensibly" shape compare_metric_choices() above uses for qc_metric.
+# Empty (not NULL) before any data is loaded or if the table has no
+# batch_name column, so the filter's selectizeInput always gets a well-typed
+# `choices` argument.
+#
+# table: the combined qcsummary table (load_result()$table), or NULL.
+#
+# Returns a character vector.
+compare_batch_name_choices <- function(table) {
+  if (is.null(table) || !"batch_name" %in% names(table)) {
+    return(character(0))
+  }
+  values <- unique(table$batch_name)
+  non_na_sorted <- sort(values[!is.na(values)])
+  if (any(is.na(values))) {
+    c(non_na_sorted, batch_name_none_sentinel())
+  } else {
+    non_na_sorted
+  }
+}
+
+# filter_by_batch_name: narrow a combined qcsummary table down to only the
+# rows whose batch_name is one of `selected` -- the actual filtering step
+# behind the "Compare files" tab's batch_name selectizeInput. Honors
+# batch_name_none_sentinel() in `selected` as a stand-in for keeping the
+# NA_character_ rows, mirroring compare_batch_name_choices()'s own encoding
+# of NA.
+#
+# table: the combined qcsummary table to filter (build_qc_comparison_plot()
+#   and build_qc_comparison_table() are both called with this function's
+#   output rather than the raw table directly, so neither of them needs any
+#   batch_name-filtering logic of its own). NULL or missing a batch_name
+#   column is returned unchanged -- there's nothing sensible to filter on.
+# selected: character vector of batch_name values (plus
+#   batch_name_none_sentinel() for "no batchName") to keep. NULL or
+#   zero-length deliberately returns a 0-row subset rather than `table`
+#   unchanged -- a user who has cleared every selection in the filter has
+#   asked to see nothing, not everything; both downstream builder functions
+#   already degrade gracefully to "no data" in that case (see their own
+#   NULL-returning empty-input handling above).
+#
+# Returns a data.frame (a row subset of `table`).
+filter_by_batch_name <- function(table, selected) {
+  if (is.null(table) || !"batch_name" %in% names(table)) {
+    return(table)
+  }
+  if (is.null(selected) || length(selected) == 0) {
+    return(table[0, , drop = FALSE])
+  }
+  keep_none <- batch_name_none_sentinel() %in% selected
+  keep_named <- setdiff(selected, batch_name_none_sentinel())
+  keep <- (table$batch_name %in% keep_named) | (keep_none & is.na(table$batch_name))
+  table[keep, , drop = FALSE]
+}
+
 # --- P10-05: export "flagged for review" file list ---
 #
 # build_flagged_export_table: per-recording rollup of the currently flagged

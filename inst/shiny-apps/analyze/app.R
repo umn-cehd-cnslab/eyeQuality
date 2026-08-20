@@ -43,6 +43,25 @@ ui <- fluidPage(
       ),
       actionButton("load", "Load qcsummary files", class = "btn-primary"),
       hr(),
+      # Live-monitoring mode: lets this app be pointed at the same output
+      # directory a Setup app run (P9-05/P9-06, a separate process/browser
+      # tab) is currently writing qcsummary.tsv files into, and watch results
+      # accumulate without repeatedly re-clicking "Load qcsummary files"
+      # above. Deliberately gated on having already clicked Load at least
+      # once (see has_loaded_once() below) -- there's no directory to poll
+      # yet otherwise, and checking this box before that point would have
+      # nothing to do until a real Load click happens anyway.
+      checkboxInput(
+        "autoRefresh",
+        "Auto-refresh (poll this directory for new/updated qcsummary files)",
+        value = FALSE
+      ),
+      numericInput(
+        "autoRefreshIntervalSec", "Auto-refresh interval (seconds)",
+        value = 5, min = 1, step = 1
+      ),
+      uiOutput("auto_refresh_status"),
+      hr(),
       h4("QC thresholds"),
       p(
         "Rows for these metrics are highlighted in the QC table when their ",
@@ -150,6 +169,22 @@ ui <- fluidPage(
             "using the same thresholds configured in the sidebar."
           ),
           uiOutput("compare_status_ui"),
+          # Narrows both the bar chart and the wide table below down to one
+          # or more runs, since the same subject/session sometimes gets
+          # reprocessed under a different batch_name (a re-run with
+          # different parameters, or a genuinely repeated recording -- see
+          # build_qc_comparison_plot()'s own comment on the bar-stacking bug
+          # this caused before that fix). Multi-select, defaulting to every
+          # currently loaded batch_name selected (see the observeEvent(manual_load_trigger(), ...)
+          # below), so a user narrows down from "everything" rather than
+          # starting from an empty comparison. The "(none)" choice stands in
+          # for derive_batch_name()'s NA_character_ case (helpers.R) --
+          # eyeQuality()'s single-file naming form has no batchName at all,
+          # which is a real, expected case here, not a data error.
+          selectizeInput(
+            "compare_batch_name_filter", "Filter to batch_name (run)",
+            choices = character(0), multiple = TRUE
+          ),
           h4("Metric across files"),
           selectInput("compare_metric_plot", "QC metric", choices = character(0)),
           # height = "auto": paired with renderPlot(..., height = function() ...)
@@ -217,16 +252,97 @@ server <- function(input, output, session) {
     }
   })
 
-  load_result <- eventReactive(input$load, {
+  # current_load_result: the single source of truth every other reactive in
+  # this app reads from -- same shape load_qcsummary_table() itself returns
+  # (n_files/table/diagnostic_message/read_errors). Was a plain
+  # eventReactive(input$load, ...) before live auto-refresh existed; that
+  # only ever recomputes on its one named trigger event, which is exactly
+  # why it couldn't also be driven by a timer without this restructuring --
+  # a reactiveVal, by contrast, can be updated from two independent places
+  # below: a manual "Load qcsummary files" click (observeEvent(input$load, ...)
+  # just below) and a live auto-refresh timer tick (the invalidateLater()-based
+  # observer further down, past qc_table_proxy). Both write into this same
+  # reactiveVal so every downstream reactive/output that reads
+  # current_load_result() (load_summary, qc_table_flagged(),
+  # compare_metric_choices(), etc.) picks up either kind of update
+  # identically, without needing to know which path produced it.
+  current_load_result <- reactiveVal(NULL)
+
+  # has_loaded_once: TRUE from the moment the FIRST manual "Load" click
+  # successfully validates a directory, and stays TRUE for the rest of the
+  # session (even across a later Load of a different directory) -- this is
+  # what auto-refresh's own polling observer (below) gates on, so checking
+  # the "Auto-refresh" box before any directory has ever been loaded simply
+  # does nothing yet rather than trying to poll an unvalidated/nonexistent
+  # selected_dir(). Deliberately its own reactiveVal rather than derived as
+  # !is.null(current_load_result()) -- the auto-refresh polling observer
+  # itself also WRITES current_load_result() on every tick, and gating that
+  # same observer's re-trigger condition on a value it also sets up would
+  # create a self-invalidating loop (the observer's own tick causing it to
+  # immediately want to re-run again, independent of invalidateLater()'s
+  # schedule) -- see that observer's own comment for the full explanation.
+  has_loaded_once <- reactiveVal(FALSE)
+
+  # last_refresh_time: POSIXct timestamp of the most recent successful load
+  # of any kind (manual click or auto-refresh tick), or NULL before the
+  # first one -- surfaced via output$auto_refresh_status below so it's
+  # always obvious to a user watching a live run whether auto-refresh is on
+  # and when it actually last pulled fresh data (a real UX complaint from
+  # field testing: it wasn't always clear what state the app was in).
+  last_refresh_time <- reactiveVal(NULL)
+
+  # manual_load_trigger: a plain counter incremented once per genuine manual
+  # "Load qcsummary files" click, used purely as output$qc_table's OWN
+  # rebuild trigger (see that renderDT() below) -- current_load_result()
+  # itself can't serve that role once auto-refresh exists, because
+  # current_load_result() now also changes on every auto-refresh tick, and
+  # rebuilding the whole DT widget on every tick would reset a user's
+  # sort/filter/page state every few seconds (exactly the UX regression
+  # auto-refresh is supposed to avoid -- see the P10-02 threshold-tweak
+  # precedent this design follows: a full rebuild only on a deliberate
+  # "start fresh" action, replaceData() for everything else). A counter
+  # (rather than e.g. Sys.time()) is enough -- nothing downstream reads its
+  # actual value, only that it changed.
+  manual_load_trigger <- reactiveVal(0L)
+
+  # The manual "Load qcsummary files" path: validates selected_dir() exactly
+  # as the former eventReactive did, then does a full, deliberate "start
+  # fresh" load -- this is the one place a NEW directory selection actually
+  # takes effect (auto-refresh below always re-polls whatever directory was
+  # most recently loaded here, never a directory the user has merely clicked
+  # around in the picker without loading).
+  observeEvent(input$load, {
     dir <- selected_dir()
     validate(need(length(dir) > 0 && nzchar(dir), "Please choose a directory first."))
     validate(need(dir.exists(dir), "Selected directory does not exist."))
 
-    load_qcsummary_table(dir, recursive = isTRUE(input$recursiveSearch))
+    current_load_result(load_qcsummary_table(dir, recursive = isTRUE(input$recursiveSearch)))
+    has_loaded_once(TRUE)
+    last_refresh_time(Sys.time())
+    manual_load_trigger(isolate(manual_load_trigger()) + 1L)
+  })
+
+  # load_result: backward-compatible alias, preserving the exact semantics
+  # the former eventReactive(input$load, ...) had for anything reading this
+  # app's server-local reactives by name -- most notably the
+  # shiny::testServer()-based regression suite, which calls load_result()
+  # directly in several places and specifically asserts (in the P9-07
+  # seeded-directory tests) that it throws before the first successful
+  # manual load, the same way an eventReactive that's never fired does.
+  # req(has_loaded_once()) reproduces that "throws pre-load, returns the
+  # real value post-load" behavior on top of the reactiveVal-based design
+  # above. Nothing in app.R itself reads load_result() -- every internal
+  # call site elsewhere in this file already reads current_load_result()
+  # directly (see that reactiveVal's own comment above for why the rename
+  # was needed once auto-refresh existed); this alias exists purely so
+  # existing external callers don't have to change.
+  load_result <- reactive({
+    req(has_loaded_once())
+    current_load_result()
   })
 
   output$load_summary <- renderUI({
-    result <- load_result()
+    result <- current_load_result()
     n_read <- if (is.null(result$table)) 0L else length(unique(result$table$source_file))
     tagList(
       h4("Loaded files"),
@@ -241,7 +357,7 @@ server <- function(input, output, session) {
   # this app's UI has no console for a user to read list.files()'s silence
   # from, so a blank table needs an explicit reason attached instead.
   output$load_diagnostics <- renderUI({
-    result <- load_result()
+    result <- current_load_result()
     if (is.null(result$diagnostic_message)) {
       return(NULL)
     }
@@ -252,7 +368,7 @@ server <- function(input, output, session) {
   })
 
   output$read_error_ui <- renderUI({
-    result <- load_result()
+    result <- current_load_result()
     if (length(result$read_errors) == 0) {
       return(NULL)
     }
@@ -286,8 +402,8 @@ server <- function(input, output, session) {
     )
   })
 
-  # qc_table_flagged: load_result()'s table with a "qc_flag" column appended
-  # -- TRUE for rows whose metric currently crosses its configured
+  # qc_table_flagged: current_load_result()'s table with a "qc_flag" column
+  # appended -- TRUE for rows whose metric currently crosses its configured
   # threshold (compute_qc_flags(), helpers.R). Recomputed whenever either
   # the loaded data or the threshold inputs change, but this reactive itself
   # is never rendered directly -- see the initial renderDT() (built once per
@@ -295,9 +411,11 @@ server <- function(input, output, session) {
   # the whole DT widget and reset the user's sort/filter/page state) and the
   # dataTableProxy observer just below (which pushes qc_table_flagged()'s
   # updated "qc_flag" values into the already-rendered widget via
-  # DT::replaceData() instead).
+  # DT::replaceData() instead -- the same replaceData() mechanism the
+  # auto-refresh polling observer further down also reuses for a live tick's
+  # freshly loaded data).
   qc_table_flagged <- reactive({
-    result <- load_result()
+    result <- current_load_result()
     req(result$table)
     tbl <- result$table
     tbl$qc_flag <- compute_qc_flags(tbl, qc_thresholds())
@@ -393,16 +511,27 @@ server <- function(input, output, session) {
   # without rebuilding this widget. "qc_flag" itself is hidden via
   # columnDefs (it's plumbing, not a metric a user would sort/filter on).
   #
-  # req(load_result()$table) is deliberately NOT inside isolate(): it's what
-  # gives this render block a reactive dependency on load_result() so it
-  # actually re-runs on each new "Load qcsummary files" click. Wrapping the
-  # whole body in isolate() (as an earlier version did) strips every
-  # dependency, including this one -- the render then only ever executes
-  # once, at app startup before any directory is even chosen, produces
-  # nothing (load_result() hasn't fired yet), and never runs again no matter
-  # what gets loaded afterward. qc_table_flagged() itself is still isolated
-  # below so a pure threshold tweak doesn't rebuild the widget (that's
-  # replaceData()'s job via the proxy further down).
+  # manual_load_trigger() (NOT current_load_result() or qc_table_flagged())
+  # is what gives this render block its reactive dependency, so it rebuilds
+  # the whole DT widget on a genuine manual "Load qcsummary files" click --
+  # exactly like req(load_result()$table) used to when load_result() was a
+  # plain eventReactive that only ever changed on that same click -- but,
+  # unlike current_load_result() itself, manual_load_trigger() does NOT also
+  # change on every auto-refresh timer tick, so a live-monitoring session
+  # doesn't get its whole table (and the user's sort/filter/page state)
+  # rebuilt from scratch every few seconds; the auto-refresh polling
+  # observer (further down, past qc_table_proxy) instead pushes tick data in
+  # place via DT::replaceData(), the same mechanism the threshold observer
+  # just below already uses for a threshold tweak. Wrapping the WHOLE body
+  # in isolate() (as an earlier version did) strips every dependency,
+  # including this one -- the render then only ever executes once, at app
+  # startup before any directory is even chosen, produces nothing
+  # (current_load_result() is still NULL), and never runs again no matter
+  # what gets loaded afterward -- see the regression test guarding exactly
+  # this bug. current_load_result() and qc_table_flagged() are therefore
+  # both read via isolate() below: this render's only real trigger is
+  # manual_load_trigger(), with the isolate()'d reads simply fetching
+  # whatever's current at the moment the trigger fires.
   # server = FALSE: this table's realistic scale (tens to low hundreds of
   # files x ~30 metric rows each) doesn't need server-side pagination, and
   # DT::renderDT()'s default of server = TRUE serves rows from whichever
@@ -414,7 +543,9 @@ server <- function(input, output, session) {
   # transparent and directly testable (the rendered data is embedded in the
   # widget itself, not fetched via a separate AJAX round-trip).
   output$qc_table <- renderDT({
-    req(load_result()$table)
+    manual_load_trigger()
+    result <- isolate(current_load_result())
+    req(result$table)
     tbl <- isolate(qc_table_flagged())
     req(tbl)
     qc_flag_col <- which(names(tbl) == "qc_flag") - 1L
@@ -455,19 +586,182 @@ server <- function(input, output, session) {
     DT::replaceData(qc_table_proxy, tbl, resetPaging = FALSE, rownames = FALSE)
   }, ignoreInit = TRUE)
 
+  # auto_refresh_interval_ms: the polling interval below, in milliseconds,
+  # for invalidateLater(). Falls back to a 5-second default for the same
+  # reasons qc_thresholds() falls back to default_qc_thresholds() above --
+  # a momentarily NULL (not rendered yet) or NA/below-1 (user clears or
+  # mistypes the numericInput box) value shouldn't produce a runaway
+  # near-0ms polling loop or an invalidateLater() call with a nonsensical
+  # argument.
+  auto_refresh_interval_ms <- reactive({
+    secs <- input$autoRefreshIntervalSec
+    if (is.null(secs) || is.na(secs) || secs < 1) secs <- 5
+    secs * 1000
+  })
+
+  # Live auto-refresh: re-polls the SAME directory selected_dir() currently
+  # points at on a fixed timer, so a user who has pointed this app at a
+  # Setup app run's (P9-05/P9-06, a separate process/browser tab) output
+  # directory can watch qcsummary.tsv results accumulate without repeatedly
+  # re-clicking "Load qcsummary files". This is the standard shiny
+  # conditional-polling pattern (see ?shiny::invalidateLater): invalidateLater()
+  # is only ever reached, and therefore only ever reschedules itself, while
+  # BOTH input$autoRefresh is checked AND has_loaded_once() is TRUE -- the
+  # instant either goes false (box unchecked, or a session that's never
+  # loaded anything), the early return() below is hit instead and the
+  # invalidation chain simply stops, rather than continuing to tick in the
+  # background with nothing to do.
+  #
+  # selected_dir()/input$recursiveSearch are read via isolate(): this
+  # observer's own re-execution is meant to be driven ONLY by the timer and
+  # the autoRefresh checkbox (and has_loaded_once(), which only a manual
+  # Load click ever sets) -- not by a user idly clicking around the
+  # directory picker before deciding whether to load it. The directory
+  # actually being polled only ever changes via a real "Load" click (which
+  # already does a full current_load_result() reset and manual_load_trigger()
+  # bump), never by this observer noticing a new, not-yet-loaded picker
+  # selection.
+  #
+  # qc_table_flagged() is also read via isolate() here, for a different
+  # reason: without it, this observer would additionally depend on
+  # qc_thresholds() (a pure threshold tweak would then trigger a full
+  # directory re-scan, which is both wasteful and not what a threshold tweak
+  # should do -- that's the qc_thresholds() observer's own job, just above)
+  # and would re-depend on current_load_result() a second time (this
+  # observer's own current_load_result(fresh) call two lines above would
+  # then re-invalidate itself outside of invalidateLater()'s own schedule --
+  # a self-triggering loop bypassing the timer entirely). isolate() here
+  # keeps this observer's only real triggers the three named above.
+  observe({
+    if (!isTRUE(input$autoRefresh) || !isTRUE(has_loaded_once())) {
+      return(invisible(NULL))
+    }
+    invalidateLater(auto_refresh_interval_ms())
+
+    dir <- isolate(selected_dir())
+    recursive <- isolate(isTRUE(input$recursiveSearch))
+    if (length(dir) == 0 || !nzchar(dir) || !dir.exists(dir)) {
+      return(invisible(NULL))
+    }
+
+    current_load_result(load_qcsummary_table(dir, recursive = recursive))
+    last_refresh_time(Sys.time())
+
+    # Push straight into the already-rendered DT widget via replaceData()
+    # (never output$qc_table's own renderDT(), which only rebuilds on
+    # manual_load_trigger() -- see that render's own comment) so a user
+    # mid-sort/filter/scroll/page on the QC table while watching a live run
+    # doesn't get yanked back to the top every tick. tryCatch() rather than
+    # req() around qc_table_flagged(): req()'s silent-stop behavior is
+    # designed for render/observer bodies that read it directly (as
+    # elsewhere in this app), but here it's guarding a value only used
+    # conditionally two lines down, so a plain NULL-on-"nothing to flag yet"
+    # (e.g. a directory whose files just got deleted mid-run) reads more
+    # clearly than relying on req()'s early-return semantics a second time
+    # in the same observer.
+    tbl <- isolate(tryCatch(
+      qc_table_flagged(),
+      shiny.silent.error = function(e) NULL,
+      validation = function(e) NULL
+    ))
+    if (!is.null(tbl)) {
+      DT::replaceData(qc_table_proxy, tbl, resetPaging = FALSE, rownames = FALSE)
+    }
+  })
+
+  # auto_refresh_status: makes live-monitoring state and recency explicit --
+  # field testing flagged that it wasn't always clear whether the app was
+  # actively polling or just sitting on a stale one-shot snapshot. Three
+  # distinct states rather than a single on/off badge: off, on-but-not-yet-
+  # eligible (checked before any directory has ever been loaded), and
+  # actively polling with a concrete last-updated time.
+  output$auto_refresh_status <- renderUI({
+    if (!isTRUE(input$autoRefresh)) {
+      return(div(class = "text-muted", "Auto-refresh is off."))
+    }
+    if (!isTRUE(has_loaded_once())) {
+      return(div(
+        class = "alert alert-info",
+        "Auto-refresh will begin once you load a directory below."
+      ))
+    }
+    last <- last_refresh_time()
+    last_str <- if (is.null(last)) "never" else format(last, "%H:%M:%S")
+    div(
+      class = "alert alert-success",
+      sprintf(
+        "Auto-refreshing every %ds -- last updated %s.",
+        round(auto_refresh_interval_ms() / 1000), last_str
+      )
+    )
+  })
+
   # P10-03: row click -> that row's plots. DT's "*_rows_selected" input
   # reports the index into the data.frame passed to datatable() (result$table
   # above), not the currently-displayed/sorted/filtered row order, so this
   # index is stable regardless of any column sort or the "filter = 'top'"
-  # search boxes a user has applied.
-  selected_source_file <- reactive({
+  # search boxes a user has applied -- as long as the underlying data.frame
+  # itself doesn't change out from under that index. Auto-refresh breaks
+  # that assumption: a newly discovered qcsummary.tsv sorts (per
+  # discover_qcsummary_files()'s alphabetical order) wherever its filename
+  # lands, potentially ahead of a row a user had already selected, shifting
+  # every row after it down by one. Re-deriving source_file by re-indexing
+  # sel[1] into whatever current_load_result()$table happens to be at read
+  # time (the original, pre-auto-refresh implementation) would then
+  # silently resolve to a DIFFERENT file's plots after a tick -- exactly the
+  # "wrong file, no crash, no warning" failure this needs to avoid.
+  #
+  # Instead, the source_file a row click resolves to is captured ONCE, at
+  # the moment DT actually reports a selection change, using
+  # current_load_result()'s table AS IT STOOD AT THAT MOMENT -- correct by
+  # construction, no re-indexing involved -- and stashed in
+  # selected_source_file_val, a plain reactiveVal. A later auto-refresh tick
+  # updating current_load_result() does NOT re-trigger this resolution (DT
+  # doesn't resend qc_table_rows_selected just because the underlying data
+  # changed), so the stashed value simply persists across ticks, which is
+  # exactly the desired "selection survives a live refresh" behavior. The
+  # separate observer just below instead watches for the one case this
+  # can't paper over: the selected file being removed from a freshly
+  # reloaded table entirely (e.g. deleted/moved mid-run) -- degrading to "no
+  # selection" there rather than continuing to show a plot for a file that
+  # no longer has a corresponding row at all.
+  selected_source_file_val <- reactiveVal(NULL)
+
+  observeEvent(input$qc_table_rows_selected, {
     sel <- input$qc_table_rows_selected
     if (is.null(sel) || length(sel) == 0) {
-      return(NULL)
+      selected_source_file_val(NULL)
+      return(invisible(NULL))
     }
-    result <- load_result()
-    req(result$table)
-    result$table$source_file[sel[1]]
+    result <- current_load_result()
+    if (is.null(result$table) || sel[1] < 1 || sel[1] > nrow(result$table)) {
+      selected_source_file_val(NULL)
+      return(invisible(NULL))
+    }
+    selected_source_file_val(result$table$source_file[sel[1]])
+  }, ignoreNULL = FALSE)
+
+  # Clears a stale selection if an auto-refresh tick's freshly reloaded table
+  # no longer contains the previously selected file at all -- e.g. its
+  # qcsummary.tsv was deleted, moved, or renamed since it was selected.
+  # Deliberately does NOT try to re-resolve to "the same recording under a
+  # new index" or similar -- clearing the selection (so plot_result() below
+  # falls back to its own "nothing selected" state) is the safe, non-jarring
+  # degradation this needs, not a best-effort guess at which row is now the
+  # "right" one.
+  observeEvent(current_load_result(), {
+    sf <- isolate(selected_source_file_val())
+    if (is.null(sf)) {
+      return(invisible(NULL))
+    }
+    result <- current_load_result()
+    if (is.null(result$table) || !(sf %in% result$table$source_file)) {
+      selected_source_file_val(NULL)
+    }
+  })
+
+  selected_source_file <- reactive({
+    selected_source_file_val()
   })
 
   # Resolves the selected row's source_file (a qcsummary.tsv path) to its
@@ -530,7 +824,7 @@ server <- function(input, output, session) {
   # selectInput/selectizeInput below always get a well-typed `choices`
   # argument.
   compare_metric_choices <- reactive({
-    tbl <- load_result()$table
+    tbl <- current_load_result()$table
     if (is.null(tbl) || !"qc_metric" %in% names(tbl)) {
       return(character(0))
     }
@@ -538,14 +832,25 @@ server <- function(input, output, session) {
   })
 
   # Repopulates both the single-metric plot selector and the multi-metric
-  # table selector on every (re)load, defaulting to the configured,
-  # thresholdable metrics (qc_threshold_config) when present -- those are the
-  # ones this app already has an opinion on, so they're the most useful
-  # starting point -- and falling back to whatever's first alphabetically
-  # otherwise. Runs on every load_result() change (not just the first), so a
-  # directory reload with a different set of files resets these choices
-  # rather than leaving a stale selection from the previous load in place.
-  observeEvent(load_result(), {
+  # table selector, defaulting to the configured, thresholdable metrics
+  # (qc_threshold_config) when present -- those are the ones this app
+  # already has an opinion on, so they're the most useful starting point --
+  # and falling back to whatever's first alphabetically otherwise.
+  #
+  # Triggered by manual_load_trigger() rather than current_load_result()
+  # itself: a genuine manual Load click (a possibly brand-new directory with
+  # a different file set) should reset these selections, but an auto-refresh
+  # tick against the SAME directory should not -- the metric set itself
+  # never changes file to file (every qcsummary.tsv carries the same fixed
+  # ~32 qc_metric rows), so there's nothing to gain by re-populating these
+  # selectors on every tick, only a user's in-progress metric choice to lose
+  # every few seconds. ignoreInit = TRUE: without it this would also fire
+  # once at session startup (manual_load_trigger() starts at a real value,
+  # 0L, not an unevaluated eventReactive sentinel like the old load_result()
+  # this replaced), which would be a harmless no-op here but is suppressed
+  # anyway for clarity -- this observer's whole point is "in response to a
+  # load", not "also once before any load has happened".
+  observeEvent(manual_load_trigger(), {
     choices <- compare_metric_choices()
     if (length(choices) == 0) {
       updateSelectInput(session, "compare_metric_plot", choices = character(0))
@@ -563,7 +868,26 @@ server <- function(input, output, session) {
       session, "compare_metrics_table",
       choices = choices, selected = default_table_metrics
     )
-  })
+  }, ignoreInit = TRUE)
+
+  # Repopulates the batch_name (run) filter, same pattern and same
+  # manual_load_trigger()-only reasoning as the metric-choice observer just
+  # above -- defaulting to every currently loaded batch_name selected
+  # (compare_batch_name_choices(), helpers.R, sorted with a trailing
+  # "(none)" for derive_batch_name()'s NA_character_ case) so a fresh
+  # manual load starts from "show everything". An auto-refresh tick that
+  # picks up a brand-new batch_name (e.g. a Setup run started under a second
+  # batchName partway through) deliberately does NOT auto-select it into an
+  # already-narrowed filter -- the same "don't silently change what a user
+  # is looking at mid-session" reasoning as the metric selectors above; a
+  # user who wants to see a newly appeared run can select it here manually.
+  observeEvent(manual_load_trigger(), {
+    choices <- compare_batch_name_choices(current_load_result()$table)
+    updateSelectizeInput(
+      session, "compare_batch_name_filter",
+      choices = choices, selected = choices
+    )
+  }, ignoreInit = TRUE)
 
   output$compare_status_ui <- renderUI({
     if (length(compare_metric_choices()) == 0) {
@@ -573,17 +897,22 @@ server <- function(input, output, session) {
   })
 
   # build_qc_comparison_plot() (helpers.R) is handed qc_table_flagged() --
-  # not load_result()$table directly -- so this plot's bar coloring always
+  # not current_load_result()$table directly -- so this plot's bar coloring always
   # matches the QC table tab's own row highlighting for the same metric
   # (both trace back to the same compute_qc_flags() call), rather than this
   # view recomputing pass/fail independently and risking drift from P10-02's
-  # flagging.
+  # flagging. Narrowed to the batch_name(s) currently selected in the filter
+  # above via filter_by_batch_name() (helpers.R) before being handed to
+  # build_qc_comparison_plot() -- that function stays agnostic to which
+  # batch_name(s) are in view, the same way it's agnostic to which directory
+  # was loaded.
   output$compare_plot <- renderPlot(
     {
       metric <- input$compare_metric_plot
       req(metric, nzchar(metric))
       tbl <- qc_table_flagged()
       req(tbl)
+      tbl <- filter_by_batch_name(tbl, input$compare_batch_name_filter)
       plot <- build_qc_comparison_plot(tbl, metric, qc_thresholds())
       req(plot)
       plot
@@ -594,29 +923,38 @@ server <- function(input, output, session) {
     # per bar (roomy enough for the legible font sizes set in
     # build_qc_comparison_plot()) plus fixed space for the title/axis, with
     # a 500px floor so a small file count doesn't render a cramped sliver.
+    # Filtered by the batch_name selection the same way the plot itself is,
+    # above, so the container height matches the actual bar count being
+    # drawn rather than the full, unfiltered file count.
     height = function() {
       metric <- input$compare_metric_plot
       tbl <- qc_table_flagged()
       if (is.null(tbl) || is.null(metric) || !nzchar(metric)) {
         return(500)
       }
+      tbl <- filter_by_batch_name(tbl, input$compare_batch_name_filter)
       n <- sum(tbl$qc_metric == metric, na.rm = TRUE)
       max(500, n * 28 + 120)
     }
   )
 
   # Wide comparison table: one row per file, one column per selected metric.
-  # Built from load_result()$table (not qc_table_flagged()) since qc_flag is
+  # Built from current_load_result()$table (not qc_table_flagged()) since qc_flag is
   # a per-row (per metric-per-file), not per-column, concept -- once
   # pivoted wide there's no single qc_flag value per file to carry over.
   # Threshold crossing is instead shown per output *column* below via
   # DT::formatStyle(), reusing qc_threshold_config's own direction/threshold
   # definitions directly (the same source of truth compute_qc_flags() reads)
-  # rather than a second flagging mechanism.
+  # rather than a second flagging mechanism. Narrowed to the batch_name(s)
+  # currently selected in the filter above via filter_by_batch_name()
+  # (helpers.R) before pivoting -- same reasoning as output$compare_plot
+  # above, build_qc_comparison_table() itself stays agnostic to which
+  # batch_name(s) are in view.
   output$compare_table <- renderDT({
     metrics <- input$compare_metrics_table
     validate(need(length(metrics) > 0, "Select at least one QC metric above."))
-    tbl <- build_qc_comparison_table(load_result()$table, metrics)
+    filtered <- filter_by_batch_name(current_load_result()$table, input$compare_batch_name_filter)
+    tbl <- build_qc_comparison_table(filtered, metrics)
     validate(need(!is.null(tbl), "No data available for the selected metric(s)."))
 
     thresholds <- qc_thresholds()
