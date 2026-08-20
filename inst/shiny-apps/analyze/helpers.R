@@ -926,8 +926,20 @@ filter_by_batch_name <- function(table, selected) {
 #     scale the sidebar's numericInput thresholds already use (matching
 #     qc_thresholds_to_percent()'s convention), in the same order as
 #     flagged_metrics.
+#   note: only present when `notes` (below) is supplied -- that recording's
+#     current review note (see the "review notes" section further down), or
+#     "" if it has none.
 # Or NULL if table_flagged has no usable rows, or none are currently flagged.
-build_flagged_export_table <- function(table_flagged) {
+#
+# notes: NULL (default -- preserves this function's original 6-column
+#   shape exactly, unchanged, for every existing caller/test that doesn't
+#   pass this argument), or a data.frame shaped like empty_notes_table()'s
+#   return value (recording, batch_name, note, updated_at). When supplied,
+#   left-joined onto the rollup above by (recording, batch_name) so the
+#   export always carries a reviewer's own explanation alongside whichever
+#   metrics triggered the flag -- app.R's download handler is the only
+#   caller that passes this.
+build_flagged_export_table <- function(table_flagged, notes = NULL) {
   required_cols <- c("recording", "batch_name", "source_file", "qc_metric", "percent", "qc_flag")
   if (is.null(table_flagged) || nrow(table_flagged) == 0 || !all(required_cols %in% names(table_flagged))) {
     return(NULL)
@@ -938,7 +950,7 @@ build_flagged_export_table <- function(table_flagged) {
     return(NULL)
   }
 
-  flagged_rows %>%
+  result <- flagged_rows %>%
     dplyr::group_by(recording, batch_name, source_file) %>%
     dplyr::summarise(
       n_flagged_metrics = dplyr::n(),
@@ -947,6 +959,19 @@ build_flagged_export_table <- function(table_flagged) {
       .groups = "drop"
     ) %>%
     as.data.frame()
+
+  if (!is.null(notes) && all(c("recording", "batch_name", "note") %in% names(notes))) {
+    # dplyr::left_join() (not base merge()) deliberately: it treats
+    # NA == NA as a match on the join key, which base merge()'s default
+    # does too but only with a less obvious incomparables= dance -- correct
+    # here because derive_batch_name()'s NA_character_ ("no batchName")
+    # case is a real, expected join key value (see resolve_notes_path()'s
+    # own header comment), not a value that should silently fail to match.
+    result <- dplyr::left_join(result, notes[, c("recording", "batch_name", "note")], by = c("recording", "batch_name"))
+    result$note[is.na(result$note)] <- ""
+  }
+
+  result
 }
 
 # ---------------------------------------------------------------------------
@@ -1419,4 +1444,345 @@ build_gaze_trajectory_plot <- function(
     yaxis = list(title = paste(y_col)),
     showlegend = TRUE
   )
+}
+
+# ---------------------------------------------------------------------------
+# Shared per-tab file selector: a search/dropdown control repeated at the top
+# of the QC flags, Plots, and Gaze Explorer tabs (three separate widget
+# instances -- a single Shiny input can't render itself in three places on
+# one page at once -- but all three are kept in sync in app.R against the
+# same underlying selected_source_file_val() reactiveVal that P10-03's QC
+# table row-click already populates, so picking a file in any one instance,
+# or clicking a QC table row, is reflected in the others).
+# ---------------------------------------------------------------------------
+
+# build_file_selector_choices: named-vector choices for that selector --
+# names are what a user reads (the recording id, or "recording [batch_name]"
+# when the same recording id is genuinely ambiguous across >1 batch_name),
+# values are that row's source_file path (the same identity
+# selected_source_file_val already tracks).
+#
+# The ambiguous-recording disambiguation rule mirrors
+# build_qc_comparison_plot()'s own bar_label construction exactly (append
+# "[batch_name]" only when needed), but is written out again here rather
+# than factored into one shared helper both call -- build_qc_comparison_plot()
+# is already tested/working, and this task doesn't need to touch its
+# internals to add a new, independent consumer of the same small rule.
+#
+# table: the combined qcsummary table (current_load_result()$table), or
+#   NULL/0-row/missing the required identity columns.
+#
+# Returns a named character vector (names = display labels, values =
+# source_file paths), sorted by label, or character(0).
+build_file_selector_choices <- function(table) {
+  required_cols <- c("recording", "batch_name", "source_file")
+  if (is.null(table) || nrow(table) == 0 || !all(required_cols %in% names(table))) {
+    return(character(0))
+  }
+
+  files <- unique(table[, required_cols, drop = FALSE])
+  ambiguous <- names(which(tapply(files$batch_name, files$recording, function(b) length(unique(b))) > 1))
+  files$label <- ifelse(
+    files$recording %in% ambiguous,
+    paste0(files$recording, " [", ifelse(is.na(files$batch_name), "NA", files$batch_name), "]"),
+    files$recording
+  )
+  files <- files[order(files$label), , drop = FALSE]
+  stats::setNames(files$source_file, files$label)
+}
+
+# ---------------------------------------------------------------------------
+# "Major" QC metrics: the same 3-concept/4-row set qc_threshold_config
+# already treats as the unambiguous, universal pass/fail signals (P10-02) --
+# reused here (not redefined) as the compact "glance at this file" summary
+# shown next to the Plots/Gaze Explorer file selectors, and as the columns
+# of the QC flags tab's own compact per-file table.
+# ---------------------------------------------------------------------------
+
+# major_qc_metric_display_labels: short, per-metric-ROW display labels for
+# that compact summary -- deliberately its own small map rather than reusing
+# qc_threshold_config$label directly, since that column's labels describe
+# the shared THRESHOLD CONTROL (interpolated_LeftEye and interpolated_RightEye
+# intentionally share one label there, "Maximum % interpolated data (either
+# eye)", because they share one UI numericInput -- see that config's own
+# comment) where here each of the 4 qc_metric rows needs its OWN distinct,
+# short label so a two-badge "Interpolated (L)" / "Interpolated (R)" readout
+# doesn't show the same text twice.
+major_qc_metric_display_labels <- c(
+  valid_raw_data = "Valid raw data",
+  robustness_proportion_valid_data_to_all_data = "Robust data",
+  interpolated_LeftEye = "Interpolated (L)",
+  interpolated_RightEye = "Interpolated (R)"
+)
+
+# major_qc_metrics: the qc_metric values major_qc_metric_display_labels
+# covers -- a thin accessor so callers never need to know that map's
+# internal shape (names() vs. values()) to get the plain metric-name vector
+# build_qc_comparison_table()/table-filtering callers actually want.
+major_qc_metrics <- function() {
+  names(major_qc_metric_display_labels)
+}
+
+# build_major_metrics_summary: the major metrics for exactly ONE file, as a
+# small label/value/flag data.frame -- backs the compact "is this file okay
+# at a glance" readout shown beside the Plots/Gaze Explorer file selectors.
+#
+# table_flagged: the combined qcsummary table with a qc_flag column already
+#   attached (app.R's qc_table_flagged() reactive).
+# source_file: the single file to summarize, or NULL/"" (returns NULL, the
+#   "nothing selected yet" case every caller already needs to handle).
+#
+# Returns a data.frame(label, percent, qc_flag) -- one row per major metric
+# with a matching row in table_flagged for that file -- or NULL if
+# source_file is missing, or has none.
+build_major_metrics_summary <- function(table_flagged, source_file) {
+  if (is.null(table_flagged) || is.null(source_file) || !nzchar(source_file)) {
+    return(NULL)
+  }
+  rows <- table_flagged[
+    table_flagged$source_file == source_file & table_flagged$qc_metric %in% major_qc_metrics(),
+    ,
+    drop = FALSE
+  ]
+  if (nrow(rows) == 0) {
+    return(NULL)
+  }
+  data.frame(
+    label = unname(major_qc_metric_display_labels[rows$qc_metric]),
+    percent = rows$percent,
+    qc_flag = rows$qc_flag,
+    stringsAsFactors = FALSE
+  )
+}
+
+# ---------------------------------------------------------------------------
+# Per-file review notes: one shared notes.tsv per loaded output directory.
+#
+# A reviewer's free-text note (e.g. "excessive blinking during calibration,
+# re-run recommended") attached to a specific recording, persisted so it
+# survives an app restart or a later reload of the same directory, and
+# included in the "export flagged for review" CSV (build_flagged_export_table()
+# above) alongside whichever metrics actually triggered the flag.
+#
+# ONE file per loaded directory (not one sidecar per recording, and not
+# folded into qcsummary.tsv/batch_config.yaml): simpler to find/back up/
+# version than scattering a per-recording file, and directly matches this
+# feature's stated usage pattern -- multiple reviewers working on the same
+# study's output directory over time, just never at the exact same moment
+# -- so there's no locking or conflict-merge logic here at all: "Save note"
+# always reads the CURRENT in-memory notes table, updates it, and
+# immediately overwrites the whole file on disk, which is the correct,
+# simplest behavior as long as two reviewers are never doing that in the
+# same instant.
+# ---------------------------------------------------------------------------
+
+# notes_filename: eyeQuality-prefixed (not a bare "notes.tsv") specifically
+# to avoid silently colliding with an unrelated file a user might already
+# have sitting at the root of their own output directory.
+notes_filename <- "eyeQuality_analyze_notes.tsv"
+
+# resolve_notes_path: the shared notes file's path for a given loaded output
+# directory -- always at that directory's own root, regardless of how many
+# levels down discover_qcsummary_files() actually found qcsummary.tsv
+# outputs under it (P10-01's recursive search) -- one notes file per
+# directory the app was pointed at, not one per subdirectory it happened to
+# search into.
+resolve_notes_path <- function(directory) {
+  file.path(directory, notes_filename)
+}
+
+# empty_notes_table: the canonical 0-row shape every notes.tsv read/write
+# path returns or expects. recording/batch_name identify a file the same way
+# every other per-recording view in this app already does (P10-01's
+# read_one_qcsummary()); note is the free text; updated_at is an ISO-8601-ish
+# timestamp of the most recent edit -- informational only (nothing here
+# reads it back programmatically), but a reviewer opening notes.tsv directly
+# wants to know how stale a note is.
+empty_notes_table <- function() {
+  data.frame(
+    recording = character(0), batch_name = character(0),
+    note = character(0), updated_at = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+# load_notes_table: read a directory's shared notes.tsv, or fall back to
+# empty_notes_table() if it doesn't exist yet (the common case: no reviewer
+# has left a note in this directory yet) or fails to parse/is missing an
+# expected column (a hand-edited or otherwise corrupted file) -- degrades
+# rather than blocking the whole app on a notes file, which is secondary to
+# the actual QC data this app exists to review.
+load_notes_table <- function(directory) {
+  path <- resolve_notes_path(directory)
+  if (!file.exists(path)) {
+    return(empty_notes_table())
+  }
+  tryCatch(
+    {
+      tbl <- readr::read_tsv(path, show_col_types = FALSE, progress = FALSE)
+      if (!all(c("recording", "batch_name", "note") %in% names(tbl))) {
+        return(empty_notes_table())
+      }
+      tbl
+    },
+    error = function(e) empty_notes_table()
+  )
+}
+
+# save_notes_table: overwrite a directory's notes.tsv with the given table.
+# Called immediately on every "Save note" click (app.R), not batched or
+# debounced -- notes.tsv is small (one row per annotated recording, not per
+# sample), so there's no performance reason to defer the write, and
+# immediate persistence is what actually makes "multiple reviewers, never
+# simultaneous" work in practice: the next reviewer to open this directory
+# sees the previous one's notes without any separate export/sync step.
+save_notes_table <- function(notes_df, directory) {
+  readr::write_tsv(notes_df, resolve_notes_path(directory))
+}
+
+# upsert_note: update, insert, or remove a single (recording, batch_name)
+# row's note. A blank/whitespace-only `note` REMOVES any existing row for
+# that file instead of writing an empty note -- keeps notes.tsv from
+# accumulating empty rows for every file a reviewer merely glanced at (only
+# files someone actually wrote something about are ever persisted), and
+# lets clearing the textbox actually clear the saved note rather than
+# leaving a blank-but-present row behind.
+#
+# batch_name may legitimately be NA (derive_batch_name()'s documented "no
+# batchName" naming form) -- matched via an explicit is.na() branch rather
+# than plain `==`, which would silently produce NA (never TRUE) against a
+# real NA batch_name and so never find/replace that row.
+#
+# notes_df: a table shaped like empty_notes_table()'s return value (NULL is
+#   treated the same as empty_notes_table()).
+# recording, batch_name: identify which row to update/insert/remove.
+# note: the new note text.
+#
+# Returns the updated notes table.
+upsert_note <- function(notes_df, recording, batch_name, note) {
+  if (is.null(notes_df)) {
+    notes_df <- empty_notes_table()
+  }
+  same_recording <- notes_df$recording == recording &
+    (if (is.na(batch_name)) is.na(notes_df$batch_name) else notes_df$batch_name %in% batch_name)
+  notes_df <- notes_df[!same_recording, , drop = FALSE]
+
+  if (is.null(note) || !nzchar(trimws(note))) {
+    return(notes_df)
+  }
+
+  rbind(
+    notes_df,
+    data.frame(
+      recording = recording, batch_name = batch_name, note = note,
+      updated_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
+      stringsAsFactors = FALSE
+    )
+  )
+}
+
+# note_for_recording: the current note text for a (recording, batch_name)
+# pair, or "" if none exists -- used to populate the notes textAreaInput
+# whenever the selected file changes, so switching files shows THAT file's
+# own previously-saved note (if any) rather than appearing to carry over
+# whatever was typed for the last file selected.
+note_for_recording <- function(notes_df, recording, batch_name) {
+  if (is.null(notes_df) || is.null(recording) || nrow(notes_df) == 0) {
+    return("")
+  }
+  same_recording <- notes_df$recording == recording &
+    (if (is.na(batch_name)) is.na(notes_df$batch_name) else notes_df$batch_name %in% batch_name)
+  match <- notes_df[same_recording, , drop = FALSE]
+  if (nrow(match) == 0) "" else match$note[1]
+}
+
+# ---------------------------------------------------------------------------
+# Compare files tab: 2-metric scatterplot
+# ---------------------------------------------------------------------------
+#
+# build_qc_comparison_plot() (P10-04, above) answers "how does ONE metric
+# stack up across every file" as a bar chart. Selecting a SECOND metric in
+# the same control switches the view to a scatterplot instead -- one point
+# per file, one metric per axis -- which is what actually answers "do files
+# that are bad on metric A also tend to be bad on metric B" at a glance,
+# something no number of single-metric bar charts can show directly.
+
+# build_qc_comparison_scatter: metric_x vs. metric_y, one point per file,
+# colored by whether that file is flagged on EITHER of the two metrics being
+# plotted (table_flagged's own qc_flag column -- never recomputed here,
+# same "single source of truth" discipline build_qc_comparison_plot()
+# already follows).
+#
+# table_flagged: the combined qcsummary table with a qc_flag column already
+#   attached (app.R's qc_table_flagged() reactive, already narrowed to
+#   whichever batch_name(s) are in view via filter_by_batch_name() before
+#   this is called -- same convention as build_qc_comparison_plot()).
+# metric_x, metric_y: two distinct qc_metric values (one per axis).
+# thresholds: current threshold values (app.R's qc_thresholds() reactive) --
+#   used only to draw a dashed reference line on whichever axis/axes have a
+#   configured threshold, exactly like build_qc_comparison_plot()'s own
+#   geom_hline().
+#
+# Returns a ggplot object, or NULL if metric_x/metric_y are missing,
+# identical, or build_qc_comparison_table() (reused here for the actual
+# long-to-wide pivot, rather than a second pivot implementation) has no
+# usable rows for them.
+build_qc_comparison_scatter <- function(table_flagged, metric_x, metric_y, thresholds) {
+  if (is.null(table_flagged) || is.null(metric_x) || is.null(metric_y) ||
+    !nzchar(metric_x) || !nzchar(metric_y) || identical(metric_x, metric_y)) {
+    return(NULL)
+  }
+
+  wide <- build_qc_comparison_table(table_flagged, c(metric_x, metric_y))
+  if (is.null(wide) || !all(c(metric_x, metric_y) %in% names(wide))) {
+    return(NULL)
+  }
+
+  flag_lookup <- table_flagged[table_flagged$qc_metric %in% c(metric_x, metric_y), c("source_file", "qc_flag")]
+  flagged_files <- unique(flag_lookup$source_file[flag_lookup$qc_flag])
+  wide$comparison_status <- factor(
+    ifelse(wide$source_file %in% flagged_files, "Flagged", "OK"),
+    levels = c("Flagged", "OK")
+  )
+
+  plot <- ggplot2::ggplot(
+    wide,
+    ggplot2::aes(x = .data[[metric_x]], y = .data[[metric_y]], color = comparison_status)
+  ) +
+    ggplot2::geom_point(size = 3, alpha = 0.85) +
+    ggplot2::scale_color_manual(values = c(Flagged = "#c0392b", OK = "#27ae60"), drop = FALSE) +
+    # Both axes are 0-1 fractions (calculateOutputMetrics()'s "percent"
+    # column), labeled as percentages here purely for display, matching
+    # build_qc_comparison_plot()'s own axis convention.
+    ggplot2::scale_x_continuous(labels = function(x) paste0(round(x * 100), "%")) +
+    ggplot2::scale_y_continuous(labels = function(x) paste0(round(x * 100), "%")) +
+    ggplot2::labs(
+      x = metric_x, y = metric_y, color = "QC status",
+      title = paste("Across-file comparison:", metric_x, "vs.", metric_y)
+    ) +
+    ggplot2::theme_minimal(base_size = 15) +
+    ggplot2::theme(
+      axis.text = ggplot2::element_text(size = 13),
+      axis.title = ggplot2::element_text(size = 14),
+      plot.title = ggplot2::element_text(size = 16, face = "bold"),
+      legend.text = ggplot2::element_text(size = 13),
+      legend.title = ggplot2::element_text(size = 14)
+    )
+
+  cfg_x <- qc_threshold_config[qc_threshold_config$qc_metric == metric_x, , drop = FALSE]
+  if (nrow(cfg_x) == 1) {
+    tv <- thresholds[[cfg_x$threshold_id[1]]]
+    if (!is.null(tv) && !is.na(tv)) {
+      plot <- plot + ggplot2::geom_vline(xintercept = tv, linetype = "dashed", color = "black")
+    }
+  }
+  cfg_y <- qc_threshold_config[qc_threshold_config$qc_metric == metric_y, , drop = FALSE]
+  if (nrow(cfg_y) == 1) {
+    tv <- thresholds[[cfg_y$threshold_id[1]]]
+    if (!is.null(tv) && !is.na(tv)) {
+      plot <- plot + ggplot2::geom_hline(yintercept = tv, linetype = "dashed", color = "black")
+    }
+  }
+
+  plot
 }

@@ -126,10 +126,54 @@ ui <- fluidPage(
       uiOutput("load_diagnostics"),
       uiOutput("read_error_ui"),
       tabsetPanel(
+        # "QC flags": renamed from "QC table" -- the every-file/every-metric
+        # long table is still here (P10-01/P10-02), but it's no longer the
+        # tab's default, fully-expanded view: field feedback was that seeing
+        # every one of ~32 metrics for every loaded file at once is too much
+        # to make a meaningful judgment call from. The tab now leads with two
+        # more scannable things instead -- a file selector (shared with the
+        # Plots/Gaze Explorer tabs, see file_selector_ids below) and a
+        # compact, all-files table of just the 3 "major" metrics
+        # (major_qc_metrics(), helpers.R) -- and tucks the full long table
+        # behind a collapsed-by-default toggle for whoever wants to drill
+        # into every metric for every file at once. The full table's own
+        # server-side wiring (output$qc_table/qc_table_proxy, the threshold
+        # re-flagging observer, auto-refresh's replaceData() push, and
+        # P10-03's row-click -> selected_source_file_val()) is UNCHANGED --
+        # only its visibility is now gated on a checkbox, which is a
+        # client-side conditionalPanel() condition with no server
+        # involvement at all.
         tabPanel(
-          "QC table",
+          "QC flags",
           br(),
-          p("Click a row to view that recording's plots in the \"Plots\" tab."),
+          selectizeInput(
+            "qcflags_file_selector", "Select file",
+            choices = character(0),
+            options = list(placeholder = "Select a file...")
+          ),
+          h4("Major QC metrics (all files)"),
+          p(
+            class = "text-muted",
+            "Valid %, robust %, and interpolated % -- the same 3 metrics thresholdable in the sidebar. ",
+            "Click a metric's threshold in the sidebar to change the highlighting below."
+          ),
+          DTOutput("qc_major_table"),
+          hr(),
+          h4("Review notes"),
+          p(
+            class = "text-muted",
+            "A note for the file currently selected above, explaining why its quality looks the way ",
+            "it does -- saved to a single notes.tsv file alongside the loaded directory (shared across ",
+            "anyone reviewing this same directory) and included in the CSV export below."
+          ),
+          textAreaInput(
+            "qcflags_note_text", NULL,
+            value = "", rows = 3, width = "100%",
+            placeholder = "e.g. Excessive blinking during calibration, re-run recommended."
+          ),
+          actionButton("qcflags_save_note", "Save note", class = "btn-primary"),
+          uiOutput("qcflags_note_status"),
+          hr(),
           uiOutput("qc_flag_summary"),
           # P10-05: export every recording currently flagged by any
           # configured threshold (qc_table_flagged()'s own qc_flag, the same
@@ -140,11 +184,27 @@ ui <- fluidPage(
           # default rather than a single metric.
           downloadButton("download_flagged_csv", "Export flagged for review (CSV)"),
           br(), br(),
-          DTOutput("qc_table")
+          checkboxInput("qcflags_show_detail", "Show detailed metrics table (every file, every metric)", value = FALSE),
+          conditionalPanel(
+            condition = "input.qcflags_show_detail == true",
+            p("Click a row to view that recording's plots in the \"Plots\" tab."),
+            DTOutput("qc_table")
+          )
         ),
         tabPanel(
           "Plots",
           br(),
+          fluidRow(
+            column(
+              6,
+              selectizeInput(
+                "plots_file_selector", "Select file",
+                choices = character(0),
+                options = list(placeholder = "Select a file...")
+              )
+            ),
+            column(6, uiOutput("plots_major_metrics_ui"))
+          ),
           uiOutput("plot_status_ui"),
           conditionalPanel(
             condition = "output.plot_ready == true",
@@ -170,6 +230,17 @@ ui <- fluidPage(
         tabPanel(
           "Gaze Explorer",
           br(),
+          fluidRow(
+            column(
+              6,
+              selectizeInput(
+                "gaze_file_selector", "Select file",
+                choices = character(0),
+                options = list(placeholder = "Select a file...")
+              )
+            ),
+            column(6, uiOutput("gaze_major_metrics_ui"))
+          ),
           uiOutput("gaze_status_ui"),
           conditionalPanel(
             condition = "output.gaze_ready == true",
@@ -210,8 +281,11 @@ ui <- fluidPage(
           "Compare files",
           br(),
           p(
-            "Compare how loaded files stack up against each other on a chosen QC metric, ",
-            "using the same thresholds configured in the sidebar."
+            "Compare how loaded files stack up against each other on chosen QC metric(s), ",
+            "using the same thresholds configured in the sidebar. Pick ONE metric for a bar ",
+            "chart across files, or TWO metrics for a scatterplot (one metric per axis, one ",
+            "point per file) -- useful for seeing whether files that are bad on one metric also ",
+            "tend to be bad on another."
           ),
           uiOutput("compare_status_ui"),
           # Narrows both the bar chart and the wide table below down to one
@@ -230,8 +304,18 @@ ui <- fluidPage(
             "compare_batch_name_filter", "Filter to batch_name (run)",
             choices = character(0), multiple = TRUE
           ),
-          h4("Metric across files"),
-          selectInput("compare_metric_plot", "QC metric", choices = character(0)),
+          h4("Metric(s) across files"),
+          # multiple = TRUE, maxItems = 2: 1 selected metric renders the
+          # original bar chart (build_qc_comparison_plot()), 2 renders a
+          # scatterplot (build_qc_comparison_scatter()) instead -- see the
+          # server's output$compare_plot for the actual branch. Capped at 2
+          # since a scatterplot only has 2 axes; a 3rd selection is simply
+          # not offered by maxItems rather than silently ignored.
+          selectizeInput(
+            "compare_metric_plot", "QC metric(s) -- 1 = bar chart, 2 = scatterplot",
+            choices = character(0), multiple = TRUE,
+            options = list(maxItems = 2)
+          ),
           # height = "auto": paired with renderPlot(..., height = function() ...)
           # below -- a fixed pixel height here made the bar chart illegible
           # once the loaded file count grew past what fits in ~500px (found
@@ -350,6 +434,15 @@ server <- function(input, output, session) {
   # actual value, only that it changed.
   manual_load_trigger <- reactiveVal(0L)
 
+  # notes_store: this loaded directory's shared review notes (see helpers.R's
+  # header comment on notes_filename) -- read from disk once per manual load
+  # (below) and kept live here thereafter; "Save note" (further down) both
+  # updates this reactiveVal and immediately persists it back to disk via
+  # save_notes_table(). Starts as empty_notes_table() (a real, 0-row table,
+  # not NULL) so every reader below can assume a well-shaped data.frame is
+  # always present, even before any directory has ever been loaded.
+  notes_store <- reactiveVal(empty_notes_table())
+
   # The manual "Load qcsummary files" path: validates selected_dir() exactly
   # as the former eventReactive did, then does a full, deliberate "start
   # fresh" load -- this is the one place a NEW directory selection actually
@@ -365,6 +458,14 @@ server <- function(input, output, session) {
     has_loaded_once(TRUE)
     last_refresh_time(Sys.time())
     manual_load_trigger(isolate(manual_load_trigger()) + 1L)
+
+    # Review notes (see helpers.R's own header comment on notes_filename):
+    # loaded once per genuine manual "Load" click, same as every other
+    # per-directory state above -- not reloaded on every auto-refresh tick,
+    # since notes aren't part of the batch pipeline's own live-changing
+    # output and re-reading them on a timer risks clobbering an in-progress,
+    # not-yet-saved edit in the notes textAreaInput below.
+    notes_store(load_notes_table(dir))
   })
 
   # load_result: backward-compatible alias, preserving the exact semantics
@@ -518,7 +619,14 @@ server <- function(input, output, session) {
         shiny.silent.error = function(e) NULL,
         validation = function(e) NULL
       )
-      tbl <- build_flagged_export_table(flagged_tbl)
+      # notes = notes_store(): adds a "note" column to the export (blank
+      # where a flagged file has no saved note) -- see
+      # build_flagged_export_table()'s own `notes` parameter doc. Read via
+      # isolate() for the same reason flagged_tbl is wrapped in tryCatch()
+      # just above: this content() function runs outside Shiny's normal
+      # render/flush cycle, and this download shouldn't itself become a new
+      # reactive dependency of anything.
+      tbl <- build_flagged_export_table(flagged_tbl, notes = isolate(notes_store()))
       if (is.null(tbl)) {
         tbl <- data.frame(
           recording = character(0),
@@ -630,6 +738,224 @@ server <- function(input, output, session) {
     req(tbl)
     DT::replaceData(qc_table_proxy, tbl, resetPaging = FALSE, rownames = FALSE)
   }, ignoreInit = TRUE)
+
+  # --- "QC flags" tab: compact major-metrics table ---
+  #
+  # One row per file, columns = major_qc_metrics() only (valid %, robust %,
+  # interpolated % per eye) -- the scannable, all-files-at-once default view
+  # this tab now leads with, in front of the full ~32-metric long table
+  # (still available, just collapsed by default -- see the UI's
+  # checkboxInput("qcflags_show_detail", ...)). Reuses
+  # build_qc_comparison_table() (P10-04, unmodified) for the actual pivot,
+  # and the exact same per-column formatStyle()/styleInterval() threshold-
+  # highlighting loop the "Compare files" tab's own wide table already uses
+  # (output$compare_table below) -- not the row-level highlighting the full
+  # long table (output$qc_table) uses, since qc_flag is a per-metric-ROW
+  # concept that has no single value once pivoted to one column per metric.
+  #
+  # Reactively rebuilt on any current_load_result()/qc_thresholds() change
+  # (not isolate()'d/proxy-optimized the way the big table is) -- this
+  # table's realistic scale (one row per file, 4 metric columns) makes a
+  # full rebuild on a threshold tweak or an auto-refresh tick cheap, the same
+  # tradeoff output$compare_table already accepts for the same reason.
+  output$qc_major_table <- renderDT({
+    tbl <- current_load_result()$table
+    req(tbl)
+    major_tbl <- build_qc_comparison_table(tbl, major_qc_metrics())
+    req(major_tbl)
+
+    thresholds <- qc_thresholds()
+    dt <- DT::datatable(
+      major_tbl,
+      rownames = FALSE,
+      filter = "top",
+      selection = "none",
+      options = list(pageLength = 25, scrollX = TRUE)
+    )
+    for (i in seq_len(nrow(qc_threshold_config))) {
+      cfg <- qc_threshold_config[i, ]
+      if (!(cfg$qc_metric %in% names(major_tbl))) {
+        next
+      }
+      threshold_value <- thresholds[[cfg$threshold_id]]
+      if (is.null(threshold_value) || is.na(threshold_value)) {
+        next
+      }
+      colors <- if (identical(cfg$direction, "min")) {
+        c("#fbe3e4", "white")
+      } else {
+        c("white", "#fbe3e4")
+      }
+      dt <- dt %>% DT::formatStyle(cfg$qc_metric, backgroundColor = DT::styleInterval(threshold_value, colors))
+    }
+    metric_cols <- setdiff(names(major_tbl), c("recording", "batch_name", "source_file"))
+    dt %>% DT::formatPercentage(metric_cols, 1)
+  })
+
+  # --- Shared per-tab file selector (QC flags / Plots / Gaze Explorer) ---
+  #
+  # Three separate selectizeInput widgets (file_selector_ids below), one
+  # positioned at the top of each of those three tabs -- a single Shiny
+  # input can't render itself in three places on one page, but all three are
+  # kept in sync against the SAME underlying selected_source_file_val()
+  # (P10-03's reactiveVal, originally populated only by the QC table's own
+  # row-click) below, so picking a file in any one instance, or clicking a
+  # QC table row, is reflected in the other two the next time that tab is
+  # viewed.
+  file_selector_ids <- c("qcflags_file_selector", "plots_file_selector", "gaze_file_selector")
+
+  # Repopulates every selector's CHOICES (not its current selection) on a
+  # genuine manual load -- same manual_load_trigger()-only reasoning as the
+  # "Compare files" tab's own metric/batch_name choice observers above: a
+  # brand-new directory's file list should reset these dropdowns' available
+  # choices, but an auto-refresh tick against the SAME directory picking up
+  # one more file should not silently reset whichever file a user currently
+  # has selected. (An auto-refresh tick that adds a brand-new file will not
+  # appear in these dropdowns until the next manual load -- the same
+  # accepted limitation already documented for the "Compare files" tab's own
+  # batch_name filter above.)
+  observeEvent(manual_load_trigger(), {
+    choices <- build_file_selector_choices(current_load_result()$table)
+    current_selection <- isolate(selected_source_file_val())
+    for (id in file_selector_ids) {
+      updateSelectizeInput(session, id, choices = choices, selected = current_selection)
+    }
+  }, ignoreInit = TRUE)
+
+  # Each selector's own change becomes the new shared selection. Three
+  # explicit observers (not a loop over file_selector_ids) deliberately --
+  # observeEvent()'s event expression captures its enclosing environment's
+  # `id` lazily, and a `for` loop's loop variable is a single shared binding
+  # mutated in place across iterations, not a fresh one per iteration; all
+  # three observers registered inside such a loop would end up reading
+  # whatever `id` happened to equal AFTER the loop finished (the classic
+  # "closure over a loop variable" bug), not their own intended id. Writing
+  # them out separately sidesteps that entirely for a fixed, small (3) set.
+  observeEvent(input$qcflags_file_selector, {
+    selected_source_file_val(input$qcflags_file_selector)
+  }, ignoreInit = TRUE)
+  observeEvent(input$plots_file_selector, {
+    selected_source_file_val(input$plots_file_selector)
+  }, ignoreInit = TRUE)
+  observeEvent(input$gaze_file_selector, {
+    selected_source_file_val(input$gaze_file_selector)
+  }, ignoreInit = TRUE)
+
+  # ...and the shared selection, however it changed (either of the 3
+  # selectors above, or the QC table's own P10-03 row-click observer), echoes
+  # back out to every selector widget so all 3 (plus the QC table's own
+  # highlighted row, unaffected here) agree on the same file. Guarded
+  # per-widget (only updated if it doesn't already show the right value) to
+  # avoid a redundant round-trip to a widget that's already correct --
+  # notably the ONE widget that just triggered this via the observers
+  # directly above, which already reflects the new value client-side and
+  # doesn't need to be told again.
+  observeEvent(selected_source_file_val(), {
+    sf <- selected_source_file_val()
+    for (id in file_selector_ids) {
+      if (!identical(isolate(input[[id]]), sf)) {
+        updateSelectizeInput(session, id, selected = if (is.null(sf)) character(0) else sf)
+      }
+    }
+  }, ignoreNULL = FALSE)
+
+  # --- "QC flags" tab: review notes for the selected file ---
+  #
+  # Populates the notes textAreaInput with the SELECTED file's own
+  # previously-saved note (if any) whenever the selection changes -- without
+  # this, a note typed for one file would appear to carry over to the next
+  # file selected, which would misleadingly look like an existing note for a
+  # file that actually has none.
+  observeEvent(selected_source_file_val(), {
+    sf <- selected_source_file_val()
+    tbl <- current_load_result()$table
+    if (is.null(sf) || is.null(tbl)) {
+      updateTextAreaInput(session, "qcflags_note_text", value = "")
+      return(invisible(NULL))
+    }
+    match_row <- unique(tbl[tbl$source_file == sf, c("recording", "batch_name"), drop = FALSE])
+    if (nrow(match_row) == 0) {
+      updateTextAreaInput(session, "qcflags_note_text", value = "")
+      return(invisible(NULL))
+    }
+    note <- note_for_recording(notes_store(), match_row$recording[1], match_row$batch_name[1])
+    updateTextAreaInput(session, "qcflags_note_text", value = note)
+  }, ignoreNULL = FALSE)
+
+  # note_save_status: list(ok = TRUE/FALSE, message = ...) for the most
+  # recent "Save note" click, or NULL before one has happened this session --
+  # same persistent-alert convention as this app's own P10-07 config_io_status.
+  note_save_status <- reactiveVal(NULL)
+
+  observeEvent(input$qcflags_save_note, {
+    sf <- selected_source_file_val()
+    dir <- selected_dir()
+    tbl <- current_load_result()$table
+    if (is.null(sf) || is.null(tbl) || length(dir) == 0 || !nzchar(dir)) {
+      note_save_status(list(ok = FALSE, message = "Select a file first."))
+      return(invisible(NULL))
+    }
+    match_row <- unique(tbl[tbl$source_file == sf, c("recording", "batch_name"), drop = FALSE])
+    if (nrow(match_row) == 0) {
+      note_save_status(list(ok = FALSE, message = "Selected file is no longer in the loaded table."))
+      return(invisible(NULL))
+    }
+
+    updated <- upsert_note(notes_store(), match_row$recording[1], match_row$batch_name[1], input$qcflags_note_text)
+    notes_store(updated)
+
+    result <- tryCatch(
+      {
+        save_notes_table(updated, dir)
+        list(ok = TRUE)
+      },
+      error = function(e) list(ok = FALSE, message = conditionMessage(e))
+    )
+    note_save_status(if (isTRUE(result$ok)) {
+      list(ok = TRUE, message = "Note saved.")
+    } else {
+      list(ok = FALSE, message = paste0("Note kept for this session, but could not save to disk: ", result$message))
+    })
+  })
+
+  output$qcflags_note_status <- renderUI({
+    status <- note_save_status()
+    if (is.null(status)) {
+      return(NULL)
+    }
+    div(
+      class = if (isTRUE(status$ok)) "alert alert-success" else "alert alert-danger",
+      status$message
+    )
+  })
+
+  # --- Compact "major metrics" readout on the Plots / Gaze Explorer tabs ---
+  #
+  # A quick "is this file okay?" glance next to those tabs' own file
+  # selectors, without switching to the QC flags tab -- build_major_metrics_summary()
+  # (helpers.R) does the actual data prep; both outputs below just render its
+  # small label/value/flag data.frame as a row of colored badges.
+  render_major_metrics_badges <- function(source_file) {
+    summary <- build_major_metrics_summary(qc_table_flagged(), source_file)
+    if (is.null(summary)) {
+      return(NULL)
+    }
+    tagList(lapply(seq_len(nrow(summary)), function(i) {
+      row <- summary[i, ]
+      span(
+        class = paste("label", if (isTRUE(row$qc_flag)) "label-danger" else "label-success"),
+        style = "margin-right: 6px; font-size: 100%; display: inline-block; padding: 4px 8px;",
+        sprintf("%s: %.1f%%", row$label, row$percent * 100)
+      )
+    }))
+  }
+
+  output$plots_major_metrics_ui <- renderUI({
+    render_major_metrics_badges(selected_source_file())
+  })
+  output$gaze_major_metrics_ui <- renderUI({
+    render_major_metrics_badges(selected_source_file())
+  })
 
   # auto_refresh_interval_ms: the polling interval below, in milliseconds,
   # for invalidateLater(). Falls back to a 5-second default for the same
@@ -1141,15 +1467,23 @@ server <- function(input, output, session) {
   observeEvent(manual_load_trigger(), {
     choices <- compare_metric_choices()
     if (length(choices) == 0) {
-      updateSelectInput(session, "compare_metric_plot", choices = character(0))
+      updateSelectizeInput(session, "compare_metric_plot", choices = character(0), selected = character(0))
       updateSelectizeInput(session, "compare_metrics_table", choices = character(0), selected = character(0))
       return()
     }
 
     configured <- unique(qc_threshold_config$qc_metric[qc_threshold_config$qc_metric %in% choices])
 
+    # Defaults to a single selected metric (a bar chart) even though this
+    # control now allows up to 2 (a scatterplot) -- a fresh load defaulting
+    # straight to a 2-metric scatterplot would pick an arbitrary metric PAIR
+    # with no obvious rationale, where a single default metric (the first
+    # configured/thresholdable one, same as before this control allowed a
+    # second selection at all) is still the most useful "just loaded, show
+    # me something" starting point; a user opts into the 2-metric view
+    # deliberately by adding a second selection themselves.
     default_plot_metric <- if (length(configured) > 0) configured[1] else choices[1]
-    updateSelectInput(session, "compare_metric_plot", choices = choices, selected = default_plot_metric)
+    updateSelectizeInput(session, "compare_metric_plot", choices = choices, selected = default_plot_metric)
 
     default_table_metrics <- if (length(configured) > 0) configured else choices[1]
     updateSelectizeInput(
@@ -1184,45 +1518,62 @@ server <- function(input, output, session) {
     NULL
   })
 
-  # build_qc_comparison_plot() (helpers.R) is handed qc_table_flagged() --
-  # not current_load_result()$table directly -- so this plot's bar coloring always
-  # matches the QC table tab's own row highlighting for the same metric
-  # (both trace back to the same compute_qc_flags() call), rather than this
-  # view recomputing pass/fail independently and risking drift from P10-02's
-  # flagging. Narrowed to the batch_name(s) currently selected in the filter
-  # above via filter_by_batch_name() (helpers.R) before being handed to
-  # build_qc_comparison_plot() -- that function stays agnostic to which
-  # batch_name(s) are in view, the same way it's agnostic to which directory
-  # was loaded.
+  # build_qc_comparison_plot()/build_qc_comparison_scatter() (helpers.R) are
+  # handed qc_table_flagged() -- not current_load_result()$table directly --
+  # so bar/point coloring always matches the QC table's own row highlighting
+  # for the same metric(s) (both trace back to the same compute_qc_flags()
+  # call), rather than this view recomputing pass/fail independently and
+  # risking drift from P10-02's flagging. Narrowed to the batch_name(s)
+  # currently selected in the filter above via filter_by_batch_name()
+  # (helpers.R) before being handed to either builder -- both stay agnostic
+  # to which batch_name(s) are in view, the same way they're agnostic to
+  # which directory was loaded.
+  #
+  # 1 selected metric -> the original bar chart; 2 -> a scatterplot instead
+  # (this task's own scope decision, see compare_metric_plot's UI comment).
+  # 0 (cleared) or >2 (shouldn't happen -- the UI's maxItems = 2 already
+  # prevents it, but req() guards defensively anyway) render nothing.
   output$compare_plot <- renderPlot(
     {
-      metric <- input$compare_metric_plot
-      req(metric, nzchar(metric))
+      metrics <- input$compare_metric_plot
+      req(length(metrics) %in% c(1, 2))
       tbl <- qc_table_flagged()
       req(tbl)
       tbl <- filter_by_batch_name(tbl, input$compare_batch_name_filter)
-      plot <- build_qc_comparison_plot(tbl, metric, qc_thresholds())
+      plot <- if (length(metrics) == 1) {
+        build_qc_comparison_plot(tbl, metrics[1], qc_thresholds())
+      } else {
+        build_qc_comparison_scatter(tbl, metrics[1], metrics[2], qc_thresholds())
+      }
       req(plot)
       plot
     },
-    # Scales with the number of bars the currently selected metric will
-    # produce, rather than a fixed pixel height -- a static height squeezed
-    # 100+ files' bars/labels down to illegibility in field testing. 28px
-    # per bar (roomy enough for the legible font sizes set in
-    # build_qc_comparison_plot()) plus fixed space for the title/axis, with
-    # a 500px floor so a small file count doesn't render a cramped sliver.
-    # Filtered by the batch_name selection the same way the plot itself is,
-    # above, so the container height matches the actual bar count being
-    # drawn rather than the full, unfiltered file count.
+    # Bar-chart case (length(metrics) == 1): scales with the number of bars
+    # the currently selected metric will produce, rather than a fixed pixel
+    # height -- a static height squeezed 100+ files' bars/labels down to
+    # illegibility in field testing. 28px per bar (roomy enough for the
+    # legible font sizes set in build_qc_comparison_plot()) plus fixed space
+    # for the title/axis, with a 500px floor so a small file count doesn't
+    # render a cramped sliver. Filtered by the batch_name selection the same
+    # way the plot itself is, above, so the container height matches the
+    # actual bar count being drawn rather than the full, unfiltered file
+    # count. This exact formula is UNCHANGED from before the 2-metric
+    # scatterplot option existed -- a fixed height is used for the
+    # scatterplot case instead (it doesn't grow with file count the way a
+    # per-file bar chart does; every file is just one more point on the same
+    # fixed-size plot area).
     height = function() {
-      metric <- input$compare_metric_plot
+      metrics <- input$compare_metric_plot
       tbl <- qc_table_flagged()
-      if (is.null(tbl) || is.null(metric) || !nzchar(metric)) {
+      if (is.null(tbl) || is.null(metrics) || length(metrics) == 0) {
         return(500)
       }
-      tbl <- filter_by_batch_name(tbl, input$compare_batch_name_filter)
-      n <- sum(tbl$qc_metric == metric, na.rm = TRUE)
-      max(500, n * 28 + 120)
+      if (length(metrics) == 1) {
+        tbl <- filter_by_batch_name(tbl, input$compare_batch_name_filter)
+        n <- sum(tbl$qc_metric == metrics[1], na.rm = TRUE)
+        return(max(500, n * 28 + 120))
+      }
+      550
     }
   )
 
