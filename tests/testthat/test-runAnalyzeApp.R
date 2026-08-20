@@ -1454,3 +1454,126 @@ test_that("build_qc_comparison_table keeps only the first value for a duplicate 
   expect_equal(result$valid_raw_data, 0.9)
   expect_type(result$valid_raw_data, "double")
 })
+
+# ---------------------------------------------------------------------------
+# P10-05: export "flagged for review" file list -- regression tests for
+# build_flagged_export_table() (helpers.R).
+# ---------------------------------------------------------------------------
+#
+# flagged_export_test_table: builds a synthetic table_flagged-shaped
+# data.frame directly from parallel vectors, same required-column shape as
+# comparison_test_table() above but general enough to mix several qc_metric
+# rows (and mixed qc_flag values) per recording -- exactly what
+# build_flagged_export_table()'s per-recording rollup needs to be exercised
+# against.
+flagged_export_test_table <- function(recording, batch_name, source_file, qc_metric, percent, qc_flag) {
+  data.frame(
+    recording = recording,
+    batch_name = batch_name,
+    source_file = source_file,
+    qc_metric = qc_metric,
+    percent = percent,
+    qc_flag = qc_flag,
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("build_flagged_export_table rolls up two flagged metrics sharing one threshold_id into a correct n_flagged_metrics/flagged_metrics/flagged_values row", {
+  # interpolated_LeftEye/RightEye share the interp_pct threshold_id (see
+  # qc_threshold_config in helpers.R) -- both flagged here for the same
+  # recording is the scenario n_flagged_metrics == 2 needs to get right.
+  tbl <- flagged_export_test_table(
+    recording = "rec-1",
+    batch_name = "test_batch",
+    source_file = "/data/rec-1_qcsummary.tsv",
+    qc_metric = c("interpolated_LeftEye", "interpolated_RightEye"),
+    percent = c(0.25, 0.30),
+    qc_flag = c(TRUE, TRUE)
+  )
+
+  result <- build_flagged_export_table(tbl)
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$recording, "rec-1")
+  expect_equal(result$n_flagged_metrics, 2)
+  expect_equal(result$flagged_metrics, "interpolated_LeftEye, interpolated_RightEye")
+  expect_equal(result$flagged_values, "25, 30")
+})
+
+test_that("build_flagged_export_table produces a single value with no stray comma when a recording is flagged on exactly one metric", {
+  tbl <- flagged_export_test_table(
+    recording = "rec-2",
+    batch_name = "test_batch",
+    source_file = "/data/rec-2_qcsummary.tsv",
+    qc_metric = "valid_raw_data",
+    percent = 0.65,
+    qc_flag = TRUE
+  )
+
+  result <- build_flagged_export_table(tbl)
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$n_flagged_metrics, 1)
+  expect_equal(result$flagged_metrics, "valid_raw_data")
+  expect_false(grepl(",", result$flagged_metrics, fixed = TRUE))
+  expect_equal(result$flagged_values, "65")
+  expect_false(grepl(",", result$flagged_values, fixed = TRUE))
+})
+
+test_that("build_flagged_export_table omits a recording with zero flagged rows entirely", {
+  tbl <- rbind(
+    flagged_export_test_table(
+      recording = "rec-1", batch_name = "test_batch", source_file = "/data/rec-1_qcsummary.tsv",
+      qc_metric = "valid_raw_data", percent = 0.5, qc_flag = TRUE
+    ),
+    flagged_export_test_table(
+      recording = "rec-2", batch_name = "test_batch", source_file = "/data/rec-2_qcsummary.tsv",
+      qc_metric = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data"),
+      percent = c(0.9, 0.95),
+      qc_flag = c(FALSE, FALSE)
+    )
+  )
+
+  result <- build_flagged_export_table(tbl)
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$recording, "rec-1")
+  expect_false("rec-2" %in% result$recording)
+})
+
+test_that("build_flagged_export_table returns NULL for NULL, 0-row, malformed (missing required column), or all-unflagged input rather than erroring", {
+  base_tbl <- flagged_export_test_table(
+    recording = "rec-1", batch_name = "test_batch", source_file = "/data/rec-1_qcsummary.tsv",
+    qc_metric = "valid_raw_data", percent = 0.5, qc_flag = TRUE
+  )
+
+  expect_null(build_flagged_export_table(NULL))
+  expect_null(build_flagged_export_table(base_tbl[0, ]))
+
+  missing_col <- base_tbl
+  missing_col$qc_flag <- NULL
+  expect_null(build_flagged_export_table(missing_col))
+
+  all_unflagged <- base_tbl
+  all_unflagged$qc_flag <- FALSE
+  expect_null(build_flagged_export_table(all_unflagged))
+})
+
+test_that("build_flagged_export_table excludes unflagged rows from the count/metrics/values even when mixed with flagged rows for the same recording", {
+  tbl <- flagged_export_test_table(
+    recording = "rec-1",
+    batch_name = "test_batch",
+    source_file = "/data/rec-1_qcsummary.tsv",
+    qc_metric = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data", "interpolated_LeftEye"),
+    percent = c(0.5, 0.6, 0.05),
+    qc_flag = c(TRUE, TRUE, FALSE)
+  )
+
+  result <- build_flagged_export_table(tbl)
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$n_flagged_metrics, 2)
+  expect_equal(result$flagged_metrics, "valid_raw_data, robustness_proportion_valid_data_to_all_data")
+  expect_false(grepl("interpolated_LeftEye", result$flagged_metrics, fixed = TRUE))
+  expect_equal(result$flagged_values, "50, 60")
+})
