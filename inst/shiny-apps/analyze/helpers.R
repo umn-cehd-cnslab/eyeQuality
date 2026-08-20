@@ -679,6 +679,28 @@ build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
     levels = c("Flagged", "OK", "No threshold configured")
   )
 
+  # bar_label: recording alone is NOT a unique file identity -- it's derived
+  # by stripping the _desc-<batchName>_ segment off the filename (see
+  # derive_recording_label()), so the same subject/session reprocessed under
+  # two different batchNames (e.g. re-run with different parameters, or
+  # genuinely repeated recordings) produces two rows with the IDENTICAL
+  # recording value. Plotting x = recording alone let ggplot2::geom_col()'s
+  # default position = "stack" silently sum those rows' percent values into
+  # one bar -- a real correctness bug found in field testing (a "150%
+  # robustness" value that's only possible as the sum of two runs, not a
+  # single file's true value). Appending batch_name whenever it's genuinely
+  # ambiguous (>1 distinct batch_name sharing the same recording) keeps each
+  # row on its own bar and makes which run produced which bar explicit,
+  # rather than just deduplicating labels cosmetically.
+  ambiguous_recordings <- names(which(tapply(
+    rows$batch_name, rows$recording, function(b) length(unique(b))
+  ) > 1))
+  rows$bar_label <- ifelse(
+    rows$recording %in% ambiguous_recordings,
+    paste0(rows$recording, " [", ifelse(is.na(rows$batch_name), "NA", rows$batch_name), "]"),
+    rows$recording
+  )
+
   # Sorted (not left in table row order) so outlier files land visibly at
   # either end of the chart rather than scattered through an arbitrary
   # file-discovery order -- coord_flip() below then reads the sorted axis
@@ -687,7 +709,7 @@ build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
   plot <- ggplot2::ggplot(
     rows,
     ggplot2::aes(
-      x = stats::reorder(recording, percent),
+      x = stats::reorder(bar_label, percent),
       y = percent,
       fill = comparison_status
     )
@@ -713,7 +735,19 @@ build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
       fill = "QC status",
       title = paste("Across-file comparison:", metric)
     ) +
-    ggplot2::theme_minimal()
+    ggplot2::theme_minimal(base_size = 15) +
+    # Legibility at real-world scale (found too small in field testing):
+    # base_size above scales most text, but axis tick labels (the file/
+    # recording names on the flipped y-axis -- the actual "which file is
+    # this" text a reviewer reads) and the title need bumping past what
+    # base_size alone gives them.
+    ggplot2::theme(
+      axis.text = ggplot2::element_text(size = 13),
+      axis.title = ggplot2::element_text(size = 14),
+      plot.title = ggplot2::element_text(size = 16, face = "bold"),
+      legend.text = ggplot2::element_text(size = 13),
+      legend.title = ggplot2::element_text(size = 14)
+    )
 
   if (has_threshold) {
     threshold_value <- thresholds[[cfg_row$threshold_id[1]]]

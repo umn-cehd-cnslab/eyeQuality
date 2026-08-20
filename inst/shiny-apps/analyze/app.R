@@ -152,7 +152,13 @@ ui <- fluidPage(
           uiOutput("compare_status_ui"),
           h4("Metric across files"),
           selectInput("compare_metric_plot", "QC metric", choices = character(0)),
-          plotOutput("compare_plot", height = "500px"),
+          # height = "auto": paired with renderPlot(..., height = function() ...)
+          # below -- a fixed pixel height here made the bar chart illegible
+          # once the loaded file count grew past what fits in ~500px (found
+          # in field testing with 100+ files), so the container instead
+          # sizes to whatever the server-computed height function returns
+          # for the currently selected metric's row count.
+          plotOutput("compare_plot", height = "auto"),
           hr(),
           h4("Side-by-side comparison table"),
           p(
@@ -379,14 +385,36 @@ server <- function(input, output, session) {
     )
   })
 
-  # Built once per data load (not per threshold tweak, see qc_table_flagged()
+  # Rebuilt once per data load (not per threshold tweak, see qc_table_flagged()
   # above), with formatStyle() baking a row-highlight rule that reads each
   # row's own "qc_flag" column value at every DataTables draw -- including
   # redraws triggered by replaceData() below, not just this initial render.
   # That's what lets the threshold observer further down update highlighting
   # without rebuilding this widget. "qc_flag" itself is hidden via
   # columnDefs (it's plumbing, not a metric a user would sort/filter on).
+  #
+  # req(load_result()$table) is deliberately NOT inside isolate(): it's what
+  # gives this render block a reactive dependency on load_result() so it
+  # actually re-runs on each new "Load qcsummary files" click. Wrapping the
+  # whole body in isolate() (as an earlier version did) strips every
+  # dependency, including this one -- the render then only ever executes
+  # once, at app startup before any directory is even chosen, produces
+  # nothing (load_result() hasn't fired yet), and never runs again no matter
+  # what gets loaded afterward. qc_table_flagged() itself is still isolated
+  # below so a pure threshold tweak doesn't rebuild the widget (that's
+  # replaceData()'s job via the proxy further down).
+  # server = FALSE: this table's realistic scale (tens to low hundreds of
+  # files x ~30 metric rows each) doesn't need server-side pagination, and
+  # DT::renderDT()'s default of server = TRUE serves rows from whichever
+  # data.frame was captured the last time this render actually executed --
+  # under the isolate()-everything bug above, that was a single frozen empty
+  # snapshot from before any directory was even chosen, which is exactly why
+  # the table stayed permanently blank rather than something that would have
+  # resolved itself later. Explicit client-side rendering keeps this
+  # transparent and directly testable (the rendered data is embedded in the
+  # widget itself, not fetched via a separate AJAX round-trip).
   output$qc_table <- renderDT({
+    req(load_result()$table)
     tbl <- isolate(qc_table_flagged())
     req(tbl)
     qc_flag_col <- which(names(tbl) == "qc_flag") - 1L
@@ -406,7 +434,7 @@ server <- function(input, output, session) {
         target = "row",
         backgroundColor = DT::styleEqual(c(TRUE, FALSE), c("#fbe3e4", "white"))
       )
-  })
+  }, server = FALSE)
 
   qc_table_proxy <- DT::dataTableProxy("qc_table")
 
@@ -550,15 +578,32 @@ server <- function(input, output, session) {
   # (both trace back to the same compute_qc_flags() call), rather than this
   # view recomputing pass/fail independently and risking drift from P10-02's
   # flagging.
-  output$compare_plot <- renderPlot({
-    metric <- input$compare_metric_plot
-    req(metric, nzchar(metric))
-    tbl <- qc_table_flagged()
-    req(tbl)
-    plot <- build_qc_comparison_plot(tbl, metric, qc_thresholds())
-    req(plot)
-    plot
-  })
+  output$compare_plot <- renderPlot(
+    {
+      metric <- input$compare_metric_plot
+      req(metric, nzchar(metric))
+      tbl <- qc_table_flagged()
+      req(tbl)
+      plot <- build_qc_comparison_plot(tbl, metric, qc_thresholds())
+      req(plot)
+      plot
+    },
+    # Scales with the number of bars the currently selected metric will
+    # produce, rather than a fixed pixel height -- a static height squeezed
+    # 100+ files' bars/labels down to illegibility in field testing. 28px
+    # per bar (roomy enough for the legible font sizes set in
+    # build_qc_comparison_plot()) plus fixed space for the title/axis, with
+    # a 500px floor so a small file count doesn't render a cramped sliver.
+    height = function() {
+      metric <- input$compare_metric_plot
+      tbl <- qc_table_flagged()
+      if (is.null(tbl) || is.null(metric) || !nzchar(metric)) {
+        return(500)
+      }
+      n <- sum(tbl$qc_metric == metric, na.rm = TRUE)
+      max(500, n * 28 + 120)
+    }
+  )
 
   # Wide comparison table: one row per file, one column per selected metric.
   # Built from load_result()$table (not qc_table_flagged()) since qc_flag is

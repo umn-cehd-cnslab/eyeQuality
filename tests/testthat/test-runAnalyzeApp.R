@@ -551,6 +551,83 @@ test_that("row selection resolves distinct qc_table_rows_selected indices to the
   })
 })
 
+test_that("output$qc_table's actual rendered DT widget reflects load_result() after 'Load qcsummary files' is clicked, not just an empty pre-load render", {
+  # Regression guard for a real bug found in manual browser testing: an
+  # earlier version of output$qc_table wrapped its entire renderDT() body in
+  # isolate(qc_table_flagged()), which strips every reactive dependency --
+  # including the dependency on load_result() that's supposed to make this
+  # re-render after a real "Load" click. With no dependencies at all, the
+  # render only ever executes once, at app startup before any directory is
+  # chosen (load_result() hasn't fired, so it produces nothing), and never
+  # runs again no matter what gets loaded afterward -- the table (and
+  # therefore row-click plots, which need a row to click) just stays
+  # permanently blank in a live session. Every other test in this file calls
+  # the underlying reactives (qc_table_flagged(), selected_source_file(),
+  # etc.) directly rather than session$getOutput("qc_table") itself, which is
+  # exactly how this slipped through: those reactives all work fine in
+  # isolation, only the actual render wiring was broken.
+  skip_on_cran()
+
+  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  expect_true(nzchar(app_dir))
+
+  dir <- tempfile("p10qctablebug_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  # A marker string distinctive enough that it can only appear in the
+  # rendered DT widget's embedded data if this render actually re-executed
+  # against real loaded data, not an empty/pre-load render.
+  marker <- "qctablebugmarker12345"
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, sprintf(
+      "sub-%s_ses-1_recording-eyetracking_physio_desc-run1_preproc_qcsummary.tsv", marker
+    ))
+  )
+
+  home <- normalizePath(fs::path_home(), winslash = "/")
+  skip_if_not(
+    startsWith(dir, home),
+    "test tempdir is not under fs::path_home(); shinyFiles root-relative simulation would not resolve"
+  )
+  rel <- sub(paste0("^", home, "/?"), "", dir)
+  path_segments <- as.list(strsplit(rel, "/")[[1]])
+
+  shiny::testServer(app_dir, {
+    # Force the render's very first execution to happen in the "no data yet"
+    # state, the same way a real browser session renders this (visible)
+    # output immediately on page load, before any directory is chosen --
+    # req(load_result()$table) throws (the eventReactive hasn't fired yet),
+    # which a real Shiny render cycle swallows silently (blank output, no
+    # visible crash); session$getOutput() surfaces that as a real R
+    # condition instead, so it's caught here to match, not because it's
+    # itself the bug being guarded against.
+    pre_load_output <- tryCatch(
+      session$getOutput("qc_table"),
+      shiny.silent.error = function(e) NULL,
+      validation = function(e) NULL
+    )
+    if (!is.null(pre_load_output)) {
+      expect_false(grepl(marker, pre_load_output, fixed = TRUE))
+    }
+
+    session$setInputs(
+      directory = list(root = "Home", path = path_segments),
+      recursiveSearch = TRUE
+    )
+    session$setInputs(load = 1)
+
+    # The actual regression guard: under the isolate()-everything bug, this
+    # second getOutput() call would still return the same empty pre-load
+    # render (no reactive dependency ever fired to re-execute it) and this
+    # would fail.
+    post_load_output <- session$getOutput("qc_table")
+    expect_true(grepl(marker, post_load_output, fixed = TRUE))
+  })
+})
+
 # ---------------------------------------------------------------------------
 # P10-02: qc_threshold_config / default_qc_thresholds()
 # ---------------------------------------------------------------------------
@@ -1398,6 +1475,40 @@ test_that("build_qc_comparison_plot returns NULL for a NULL table, NULL metric, 
   expect_null(build_qc_comparison_plot(NULL, "valid_raw_data", thresholds))
   expect_null(build_qc_comparison_plot(tbl, NULL, thresholds))
   expect_null(build_qc_comparison_plot(tbl, "", thresholds))
+})
+
+test_that("build_qc_comparison_plot disambiguates two rows sharing the same recording but different batch_name, rather than letting geom_col's default stacking sum them into one bar", {
+  # Regression guard for a real bug found in field testing: recording alone
+  # isn't a unique file identity -- derive_recording_label() strips the
+  # batchName-specific part of the filename, so two runs of the same
+  # subject/session under different batch_name values previously shared one
+  # x-axis category. geom_col()'s default position = "stack" then summed
+  # their percent values into a single bar (e.g. 0.8 + 0.7 rendered as an
+  # impossible "150%").
+  tbl <- data.frame(
+    recording = c("sub-01_ses-1_recording-eyetracking_physio", "sub-01_ses-1_recording-eyetracking_physio"),
+    batch_name = c("run1", "run2"),
+    source_file = c("/data/run1_qcsummary.tsv", "/data/run2_qcsummary.tsv"),
+    qc_metric = "robustness_proportion_valid_data_to_all_data",
+    percent = c(0.8, 0.7),
+    qc_flag = c(FALSE, FALSE),
+    stringsAsFactors = FALSE
+  )
+  plot <- build_qc_comparison_plot(tbl, "robustness_proportion_valid_data_to_all_data", default_qc_thresholds())
+
+  expect_s3_class(plot, "ggplot")
+  expect_equal(nrow(plot$data), 2)
+  # The actual fix: each row must land on its own distinct x-axis category,
+  # even though `recording` alone is identical for both -- that's what
+  # prevents geom_col() from stacking them together.
+  expect_length(unique(plot$data$bar_label), 2)
+  expect_true(all(grepl("run1|run2", plot$data$bar_label, fixed = FALSE)))
+})
+
+test_that("build_qc_comparison_plot leaves bar_label as the plain recording value when it's already unambiguous (no batch_name collision)", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5, 0.7))
+  plot <- build_qc_comparison_plot(tbl, "valid_raw_data", default_qc_thresholds())
+  expect_equal(sort(plot$data$bar_label), sort(tbl$recording))
 })
 
 test_that("build_qc_comparison_table pivots a long qcsummary table wide, one row per file and one column per selected metric, with correct values", {
