@@ -1623,3 +1623,167 @@ test_that("output$download_flagged_csv's content() does not throw and produces a
     )
   })
 })
+
+# ---------------------------------------------------------------------------
+# P9-07: post-run summary linking to the Analyze app
+# ---------------------------------------------------------------------------
+#
+# Two pieces exercised here: R/runAnalyzeApp.R's new `initialDirectory`
+# argument (validation, and that a valid value is actually plumbed through to
+# shiny::shinyOptions() before shiny::runApp() would be reached), and the
+# Analyze app's own `directory_override` reactive (app.R), seeded from
+# getShinyOption("analyze_initialDirectory", NULL), via shiny::testServer().
+#
+# runAnalyzeApp() itself calls shiny::runApp(), which blocks until the app is
+# closed -- not something a unit test can call for real. testthat::
+# local_mocked_bindings(..., .package = "shiny") stands in for it, the same
+# technique test-eyeQualityBatch.R already uses to mock parallel::parLapply()
+# (see its P7-04 placeholder-summary test) -- confirmed to work for a
+# `pkg::fun()`-style call site, not just an imported/internal one.
+
+test_that("runAnalyzeApp() passes a valid single-string initialDirectory through to shiny::shinyOptions() before shiny::runApp() would be reached", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("shinyFiles")
+  skip_if_not_installed("DT")
+
+  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
+  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL), add = TRUE)
+
+  eyeQuality::runAnalyzeApp(initialDirectory = "/some/study/outputs")
+
+  expect_equal(shiny::getShinyOption("analyze_initialDirectory", NULL), "/some/study/outputs")
+})
+
+test_that("runAnalyzeApp() accepts NULL initialDirectory (the default) and leaves the shinyOption unset", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("shinyFiles")
+  skip_if_not_installed("DT")
+
+  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
+  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL), add = TRUE)
+
+  eyeQuality::runAnalyzeApp()
+
+  expect_null(shiny::getShinyOption("analyze_initialDirectory", NULL))
+})
+
+test_that("runAnalyzeApp() errors clearly on a non-scalar initialDirectory", {
+  expect_error(
+    eyeQuality::runAnalyzeApp(initialDirectory = c("/a", "/b")),
+    "single path string"
+  )
+})
+
+test_that("runAnalyzeApp() errors clearly on an NA initialDirectory", {
+  expect_error(
+    eyeQuality::runAnalyzeApp(initialDirectory = NA_character_),
+    "single path string"
+  )
+})
+
+test_that("runAnalyzeApp() errors clearly on a non-character initialDirectory", {
+  expect_error(
+    eyeQuality::runAnalyzeApp(initialDirectory = 123),
+    "single path string"
+  )
+})
+
+# ---------------------------------------------------------------------------
+# P9-07: Analyze app's directory_override seeded from analyze_initialDirectory
+# ---------------------------------------------------------------------------
+#
+# In real production use, runAnalyzeApp() calls shiny::shinyOptions() BEFORE
+# shiny::runApp(app_dir), and the resulting global option is inherited by
+# every real browser session's own session$options at session-creation time
+# (confirmed directly against shiny's own source: ShinySession$initialize()
+# does `self$options <- getCurrentAppState()$options`, and getShinyOption()'s
+# session branch reads only from session$options). shiny::testServer(),
+# however, bypasses shiny::runApp()/shinyApp() entirely and constructs a bare
+# MockShinySession with no app-level state behind it, so a
+# shiny::shinyOptions() call made from top-level test code before
+# testServer() is never seen by getShinyOption() inside server() -- confirmed
+# directly while writing these tests (session$options came back empty
+# regardless). The correct way to simulate a seeded option in this harness is
+# to construct the MockShinySession by hand, set its `options` field directly
+# (a plain public R6 field), and pass it in via testServer()'s own `session`
+# argument -- exercising the exact same getShinyOption()/session$options code
+# path server() itself uses, just seeded a different way than production
+# code seeds it.
+
+# seeded_session: a MockShinySession pre-populated with
+# analyze_initialDirectory, for handing to shiny::testServer(..., session = ...).
+seeded_session <- function(initial_directory) {
+  sess <- shiny::MockShinySession$new()
+  sess$options <- list(analyze_initialDirectory = initial_directory)
+  sess
+}
+
+test_that("Analyze app pre-populates the directory field from a seeded analyze_initialDirectory shinyOption, without auto-loading, and the seeded value is directly usable once 'load' is clicked", {
+  skip_on_cran()
+
+  seed_dir <- tempfile("p907_seed_")
+  dir.create(seed_dir, recursive = TRUE)
+  on.exit(unlink(seed_dir, recursive = TRUE), add = TRUE)
+  readr::write_tsv(
+    data.frame(qc_metric = c("a", "b"), n = c(1, 2)),
+    file.path(seed_dir, "sub-a_ses-1_desc-p907seed_preproc_qcsummary.tsv")
+  )
+  seed_dir <- normalizePath(seed_dir, winslash = "/", mustWork = TRUE)
+
+  shiny::testServer(analyze_app_dir, {
+    # pre-populated purely from the seeded option, before any picker interaction
+    expect_equal(selected_dir(), seed_dir)
+    expect_equal(session$getOutput("selected_directory"), seed_dir)
+
+    # no auto-load: load_result() is an eventReactive bound to input$load and
+    # has never fired, so evaluating it now raises a silent shiny condition
+    # rather than returning a real (even if empty) result -- if the app ever
+    # started auto-triggering a load off the seeded directory, this would
+    # instead return a populated result here.
+    expect_error(load_result())
+
+    # clicking "Load qcsummary files" now uses the seeded directory directly,
+    # confirming the pre-populated value is a real, usable selection and not
+    # just a display-only placeholder.
+    session$setInputs(load = 1)
+    result <- load_result()
+    expect_equal(result$n_files, 1L)
+  }, session = seeded_session(seed_dir))
+})
+
+test_that("Analyze app: a real directory-picker selection overrides the seeded analyze_initialDirectory fallback, never the reverse", {
+  skip_on_cran()
+
+  seed_dir <- tempfile("p907_seed_override_")
+  dir.create(seed_dir, recursive = TRUE)
+  on.exit(unlink(seed_dir, recursive = TRUE), add = TRUE)
+  seed_dir <- normalizePath(seed_dir, winslash = "/", mustWork = TRUE)
+
+  real_dir <- tempfile("p907_real_picked_")
+  dir.create(real_dir, recursive = TRUE)
+  on.exit(unlink(real_dir, recursive = TRUE), add = TRUE)
+  real_dir <- normalizePath(real_dir, winslash = "/", mustWork = TRUE)
+  real_segments <- rel_home_segments_p1007(real_dir)
+
+  shiny::testServer(analyze_app_dir, {
+    expect_equal(selected_dir(), seed_dir)
+
+    session$setInputs(directory = list(root = "Home", path = real_segments))
+    expect_equal(normalizePath(selected_dir(), winslash = "/"), real_dir)
+    expect_false(identical(normalizePath(selected_dir(), winslash = "/"), seed_dir))
+  }, session = seeded_session(seed_dir))
+})
+
+test_that("Analyze app with no analyze_initialDirectory shinyOption set: selected_dir() is empty, matching pre-P9-07 behavior", {
+  skip_on_cran()
+
+  # A plain, unseeded MockShinySession (testServer()'s own default) -- no
+  # analyze_initialDirectory anywhere in its options, the same as launching
+  # runAnalyzeApp() with no initialDirectory argument at all.
+  shiny::testServer(analyze_app_dir, {
+    expect_length(selected_dir(), 0)
+    expect_equal(session$getOutput("selected_directory"), "No directory selected yet.")
+  })
+})

@@ -486,3 +486,145 @@ test_that("Setup app launch actually threads the current layout/pathPattern into
   expect_length(qc_files, 2)
   expect_true(all(grepl("sub-1_", basename(qc_files))))
 })
+
+# ---------------------------------------------------------------------------
+# P9-07: post-run summary linking to the Analyze app
+# ---------------------------------------------------------------------------
+#
+# resolve_analyze_directory()/build_analyze_launch_command() are Shiny-free
+# helpers (helpers.R) tested directly first, then the Setup app's own
+# output$post_run_link panel (app.R) via shiny::testServer(). progress_state
+# and run_info are reactiveValues objects defined inside server() -- directly
+# readable/writable from within a testServer() expr block, the same way
+# config_io_status()/loaded_config_extra() are read directly elsewhere in this
+# file -- so these tests drive the panel straight to each status it cares
+# about rather than needing a real background batch run just to reach "done".
+
+test_that("resolve_analyze_directory returns outputDir when it is set", {
+  expect_equal(resolve_analyze_directory("/out/dir", "/data/bids"), "/out/dir")
+})
+
+test_that("resolve_analyze_directory falls back to directoryBIDS when outputDir is NULL, matching eyeQualityBatch()'s own outputDir = NULL nested-derivatives convention", {
+  # eyeQualityBatch()'s own docs (R/eyeQualityBatch.R): outputDir = NULL (the
+  # default) writes each file's output into that file's own nested
+  # derivatives/eyeQuality-v1/ subfolder underneath directoryBIDS, rather than
+  # one central location -- so directoryBIDS itself (not some other path) is
+  # the only correct fallback for "where did this run's outputs land."
+  expect_equal(resolve_analyze_directory(NULL, "/data/bids"), "/data/bids")
+})
+
+test_that("resolve_analyze_directory falls back to directoryBIDS when outputDir is a blank or whitespace-only string", {
+  # blank_to_null() treats an empty/whitespace-only textInput value the same
+  # as NULL -- this is the actual shape input$outputDir takes when a user
+  # leaves the Setup app's "Output directory" field untouched.
+  expect_equal(resolve_analyze_directory("", "/data/bids"), "/data/bids")
+  expect_equal(resolve_analyze_directory("   ", "/data/bids"), "/data/bids")
+})
+
+test_that("build_analyze_launch_command produces a syntactically valid, parseable eyeQuality::runAnalyzeApp() call pointed at the given directory", {
+  cmd <- build_analyze_launch_command("/data/study/outputs")
+
+  parsed <- str2lang(cmd)
+  expect_equal(parsed[[1]], quote(eyeQuality::runAnalyzeApp))
+  # eval()-ing just the unevaluated initialDirectory argument (a plain string
+  # constant) is safe here -- it never calls runAnalyzeApp() itself.
+  expect_equal(eval(parsed$initialDirectory), "/data/study/outputs")
+})
+
+test_that("build_analyze_launch_command escapes a Windows-style backslash path so the generated call round-trips through R's own parser back to the exact original path", {
+  # The real regression this guards against: a raw (unescaped) backslash path
+  # pasted into build_analyze_launch_command()'s sprintf() template would
+  # either fail to parse at all (a lone backslash before certain characters)
+  # or parse into a DIFFERENT string than the original directory (R's parser
+  # treats "\d", "\U" etc. as escape sequences) -- silently handing the user a
+  # command that opens the wrong directory, or none at all. Parsing the
+  # generated command string with R's own parser and evaluating the resulting
+  # string literal is what actually proves the escaping is correct, not just
+  # that backslashes were doubled somewhere in the printed text.
+  windows_path <- "C:\\Users\\test\\study data"
+  cmd <- build_analyze_launch_command(windows_path)
+
+  parsed <- str2lang(cmd)
+  expect_equal(eval(parsed$initialDirectory), windows_path)
+})
+
+test_that("build_analyze_launch_command escapes an embedded double quote so the generated call still parses as valid R code", {
+  tricky_path <- 'C:\\data\\"quoted"\\dir'
+  cmd <- build_analyze_launch_command(tricky_path)
+
+  parsed <- str2lang(cmd)
+  expect_equal(eval(parsed$initialDirectory), tricky_path)
+})
+
+test_that("Setup app's post_run_link panel is hidden before any run, while a run is in progress, and after a coarse run-level failure", {
+  skip_on_cran()
+
+  shiny::testServer(setup_app_dir, {
+    # "not started" is progress_state's own initial value -- no mutation needed
+    expect_null(session$getOutput("post_run_link"))
+
+    # run_info$directory/batchName must be set to something real before
+    # flipping progress_state$status to "running": app.R's own live-polling
+    # observe() (P9-05/06) is unconditionally armed and fires
+    # poll_batch_progress(run_info$directory, run_info$batchName, ...) the
+    # moment status == "running", regardless of which output this test cares
+    # about. With both left NULL, poll_batch_progress()'s
+    # file.path(NULL, ...) collapses to character(0), and
+    # if (file.exists(character(0))) errors with "argument is of length
+    # zero" inside that observer -- an uncaught reactive error that tears
+    # down the whole mock session, breaking every assertion after it (not a
+    # hypothetical: this is exactly what happened while writing this test).
+    run_info$directory <- tempdir()
+    run_info$batchName <- "p907_running_dummy"
+
+    # Direct reactiveValues mutation (progress_state$status <- ...), unlike
+    # session$setInputs(), does not itself trigger a reactive flush in this
+    # harness -- session$getOutput() only re-flushes automatically when an
+    # output's cached promise is still NULL (i.e. never evaluated), so an
+    # explicit session$flushReact() is needed here for each mutation to
+    # actually be picked up before the next getOutput() call, rather than
+    # silently re-returning the previous (also-NULL) cached value below.
+    progress_state$status <- "running"
+    session$flushReact()
+    expect_null(session$getOutput("post_run_link"))
+
+    progress_state$status <- "failed"
+    progress_state$message <- "a coarse validation error"
+    session$flushReact()
+    expect_null(session$getOutput("post_run_link"))
+  })
+})
+
+test_that("Setup app's post_run_link panel shows the outputDir-resolved directory and a matching launch command once a run reaches status == 'done'", {
+  skip_on_cran()
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(outputDir = "/central/outputs")
+    run_info$directory <- "/data/study_a"
+    progress_state$status <- "done"
+    session$flushReact()
+
+    html <- paste(as.character(session$getOutput("post_run_link")), collapse = "\n")
+    expect_true(grepl("/central/outputs", html, fixed = TRUE))
+    expect_true(grepl('eyeQuality::runAnalyzeApp(initialDirectory = "/central/outputs")', html, fixed = TRUE))
+    # outputDir was set, so directoryBIDS (run_info$directory) must not be
+    # what's shown/linked -- pins down which of the two resolve_analyze_directory()
+    # actually chose, not just that something plausible-looking was rendered.
+    expect_false(grepl("/data/study_a", html, fixed = TRUE))
+  })
+})
+
+test_that("Setup app's post_run_link panel falls back to directoryBIDS when outputDir was left blank for the run", {
+  skip_on_cran()
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(outputDir = "")
+    run_info$directory <- "/data/study_b"
+    progress_state$status <- "done"
+    session$flushReact()
+
+    html <- paste(as.character(session$getOutput("post_run_link")), collapse = "\n")
+    expect_true(grepl("/data/study_b", html, fixed = TRUE))
+    expect_true(grepl('eyeQuality::runAnalyzeApp(initialDirectory = "/data/study_b")', html, fixed = TRUE))
+  })
+})
