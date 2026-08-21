@@ -16,8 +16,12 @@
 getFileRunLogName <- function(filename, batchName = NULL) {
   # sink(runlog, append = FALSE, type = "output")
   # base <- basename(path_ext_remove(x))
+  # .safe_basename() (R/windowsLongPath.R): base R's own basename() has its
+  # own ~300-character path limit on Windows, confirmed independently of
+  # windows_long_path()'s own MAX_PATH workaround -- a real failure point
+  # for a long filename, not the "CHECK" this line used to be marked with.
   base <-
-    basename(path_ext_remove(filename)) # CHECK: does this work?
+    .safe_basename(path_ext_remove(filename))
   directory <- path_dir(filename)
   log <-
     paste0(

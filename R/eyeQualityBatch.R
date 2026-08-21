@@ -460,7 +460,12 @@ get_qcsummary_output_path <- function(inputFile, batchName = NULL, outputDir = N
     "preproc_qcsummary"
   )
 
-  filename <- basename(fs::path_ext_remove(inputFile))
+  # .safe_basename() (see R/windowsLongPath.R): base R's own basename() has
+  # its own ~300-character path limit on Windows, distinct from (and not
+  # fixed by) windows_long_path()/windows_safe_read_*() -- a real,
+  # confirmed failure point for a long inputFile path, independent of
+  # whichever adapter/software produced it.
+  filename <- .safe_basename(fs::path_ext_remove(inputFile))
   directory <- fs::path_dir(inputFile)
   newdirectory <- if (is.null(outputDir)) {
     fs::path(directory, "derivatives", "eyeQuality-v1")

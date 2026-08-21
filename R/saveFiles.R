@@ -69,7 +69,11 @@ saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = 
 
 create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL) {
   # Remove file extension (assuming the last occurrence of "." denotes the extension)
-  filename <- basename(fs::path_ext_remove(inputfile))
+  # .safe_basename() (see R/windowsLongPath.R): base R's own basename() has
+  # its own ~300-character path limit on Windows, distinct from (and not
+  # fixed by) windows_long_path()/windows_safe_read_*() -- a real, confirmed
+  # failure point for a long inputfile path.
+  filename <- .safe_basename(fs::path_ext_remove(inputfile))
   directory <- fs::path_dir(inputfile)
   newdirectory <- if (is.null(outputDir)) {
     fs::path(directory, "derivatives", "eyeQuality-v1")

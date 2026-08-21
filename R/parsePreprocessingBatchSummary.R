@@ -15,8 +15,6 @@
 #'   tibble with those same two columns if nothing failed.
 #' @export
 #'
-#' @importFrom readr read_tsv
-#' @importFrom readr read_lines
 #' @importFrom stringr str_glue
 #' @importFrom stringr str_extract
 #' @importFrom dplyr mutate
@@ -27,7 +25,15 @@
 parsePreprocessingBatchSummary <-
   function(batch_summary_file, info_to_extract = "summary") {
     if (info_to_extract == "summary") {
-      read_tsv(
+      # windows_safe_read_tsv(): see R/windowsLongPath.R -- readr's own
+      # pre-open existence check can report a real, over-~260-char path
+      # (deeply nested Box/OneDrive study trees plus this package's own
+      # nested derivatives/eyeQuality-v1/ output convention get there
+      # easily) as "does not exist" even though file.exists()/list.files()
+      # found it, and a bare windows_long_path()-prefixed string does not
+      # fix this on its own (see that function's roxygen docs) -- hence the
+      # dedicated wrapper rather than just wrapping the path here.
+      windows_safe_read_tsv(
         str_glue(batch_summary_file),
         col_names = FALSE,
         show_col_types = FALSE
@@ -65,7 +71,9 @@ parsePreprocessingBatchSummary <-
         ) %>%
         return()
     } else if (info_to_extract %in% c("failedfiles", "successfulfiles", "skippedfiles")) {
-      lines <- read_lines(str_glue(batch_summary_file))
+      # windows_safe_read_lines(): same long-path exposure as the
+      # windows_safe_read_tsv() call above -- see R/windowsLongPath.R.
+      lines <- windows_safe_read_lines(str_glue(batch_summary_file))
 
       header_pattern <- if (info_to_extract == "successfulfiles") {
         "^------ Successfully processed files \\(n = (\\d+)\\):"
