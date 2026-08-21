@@ -6,6 +6,426 @@
 # session, for testing or scripting -- same pattern as the Setup app's
 # helpers.R/build_dry_run_preview().
 
+# ---------------------------------------------------------------------------
+# Windows MAX_PATH workaround for readr file reads
+# ---------------------------------------------------------------------------
+#
+# windows_long_path: opt a path into Windows' extended-length path API (the
+# "\\?\" prefix) so a downstream file read doesn't hit the classic 260-
+# character MAX_PATH limit.
+#
+# NOTE: this function on its own is NOT the actual fix used at any read call
+# site in this file -- see windows_safe_read_tsv() below (which calls this
+# function internally) for why a "\\?\"-prefixed path can't just be handed
+# to readr::read_tsv() directly, and for the actual, verified call every
+# read call site in this file uses instead.
+#
+# Found in real field use, not speculatively: this app's own recursive
+# directory search (discover_qcsummary_files()) combined with this package's
+# nested "derivatives/eyeQuality-v1/" output convention (get_qcsummary_output_
+# path(), R/eyeQualityBatch.R) and long BIDS-style filenames routinely produce
+# full paths well past 260 characters once a study's raw data already sits
+# several directories deep (e.g. a Box-synced study tree) -- one real batch
+# output directory produced 291 files that failed to load this way. On
+# Windows, readr's underlying reader (via vroom/fs) treats the file as not
+# existing at all once the full path exceeds MAX_PATH, even though the file
+# is completely real. file.exists()/list.files() frequently still find/list
+# it in this situation (verified: list.files(recursive = TRUE) found a real
+# long-path fixture file, with a "over-long path" warning, when readr could
+# not), which is exactly why a file can show up as "matched" by
+# discover_qcsummary_files() and then fail to actually load: the mismatch
+# between what different path-handling code recognizes is the whole bug,
+# not a sign the file is actually missing.
+#
+# The "\\?\" prefix opts a path into the Win32 API variant with no such
+# limit, but only under strict conditions that make "just prepend the
+# string" wrong on its own:
+#   - it must be absolute and backslash-separated -- "\\?\" paths are passed
+#     through with NO further parsing by the OS (no "/", no "."/".."
+#     resolution), so the path handed in must already be fully resolved
+#     before the prefix is applied, not resolved by the OS afterward. That's
+#     why this function always routes through normalizePath() first, rather
+#     than only doing so once some length threshold is crossed -- a
+#     relative path that LOOKS short can still resolve to something over
+#     260 characters once it's made absolute, so guessing a threshold from
+#     the input string alone would just miss cases.
+#   - a UNC path ("\\server\share\...") needs the distinct "\\?\UNC\
+#     server\share\..." form -- a bare "\\?\" glued onto a UNC path's
+#     leading "\\" is not a valid extended-length path.
+#   - applying the prefix twice (e.g. if some caller already ran a path
+#     through this function) must be a no-op, not a broken double-prefixed
+#     string.
+# It's also a deliberate no-op on any non-Windows platform: MAX_PATH and
+# "\\?\" are both Windows-only concepts, and prepending this prefix on
+# Linux/macOS would just corrupt an otherwise-valid path.
+#
+# normalizePath(..., mustWork = FALSE) is used rather than mustWork = TRUE:
+# some call sites in this file (e.g. resolve_preproc_data_path()'s sibling
+# file, which may not exist) legitimately need to normalize a path that
+# might not exist on disk without erroring, and every caller here already
+# has its own file.exists() check (or readr's own error handling) downstream
+# for the "genuinely missing" case -- this function's only job is path
+# string normalization, not existence checking.
+#
+# IMPORTANT, and NOT just a theoretical concern -- confirmed directly against
+# a real >260-character nested path on the project's authoritative Windows R
+# environment: normalizePath() itself has its OWN silent failure mode past
+# MAX_PATH, distinct from (but easily confused with) the bug this whole
+# function exists to fix. When the path is long AND its tail doesn't yet
+# exist on disk (the common case here -- a file this app is *about* to
+# construct/check, not one already sitting on disk), normalizePath(mustWork
+# = FALSE) can come back completely unresolved: original forward slashes
+# still present, no absolute-ification performed, as if it had simply
+# returned its input unchanged rather than erroring or truncating (R on
+# Windows appears to size normalizePath()'s underlying buffer to the classic
+# MAX_PATH, and mustWork = FALSE suppresses the resulting failure into a
+# silent passthrough instead of a warning/error). A shorter reproduction
+# with the same nonexistent-tail shape but comfortably under 260 characters
+# resolves correctly, confirming length (combined with nonexistence) is
+# what triggers it, not something else about the path's shape.
+#
+# That means this function can NOT simply trust normalizePath()'s output
+# once a path is long -- exactly the paths it exists to handle. Every path
+# below is therefore ALSO run through this function's own manual
+# resolution (force_backslash / is_absolute / collapse_dot_segments) after
+# normalizePath(), unconditionally rather than only as a length-triggered
+# fallback -- harmless (a no-op) on an already-fully-resolved absolute
+# backslash path with no "."/".." segments (the case where normalizePath()
+# succeeded), and load-bearing on the case where it silently didn't.
+#
+# path: a single character path (any length; short paths pass through
+#   normalizePath()+prefixing harmlessly, so this is safe to apply
+#   unconditionally rather than only above some length threshold).
+#
+# Returns a single character string: `path` unchanged on non-Windows
+# platforms or for NULL/NA/empty input, otherwise the normalized,
+# extended-length-prefixed form.
+windows_long_path <- function(path) {
+  if (.Platform$OS.type != "windows") {
+    return(path)
+  }
+  if (is.null(path) || length(path) != 1 || is.na(path) || !nzchar(path)) {
+    return(path)
+  }
+  if (startsWith(path, "\\\\?\\")) {
+    return(path)
+  }
+
+  resolved <- tryCatch(
+    normalizePath(path, winslash = "\\", mustWork = FALSE),
+    error = function(e) path
+  )
+
+  # Manual second pass -- see the header comment above on why this can't be
+  # skipped just because normalizePath() already ran.
+  resolved <- .windows_force_backslash(resolved)
+  if (!.windows_is_absolute_path(resolved)) {
+    cwd <- sub("\\\\+$", "", .windows_force_backslash(getwd()))
+    resolved <- paste0(cwd, "\\", resolved)
+  }
+  resolved <- .windows_collapse_dot_segments(resolved)
+
+  if (startsWith(resolved, "\\\\?\\")) {
+    return(resolved)
+  }
+
+  if (startsWith(resolved, "\\\\")) {
+    # UNC form: "\\server\share\..." -> "\\?\UNC\server\share\...". substring()
+    # drops the leading pair of backslashes already present in `resolved`
+    # (kept as literal "\\\\" in the R source below, i.e. two characters),
+    # since the "\\?\UNC\" replacement below supplies its own.
+    paste0("\\\\?\\UNC\\", substring(resolved, 3))
+  } else {
+    paste0("\\\\?\\", resolved)
+  }
+}
+
+# .windows_force_backslash: replace every "/" with "\\" -- R's own path
+# helpers (file.path(), and by extension list.files(full.names = TRUE),
+# which is how nearly every path windows_long_path() ever sees actually
+# arrives) default to "/" as their separator even on Windows, and
+# normalizePath()'s winslash = "\\" argument is exactly the part of
+# normalizePath() confirmed above to silently no-op on a long,
+# mostly-nonexistent path -- so this has to be redone by hand rather than
+# assumed already done.
+.windows_force_backslash <- function(p) {
+  gsub("/", "\\\\", p, fixed = TRUE)
+}
+
+# .windows_is_absolute_path: TRUE for a drive-letter ("C:\...") or UNC
+# ("\\server\...") absolute Windows path. Deliberately checked AFTER
+# .windows_force_backslash() has already run on the candidate -- this
+# regex only recognizes the backslash form.
+.windows_is_absolute_path <- function(p) {
+  grepl("^[A-Za-z]:\\\\", p) || grepl("^\\\\\\\\", p)
+}
+
+# .windows_collapse_dot_segments: manually collapse "."/".." path segments,
+# preserving the drive ("C:\") or UNC ("\\server\share\") root untouched.
+# Needed because a "\\?\"-prefixed path is passed to Windows with NO further
+# parsing -- unlike a normal path, the OS will NOT resolve "."/".." itself,
+# so any such segments have to be gone before this function's caller adds
+# that prefix. Also compensates for the case (see windows_long_path()'s own
+# header comment) where normalizePath() silently failed to do this itself.
+#
+# p: an already-absolute, already-backslash-separated path (i.e. already run
+#   through .windows_force_backslash() and confirmed absolute by
+#   .windows_is_absolute_path()).
+#
+# Returns a single character string with the same root, but with every
+# "."/".." segment collapsed out of the remainder.
+.windows_collapse_dot_segments <- function(p) {
+  if (grepl("^[A-Za-z]:\\\\", p)) {
+    root <- substr(p, 1, 3)
+    rest <- substr(p, 4, nchar(p))
+  } else if (grepl("^\\\\\\\\", p)) {
+    m <- regmatches(p, regexec("^(\\\\\\\\[^\\\\]+\\\\[^\\\\]+\\\\)(.*)$", p))[[1]]
+    if (length(m) != 3) {
+      # Doesn't match the expected "\\server\share\..." shape (e.g. just
+      # "\\server\share" with nothing following) -- nothing to collapse.
+      return(p)
+    }
+    root <- m[2]
+    rest <- m[3]
+  } else {
+    # Not actually absolute (shouldn't happen given this is only ever
+    # called after .windows_is_absolute_path() confirms it is) -- returned
+    # unchanged rather than guessing at a root to preserve.
+    return(p)
+  }
+
+  segments <- strsplit(rest, "\\\\")[[1]]
+  segments <- segments[nzchar(segments)]
+  stack <- character(0)
+  for (seg in segments) {
+    if (identical(seg, ".")) {
+      next
+    } else if (identical(seg, "..")) {
+      if (length(stack) > 0) {
+        stack <- stack[-length(stack)]
+      }
+    } else {
+      stack <- c(stack, seg)
+    }
+  }
+  paste0(root, paste(stack, collapse = "\\"))
+}
+
+# windows_safe_read_tsv: the actual call every long-path-vulnerable
+# readr::read_tsv() call site in this file should use, in place of calling
+# readr::read_tsv(path, ...) directly.
+#
+# IMPORTANT -- this is NOT simply "readr::read_tsv(windows_long_path(path),
+# ...)", and confirming that the naive version doesn't actually work was the
+# single most important thing this fix's real-long-path verification (see
+# this fix's accompanying test) caught: readr (backed by vroom, which in
+# turn leans on the `fs` package for its own path handling/existence checks)
+# does NOT reliably honor a "\\?\"-prefixed extended-length path passed to
+# it as a plain string. Confirmed directly: `fs::file_exists()` on a real,
+# genuinely-existing, `windows_long_path()`-prefixed long path returns
+# FALSE, and `fs::path_real()` on that same path errors with ENOENT --
+# `fs` appears to internally rewrite the path's backslashes to forward
+# slashes for its own cross-platform representation (fs::path_real() on
+# such an input visibly comes back as "//?/C:/Users/...", not
+# "\\?\C:\Users\..."), which silently destroys the "\\?\" prefix's actual
+# meaning to Windows (the prefix is only recognized in its literal
+# backslash form) before the path ever reaches an actual file-open call.
+# The result: readr::read_tsv(windows_long_path(path), ...) still fails
+# with "does not exist" on a real long path, even though the file
+# demonstrably exists (confirmed via file.size() on that same string
+# returning the correct, nonzero size) -- readr's own pre-open existence
+# check is what's failing, not the eventual read itself.
+#
+# What DOES work, confirmed directly on the same real long-path fixture:
+# base R's own file() connections correctly honor a "\\?\"-prefixed path
+# (readLines()/read.delim() succeed on it directly), and readr::read_tsv()
+# accepts an already-open connection in place of a path string. So the fix
+# is to have BASE R (not readr/vroom/fs) do the actual file opening -- this
+# function opens a binary connection itself via windows_long_path(), and
+# hands readr::read_tsv() that connection rather than the path string,
+# sidestepping fs's mangling entirely since fs's path logic is never
+# consulted for a connection object.
+#
+# A plain, unprefixed readr::read_tsv(path, ...) is used on non-Windows
+# platforms (windows_long_path() is a no-op there, so opening a redundant
+# connection ourselves would add no value, just another thing that could
+# behave slightly differently from calling readr directly).
+#
+# The connection is explicitly closed on exit (readr::read_tsv() does NOT
+# close a connection it did not open itself -- confirmed directly: the
+# connection remains isOpen() == TRUE after a successful read) -- via
+# on.exit() rather than a plain trailing close(), so it's still released on
+# an error partway through the read (avoiding a leaked, potentially
+# locking, open file handle).
+#
+# Opening the connection itself is wrapped so that a failure to open (e.g.
+# a missing file) raises a clear, specific error -- file()'s own default
+# failure behavior is to first emit a WARNING with the actual OS reason
+# (e.g. "No such file or directory") and only then raise a generic "cannot
+# open the connection" error whose message alone loses that detail; the
+# warning handler below intercepts at the point the specific reason is
+# still available and re-raises it as the error instead.
+#
+# path: a single file path (any length).
+# ...: forwarded to readr::read_tsv() (e.g. show_col_types, progress).
+#
+# Returns whatever readr::read_tsv() returns (or raises whatever error it,
+# or the connection-open step, raises) -- a drop-in replacement for calling
+# readr::read_tsv(path, ...) directly at every call site in this file.
+windows_safe_read_tsv <- function(path, ...) {
+  if (.Platform$OS.type != "windows") {
+    return(readr::read_tsv(path, ...))
+  }
+
+  con <- tryCatch(
+    file(windows_long_path(path), open = "rb"),
+    warning = function(w) stop(conditionMessage(w), call. = FALSE)
+  )
+  on.exit(try(close(con), silent = TRUE), add = TRUE)
+
+  readr::read_tsv(con, ...)
+}
+
+# windows_safe_write_tsv: the write-side counterpart to
+# windows_safe_read_tsv() -- used by save_notes_table() below, the one write
+# call site in this file that writes to a filesystem-discovered directory
+# path (as opposed to a path this file itself just constructed and knows to
+# be short).
+#
+# This was explicitly NOT assumed to need the same fix as the read side --
+# confirmed directly, rather than guessed, that it does. Tested
+# readr::write_tsv() against a real >260-character destination path (a
+# notes.tsv sitting at the root of a deeply-nested long output directory,
+# the exact scenario save_notes_table() runs in for real study data): it
+# fails with the identical "path too long" error `fs` raises on the read
+# side (see windows_safe_read_tsv()'s header comment on `fs`'s role here) --
+# the write path goes through the same `fs`-backed path handling as the read
+# path, so it was never actually a question of IF this needed fixing, only
+# of confirming that rather than assuming it from the read-side finding
+# alone.
+#
+# path: a single file path (any length).
+# ...: forwarded to readr::write_tsv() (e.g. any future formatting args).
+#
+# Returns whatever readr::write_tsv() returns (invisibly, matching
+# readr::write_tsv()'s own return contract).
+windows_safe_write_tsv <- function(df, path, ...) {
+  if (.Platform$OS.type != "windows") {
+    return(readr::write_tsv(df, path, ...))
+  }
+
+  con <- tryCatch(
+    file(windows_long_path(path), open = "wb"),
+    warning = function(w) stop(conditionMessage(w), call. = FALSE)
+  )
+  on.exit(try(close(con), silent = TRUE), add = TRUE)
+
+  readr::write_tsv(df, con, ...)
+}
+
+# windows_safe_file_exists: a file.exists() replacement for the gates that
+# guard several of this file's windows_safe_read_tsv() call sites (e.g.
+# load_plot_data()'s "does the sibling preproc.tsv exist" check below).
+#
+# NOT redundant with windows_safe_read_tsv() -- confirmed directly, on the
+# same real long-path fixture used to verify that function, that base R's
+# own file.exists() has the identical false-negative failure mode on a
+# long path that readr/vroom/fs has: file.exists() returned FALSE for a
+# file that demonstrably existed (confirmed via file.size() on the exact
+# same string returning the correct, nonzero size, and via
+# list.files(recursive = TRUE) listing it). This was checked directly
+# rather than assumed reliable -- the header comment on windows_long_path()
+# above notes that file.exists()/list.files() "frequently" still find a
+# long-path file where readr can't, which is true of list.files() in every
+# case tested here, but file.exists() itself turned out to be just as
+# unreliable as readr for a long path once actually tested against one, on
+# this project's authoritative Windows R environment. Left unfixed, every
+# gate below would keep reporting a real file as "missing" before
+# windows_safe_read_tsv() ever got a chance to run -- i.e. those three read
+# call sites would still appear broken to a user even after
+# windows_safe_read_tsv() itself was fixed, since the gate in front of each
+# would still say "not found" first.
+#
+# Reuses the exact same mechanism windows_safe_read_tsv() itself relies on
+# (a windows_long_path()-prefixed base R connection, which IS confirmed
+# reliable for long paths) rather than inventing a second, independent
+# long-path workaround: opening the file for read and immediately closing
+# it is treated as the existence check itself, since that's the actual
+# operation being gated on succeeding a moment later anyway.
+#
+# path: a single file path (any length).
+#
+# Returns TRUE/FALSE. On non-Windows platforms, a plain file.exists() call
+# (no known equivalent issue on those platforms, and no reason to pay for
+# an extra open/close round trip there).
+windows_safe_file_exists <- function(path) {
+  if (.Platform$OS.type != "windows") {
+    return(file.exists(path))
+  }
+
+  con <- tryCatch(
+    file(windows_long_path(path), open = "rb"),
+    error = function(e) NULL,
+    warning = function(w) NULL
+  )
+  if (is.null(con)) {
+    return(FALSE)
+  }
+  close(con)
+  TRUE
+}
+
+# .safe_basename: a basename()-equivalent implemented as pure string
+# manipulation, with NO underlying OS/file-API call -- used everywhere in
+# this file that would otherwise call base R's own basename() on a
+# filesystem-discovered path (derive_recording_label(), derive_batch_name(),
+# and the two load_plot_data()/load_gaze_trajectory_data() error messages
+# below), for exactly the same reason windows_safe_read_tsv()/
+# windows_safe_file_exists() exist: a real, distinct, empirically-confirmed
+# long-path failure mode, this time inside base R itself rather than
+# readr/vroom/fs.
+#
+# Confirmed directly (not assumed) on the project's authoritative Windows R
+# environment: base R's own basename() (and dirname()) raise a plain
+# "path too long" error for a path around 300 characters -- well past the
+# lengths this app's own real-world fixtures produce (discover_qcsummary_
+# files() found a real, over-260-character file via list.files() just fine;
+# calling basename() on that EXACT same string, unchanged, is what then
+# errors). This appears to be R's Windows build's own internal fixed-size
+# path buffer (independent of, and with a tighter effective limit than,
+# either the classic Win32 MAX_PATH story this whole fix is about, or the
+# "\\?\" extended-length escape windows_long_path() implements) -- i.e. a
+# THIRD, distinct long-path failure point in this file's dependency chain,
+# not a restatement of the readr/vroom/fs issue windows_safe_read_tsv()
+# already fixes. Left unfixed, read_one_qcsummary() (which calls
+# derive_recording_label()/derive_batch_name(), both of which call
+# basename()) would still fail on a real long qcsummary.tsv path even after
+# windows_safe_read_tsv() itself succeeds at the actual file read -- this is
+# NOT a redundant fix, it was a genuinely separate crash found empirically
+# while verifying read_one_qcsummary() end-to-end against a real long path,
+# not by reasoning about readr/vroom in isolation.
+#
+# Verified to match base R's own basename() output exactly across the
+# ordinary cases this file's paths can take (trailing slash, root-only,
+# mixed "/"/"\\" separators, a bare filename with no directory component,
+# spaces in the filename) -- this is meant as a drop-in, not an
+# approximation.
+#
+# path: a single character path (or NA/"" -- basename()'s own edge-case
+#   behavior for those is preserved: NA in, NA out; "" in, "" out).
+#
+# Returns a single character string: the final path component, with any
+# trailing "/"/"\\" stripped first (matching basename()'s own behavior for
+# a path ending in a directory separator).
+.safe_basename <- function(path) {
+  if (is.na(path)) {
+    return(NA_character_)
+  }
+  path <- sub("[/\\\\]+$", "", path)
+  m <- regmatches(path, regexpr("[^/\\\\]*$", path))
+  if (length(m) == 0) "" else m
+}
+
 # qcsummary_filename_pattern: the shared naming convention every qcsummary
 # output is written under -- see get_qcsummary_output_path()/saveFiles() in
 # R/eyeQualityBatch.R and R/saveFiles.R, which construct
@@ -74,7 +494,7 @@ discover_qcsummary_files <- function(directory, recursive = TRUE) {
 #
 # Returns a single character string.
 derive_recording_label <- function(qcsummary_path) {
-  sub(qcsummary_filename_pattern, "", basename(qcsummary_path))
+  sub(qcsummary_filename_pattern, "", .safe_basename(qcsummary_path))
 }
 
 # derive_batch_name: pull the batchName back out of a qcsummary output's
@@ -102,8 +522,8 @@ derive_recording_label <- function(qcsummary_path) {
 # opposite (incorrect) assumption.
 derive_batch_name <- function(qcsummary_path) {
   m <- regmatches(
-    basename(qcsummary_path),
-    regexec("_desc-(.*)_preproc_qcsummary\\.tsv$", basename(qcsummary_path))
+    .safe_basename(qcsummary_path),
+    regexec("_desc-(.*)_preproc_qcsummary\\.tsv$", .safe_basename(qcsummary_path))
   )[[1]]
   if (length(m) < 2 || !nzchar(m[2])) {
     return(NA_character_)
@@ -170,7 +590,7 @@ build_zero_match_diagnostic <- function(directory, recursive) {
 # Returns a data.frame, or raises an error (via readr's own parse failure)
 # if the file isn't parseable as a delimited qcsummary.tsv.
 read_one_qcsummary <- function(path) {
-  qc <- readr::read_tsv(path, show_col_types = FALSE, progress = FALSE)
+  qc <- windows_safe_read_tsv(path, show_col_types = FALSE, progress = FALSE)
   qc$recording <- derive_recording_label(path)
   qc$batch_name <- derive_batch_name(path)
   qc$source_file <- path
@@ -469,7 +889,7 @@ resolve_preproc_data_path <- function(qcsummary_path) {
 load_plot_data <- function(qcsummary_path) {
   preproc_path <- resolve_preproc_data_path(qcsummary_path)
 
-  if (!file.exists(preproc_path)) {
+  if (!windows_safe_file_exists(preproc_path)) {
     return(list(
       ok = FALSE,
       preproc_path = preproc_path,
@@ -480,14 +900,14 @@ load_plot_data <- function(qcsummary_path) {
           "in the same derivatives/eyeQuality-v1/ folder -- it may have been moved, ",
           "renamed, or deleted since the batch run completed."
         ),
-        preproc_path, basename(qcsummary_path)
+        preproc_path, .safe_basename(qcsummary_path)
       )
     ))
   }
 
   tryCatch(
     {
-      data <- readr::read_tsv(preproc_path, show_col_types = FALSE, progress = FALSE)
+      data <- windows_safe_read_tsv(preproc_path, show_col_types = FALSE, progress = FALSE)
       plots <- generateEyeTrackingPlots(data)
       list(ok = TRUE, preproc_path = preproc_path, data = data, plots = plots)
     },
@@ -1086,7 +1506,7 @@ load_gaze_trajectory_data <- function(qcsummary_path) {
   preproc_path <- resolve_preproc_data_path(qcsummary_path)
   events_path <- resolve_events_data_path(qcsummary_path)
 
-  if (!file.exists(preproc_path)) {
+  if (!windows_safe_file_exists(preproc_path)) {
     return(list(
       ok = FALSE,
       preproc_path = preproc_path,
@@ -1098,14 +1518,14 @@ load_gaze_trajectory_data <- function(qcsummary_path) {
           "same derivatives/eyeQuality-v1/ folder -- it may have been moved, renamed, or ",
           "deleted since the batch run completed."
         ),
-        preproc_path, basename(qcsummary_path)
+        preproc_path, .safe_basename(qcsummary_path)
       )
     ))
   }
 
   loaded <- tryCatch(
     {
-      data <- readr::read_tsv(preproc_path, show_col_types = FALSE, progress = FALSE)
+      data <- windows_safe_read_tsv(preproc_path, show_col_types = FALSE, progress = FALSE)
       # gazeX.preprocessed_px/gazeY.preprocessed_px/recordingTimestamp_ms are
       # the three columns this tab's trajectory plot and AOI test actually
       # read (build_gaze_trajectory_plot()/compute_aoi_percent() below) --
@@ -1138,10 +1558,10 @@ load_gaze_trajectory_data <- function(qcsummary_path) {
   # graceful degradation.
   events <- tryCatch(
     {
-      if (!file.exists(events_path)) {
+      if (!windows_safe_file_exists(events_path)) {
         NULL
       } else {
-        ev <- readr::read_tsv(events_path, show_col_types = FALSE, progress = FALSE)
+        ev <- windows_safe_read_tsv(events_path, show_col_types = FALSE, progress = FALSE)
         if (nrow(ev) == 0 || !all(c("event", "recordingTimestamp_ms") %in% names(ev))) {
           NULL
         } else {
@@ -1614,12 +2034,12 @@ empty_notes_table <- function() {
 # the actual QC data this app exists to review.
 load_notes_table <- function(directory) {
   path <- resolve_notes_path(directory)
-  if (!file.exists(path)) {
+  if (!windows_safe_file_exists(path)) {
     return(empty_notes_table())
   }
   tryCatch(
     {
-      tbl <- readr::read_tsv(path, show_col_types = FALSE, progress = FALSE)
+      tbl <- windows_safe_read_tsv(path, show_col_types = FALSE, progress = FALSE)
       if (!all(c("recording", "batch_name", "note") %in% names(tbl))) {
         return(empty_notes_table())
       }
@@ -1637,7 +2057,7 @@ load_notes_table <- function(directory) {
 # simultaneous" work in practice: the next reviewer to open this directory
 # sees the previous one's notes without any separate export/sync step.
 save_notes_table <- function(notes_df, directory) {
-  readr::write_tsv(notes_df, resolve_notes_path(directory))
+  windows_safe_write_tsv(notes_df, resolve_notes_path(directory))
 }
 
 # upsert_note: update, insert, or remove a single (recording, batch_name)

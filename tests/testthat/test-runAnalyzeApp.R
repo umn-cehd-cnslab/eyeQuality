@@ -3953,3 +3953,153 @@ test_that("the Plots and Gaze Explorer tabs' major-metrics badges show the corre
     expect_match(gaze_badges_b, "50.0%", fixed = TRUE)
   })
 })
+
+# ---------------------------------------------------------------------------
+# Windows MAX_PATH (260-character) long-path handling
+# ---------------------------------------------------------------------------
+#
+# A real qcsummary.tsv failing to load with a readr "does not exist" error
+# despite genuinely existing on disk -- the well-known Windows 260-character
+# MAX_PATH limitation, hit in practice by this app's own recursive directory
+# search combined with this package's nested derivatives/eyeQuality-v1/
+# output convention and long BIDS-style filenames sitting under a
+# deeply-nested (e.g. Box-synced) study tree; one real batch's output
+# directory produced 291 files that failed this way. helpers.R's
+# windows_long_path()/windows_safe_read_tsv()/windows_safe_write_tsv()/
+# windows_safe_file_exists() (and .safe_basename(), a distinct, separately
+# discovered long-path failure mode inside base R's own basename()) exist to
+# fix this -- see their header comments in helpers.R for the full mechanism
+# and for why a naive readr::read_tsv(windows_long_path(path)) call turns
+# out NOT to be sufficient on its own.
+#
+# This is deliberately end-to-end against every read/write call site that
+# touches a filesystem-discovered path, not a unit test of windows_long_path()
+# in isolation: the single most load-bearing thing to confirm is that a real
+# file at a real path over 260 characters actually loads through this app's
+# real public functions, on whatever platform this suite runs on. On
+# Windows, this exercises the actual fix; on other platforms, MAX_PATH
+# doesn't apply and windows_long_path() is a documented no-op, so this same
+# test still validates nothing regressed for a long path in general.
+#
+# Deliberately does NOT go through eyeQualityBatch()/eyeQuality(saveData =
+# TRUE) to write the fixture files at this long path -- that would exercise
+# R/saveFiles.R's own file-writing, a separate, non-overlapping long-path fix
+# tracked independently of this app-layer one. Instead, a real preprocessed
+# data.frame is obtained via eyeQuality(saveData = FALSE) (in-memory,
+# unaffected by any write-path issue), and written to disk directly via this
+# file's own windows_safe_write_tsv() -- the same mechanism save_notes_table()
+# itself now uses -- so this test is self-contained and doesn't depend on
+# the core package's own long-path fix having landed yet.
+test_that("read_one_qcsummary/load_qcsummary_table/load_plot_data/load_gaze_trajectory_data/save_notes_table+load_notes_table all succeed against a real path over 260 characters", {
+  skip_on_cran()
+
+  base_dir <- tempfile("p_longpath_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  # Deeply nested, long directory segments -- mirroring a real Box-synced
+  # study tree (e.g. "IBIS INFANT EYE TRACKING PREPROCESSING/ARCHIVE/
+  # IBIS-EP_DATA/UMN/01_Calibration_Verification_Start/AUDIT_PASSED/...")
+  # -- until the eventual full qcsummary.tsv path is comfortably past 260
+  # characters.
+  segment <- "IBIS_EP_DATA_UMN_01_Calibration_Verification_Start_AUDIT_PASSED"
+  nested <- base_dir
+  i <- 0
+  while (nchar(nested) < 170) {
+    i <- i + 1
+    nested <- file.path(nested, paste0(segment, "_", i))
+  }
+  deriv_dir <- file.path(nested, "sub-UMN7001", "ses-06", "derivatives", "eyeQuality-v1")
+  # base R's own dir.create(..., recursive = TRUE) turns out to share the
+  # same MAX_PATH-adjacent failure mode as basename()/file.exists() (see
+  # helpers.R's .safe_basename()/windows_safe_file_exists() header comments)
+  # -- confirmed directly: a raw (unprefixed) dir.create() call on this exact
+  # ~250-character deriv_dir silently fails partway through the recursive
+  # walk ("cannot create dir ... No such file or directory"), leaving deeper
+  # levels missing. Routed through windows_long_path() here purely as test
+  # scaffolding (this test isn't about directory creation) so the fixture
+  # setup itself is reliable regardless of length.
+  dir.create(windows_long_path(deriv_dir), recursive = TRUE)
+
+  stem <- "sub-UMN7001_ses-06_task-A1CalibrationVerificationStart_ET_desc-01"
+  qcsummary_path <- file.path(deriv_dir, paste0(stem, "_preproc_qcsummary.tsv"))
+  preproc_path <- file.path(deriv_dir, paste0(stem, "_preproc.tsv"))
+  events_path <- file.path(deriv_dir, paste0(stem, "_events.tsv"))
+  skip_if_not(nchar(qcsummary_path) > 260, "test setup failed to build a genuinely >260-character path")
+
+  raw_file <- system.file("extdata", "tobii_studio_sample.tsv", package = "eyeQuality")
+  real_preproc_df <- suppressMessages(eyeQuality(
+    raw_file,
+    displayDimensionX_mm = 594,
+    displayDimensionY_mm = 344,
+    saveData = FALSE
+  ))
+
+  qc_df <- data.frame(
+    qc_metric = c(
+      "valid_raw_data", "robustness_proportion_valid_data_to_all_data",
+      "interpolated_LeftEye", "interpolated_RightEye"
+    ),
+    n = c(200, 200, 0, 0),
+    percent = c(1.0, 1.0, 0.0, 0.0)
+  )
+  events_df <- data.frame(
+    event = c("TrialStart", "TrialEnd"),
+    recordingTimestamp_ms = c(
+      real_preproc_df$recordingTimestamp_ms[1],
+      real_preproc_df$recordingTimestamp_ms[nrow(real_preproc_df)]
+    )
+  )
+
+  windows_safe_write_tsv(qc_df, qcsummary_path)
+  windows_safe_write_tsv(real_preproc_df, preproc_path)
+  windows_safe_write_tsv(events_df, events_path)
+
+  # read_one_qcsummary() -- exercises windows_safe_read_tsv() AND
+  # .safe_basename() (via derive_recording_label()/derive_batch_name()).
+  qc_row <- read_one_qcsummary(qcsummary_path)
+  expect_s3_class(qc_row, "data.frame")
+  expect_equal(nrow(qc_row), 4)
+  expect_equal(qc_row$recording[1], "sub-UMN7001_ses-06_task-A1CalibrationVerificationStart_ET")
+  expect_equal(qc_row$batch_name[1], "01")
+
+  # load_qcsummary_table() -- exercises discover_qcsummary_files()'s
+  # list.files(recursive = TRUE) over the whole long nested tree too.
+  loaded <- load_qcsummary_table(base_dir, recursive = TRUE)
+  expect_equal(loaded$n_files, 1L)
+  expect_length(loaded$read_errors, 0)
+  expect_s3_class(loaded$table, "data.frame")
+
+  # load_plot_data() -- the exact reported-bug code path: resolves and reads
+  # the sibling preproc.tsv, then calls the real generateEyeTrackingPlots().
+  plot_result <- load_plot_data(qcsummary_path)
+  expect_true(plot_result$ok)
+  expect_length(plot_result$plots, 3)
+  expect_equal(nrow(plot_result$data), nrow(real_preproc_df))
+
+  # load_gaze_trajectory_data() -- reads preproc.tsv AND the sibling
+  # events.tsv.
+  gaze_result <- load_gaze_trajectory_data(qcsummary_path)
+  expect_true(gaze_result$ok)
+  expect_false(is.null(gaze_result$events))
+
+  # save_notes_table()/load_notes_table() round trip -- notes.tsv sits at
+  # base_dir's own root, itself a long path given how deeply nested base_dir's
+  # own tail is.
+  notes <- load_notes_table(base_dir)
+  expect_equal(nrow(notes), 0)
+  notes <- upsert_note(
+    notes, derive_recording_label(qcsummary_path), derive_batch_name(qcsummary_path),
+    "flagged for re-review"
+  )
+  save_notes_table(notes, base_dir)
+  notes_reloaded <- load_notes_table(base_dir)
+  expect_equal(nrow(notes_reloaded), 1)
+  expect_equal(notes_reloaded$note[1], "flagged for re-review")
+
+  # Negative control: a genuinely missing file at an equally long path must
+  # still be correctly reported missing, not silently mistaken for existing.
+  missing_qcsummary <- file.path(deriv_dir, "sub-DOES-NOT-EXIST_ses-99_task-x_desc-01_preproc_qcsummary.tsv")
+  expect_error(read_one_qcsummary(missing_qcsummary))
+  expect_false(windows_safe_file_exists(missing_qcsummary))
+})
