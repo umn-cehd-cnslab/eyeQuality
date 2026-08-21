@@ -24,17 +24,23 @@
 #'   it into something invalid.
 #'
 #' `normalizePath(mustWork = FALSE)` is the obvious way to get an absolute,
-#' resolved path before adding the prefix, but confirmed directly against a
-#' real long-path fixture on native Windows R: for a path whose tail does
-#' not yet exist on disk, `normalizePath(mustWork = FALSE)` can silently
-#' fail to resolve it at all (returning the input close to unchanged,
-#' relative segments and all, rather than erroring) -- relying on it alone
-#' would silently produce a still-broken, non-absolute result instead of
-#' the intended fix. A manual fallback (`.windows_force_backslash()`,
-#' `.windows_is_absolute_path()`, `.windows_collapse_dot_segments()` below)
-#' runs after it unconditionally to make sure the result really is
-#' absolute/backslash-separated/dot-free even when `normalizePath()` itself
-#' didn't get there.
+#' resolved path before adding the prefix. An earlier version of this
+#' function trusted it unconditionally; a sibling fix in this codebase
+#' (`inst/shiny-apps/analyze/helpers.R`'s own `windows_long_path()`) reported
+#' `normalizePath(mustWork = FALSE)` silently failing to resolve a long,
+#' not-yet-existing path on its own testing. Independent re-verification here
+#' (multiple real >250-character paths, both single giant segments and real
+#' multi-segment nested trees) could **not** reproduce that specific failure
+#' -- `normalizePath()` resolved correctly every time it was tried on this
+#' package's own Windows R test environment. Rather than delete the fallback
+#' on the strength of a non-reproduction (the underlying claim may still be
+#' real under conditions not yet tried, e.g. a different Windows/R build), it
+#' stays as cheap defense in depth: a manual fallback
+#' (`.windows_force_backslash()`, `.windows_is_absolute_path()`,
+#' `.windows_collapse_dot_segments()` below) runs after `normalizePath()`
+#' unconditionally, confirmed harmless (a no-op) on the success path this
+#' function's own tests exercise, and would still catch the reported failure
+#' mode if it does occur.
 #'
 #' Note this function alone is **not** sufficient to make `readr` (or
 #' `vroom`, which `readr` is built on) actually read a `\\?\`-prefixed long

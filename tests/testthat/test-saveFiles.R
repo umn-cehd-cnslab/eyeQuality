@@ -341,6 +341,201 @@ test_that("eyeQuality(saveData = TRUE) writes its run log with a .txt extension,
   expect_false(file.exists(runlog_wrong_tsv))
 })
 
+## ---- Windows long-path write regression tests (qa-verifier Gap 1) -------
+#
+# de38175 wrapped every write.table()/cat() call in saveFiles() and
+# print_or_save() with windows_long_path() but shipped with no automated
+# test. Confirmed directly on Windows R (see probe below): create_new_filename()
+# (called internally by saveFiles() to build every output path) assembles its
+# result via fs::path()/fs::dir_create(), which enforce their OWN, separate
+# <260-char ceiling ("Total path length must be less than PATH_MAX: 260")
+# ahead of any OS call and regardless of windows_long_path()'s "\\?\"
+# prefixing (see create_new_filename()'s own comment in this file) -- so a
+# real >260-character path can never actually reach saveFiles()'s
+# write.table() calls through the normal, unmodified create_new_filename()
+# call chain; that's a separate, already-acknowledged gap, out of scope here.
+# create_new_filename() is mocked below (via a plain file.path()-built path,
+# bypassing fs entirely) so these tests can isolate what IS in scope: whether
+# saveFiles()'s own windows_long_path()-wrapped write.table() calls actually
+# succeed once a genuinely long path reaches them. print_or_save() needs no
+# such mock -- its `filename` argument is a plain string built by its caller
+# (eyeQualityBatch()'s batch_run_summary is plain paste0(), not fs::path()),
+# so it can be exercised directly at a real long path.
+#
+# Content is read back and compared value-for-value after every write, not
+# just checked for "no error" -- and NOT via plain file.exists()/read.table()
+# on the un-prefixed path: confirmed directly on Windows that even a
+# genuinely-written file's OWN file.exists() can itself return FALSE past
+# ~260 chars (a separate MAX_PATH-limited Win32 call, same underlying story
+# as windows_long_path()'s own header comment), so every readback below goes
+# through windows_long_path() too, exactly as saveFiles()/print_or_save()
+# themselves do.
+
+# Builds a real, deeply-nested directory whose own path is already >150
+# characters, via plain file.path() (no fs involved) so it isn't subject to
+# fs::path()'s separate 260-char ceiling. dir.create() itself is routed
+# through windows_long_path() -- confirmed directly (and consistent with
+# test-runAnalyzeApp.R's identical need) that a raw, unprefixed dir.create()
+# can itself silently fail partway through a sufficiently long recursive
+# path.
+build_gap1_long_dir <- function(base_dir, target_len = 235) {
+  segment <- "gap1_windows_longpath_segment"
+  nested <- base_dir
+  i <- 0
+  while (nchar(nested) < target_len) {
+    i <- i + 1
+    nested <- file.path(nested, paste0(segment, "_", i))
+  }
+  dir.create(windows_long_path(nested), recursive = TRUE, showWarnings = FALSE)
+  nested
+}
+
+test_that("saveFiles() writes all four output files to a real, genuinely >260-character path", {
+  skip_on_cran()
+
+  base_dir <- tempfile("p_gap1_savefiles_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  long_dir <- build_gap1_long_dir(base_dir)
+
+  mock_create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL) {
+    ext <- if (is.null(newFileExtension)) "tsv" else sub("^\\.", "", newFileExtension)
+    file.path(long_dir, paste0("gap1out", appendname, ".", ext))
+  }
+  testthat::local_mocked_bindings(create_new_filename = mock_create_new_filename)
+
+  inputFile <- file.path(base_dir, "sub-01_task-test_physio.tsv") # never opened -- create_new_filename() is mocked and ignores it beyond naming
+  minimal_data <- data.frame(x = 1:3, y = 4:6)
+  minimal_events <- data.frame(event = c("start", "end"))
+  minimal_timing <- list(step1 = 0.1, step2 = 0.2)
+  minimal_summary <- data.frame(metric = c("n_rows", "pct_valid"), value = c(3, 1))
+
+  expected_preproc <- mock_create_new_filename(inputFile, "_desc-gap1_preproc", ".tsv")
+  expected_events <- mock_create_new_filename(inputFile, "_desc-gap1_events", ".tsv")
+  expected_runtimes <- mock_create_new_filename(inputFile, "_desc-gap1_preproc_runtimes", ".tsv")
+  expected_qcsummary <- mock_create_new_filename(inputFile, "_desc-gap1_preproc_qcsummary", ".tsv")
+  expect_true(nchar(expected_qcsummary) > 260)
+
+  expect_no_error(
+    saveFiles(inputFile, minimal_data, minimal_events, minimal_timing, minimal_summary, batchName = "gap1")
+  )
+
+  preproc_readback <- read.table(windows_long_path(expected_preproc), header = TRUE, sep = "\t")
+  expect_equal(preproc_readback$x, minimal_data$x)
+  expect_equal(preproc_readback$y, minimal_data$y)
+
+  events_readback <- read.table(windows_long_path(expected_events), header = TRUE, sep = "\t")
+  expect_equal(as.character(events_readback$event), minimal_events$event)
+
+  runtimes_readback <- read.table(windows_long_path(expected_runtimes), header = TRUE, sep = "\t")
+  expect_equal(runtimes_readback$step1, minimal_timing$step1)
+  expect_equal(runtimes_readback$step2, minimal_timing$step2)
+
+  qcsummary_readback <- read.table(windows_long_path(expected_qcsummary), header = TRUE, sep = "\t")
+  expect_equal(as.character(qcsummary_readback$metric), minimal_summary$metric)
+  expect_equal(qcsummary_readback$value, minimal_summary$value)
+})
+
+test_that("saveFiles()'s write.table() calls actually depend on windows_long_path() -- unwrapped, the same long-path write fails on Windows (negative control)", {
+  skip_on_cran()
+  skip_if_not(
+    .Platform$OS.type == "windows",
+    "MAX_PATH is Windows-specific; this negative control needs real Windows execution to be meaningful (no such limit exists to trigger on this platform)"
+  )
+
+  base_dir <- tempfile("p_gap1_savefiles_neg_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  long_dir <- build_gap1_long_dir(base_dir)
+
+  mock_create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL) {
+    ext <- if (is.null(newFileExtension)) "tsv" else sub("^\\.", "", newFileExtension)
+    file.path(long_dir, paste0("gap1negout", appendname, ".", ext))
+  }
+  # windows_long_path() mocked to a pure passthrough -- simulates de38175
+  # being reverted, i.e. saveFiles()'s write.table() calls receiving the raw,
+  # unprefixed long path exactly as they would without that fix.
+  testthat::local_mocked_bindings(
+    create_new_filename = mock_create_new_filename,
+    windows_long_path = function(path, ...) path
+  )
+
+  inputFile <- file.path(base_dir, "sub-01_task-test_physio.tsv")
+  minimal_data <- data.frame(x = 1:3, y = 4:6)
+  minimal_events <- data.frame(event = c("start", "end"))
+  minimal_timing <- list(step1 = 0.1, step2 = 0.2)
+  minimal_summary <- data.frame(metric = c("n_rows", "pct_valid"), value = c(3, 1))
+
+  expect_true(nchar(mock_create_new_filename(inputFile, "_desc-gap1_events", ".tsv")) > 260)
+
+  # file()'s own default failure behavior emits a warning with the actual OS
+  # reason ("cannot open file ...: No such file or directory") before raising
+  # the generic "cannot open the connection" error write.table() surfaces --
+  # both conditions are the expected signature of this exact failure mode
+  # (see windows_safe_read_csv()'s own header comment in R/windowsLongPath.R
+  # for the read-side equivalent), so the warning is suppressed here rather
+  # than left to leak into the test run's output as noise.
+  suppressWarnings(
+    expect_error(
+      saveFiles(inputFile, minimal_data, minimal_events, minimal_timing, minimal_summary, batchName = "gap1neg")
+    )
+  )
+})
+
+test_that("print_or_save() writes both its cat() (character) and write.table() (non-character) branches to a real >260-character path", {
+  skip_on_cran()
+
+  base_dir <- tempfile("p_gap1_print_or_save_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  long_dir <- build_gap1_long_dir(base_dir)
+
+  char_path <- file.path(long_dir, "gap1_char_runlog.txt")
+  expect_true(nchar(char_path) > 260)
+  expect_no_error(print_or_save("hello from print_or_save", savedata = TRUE, filename = char_path))
+  char_content <- readLines(windows_long_path(char_path))
+  expect_equal(char_content[1], "hello from print_or_save")
+
+  table_path <- file.path(long_dir, "gap1_table_runlog.txt")
+  expect_true(nchar(table_path) > 260)
+  df <- data.frame(a = 1:2, b = c("x", "y"))
+  # print_or_save()'s write.table(..., append = TRUE) call emits R's standard
+  # (harmless) "appending column names to file" warning whenever col.names
+  # isn't explicitly set -- expected, unrelated to what this test is
+  # checking, so suppressed rather than left to leak into the test output.
+  expect_no_error(suppressWarnings(print_or_save(df, savedata = TRUE, filename = table_path)))
+  table_content <- read.table(windows_long_path(table_path), header = TRUE)
+  expect_equal(table_content$a, df$a)
+  expect_equal(as.character(table_content$b), df$b)
+})
+
+test_that("print_or_save() actually depends on windows_long_path() -- unwrapped, the same long-path write fails on Windows (negative control)", {
+  skip_on_cran()
+  skip_if_not(
+    .Platform$OS.type == "windows",
+    "MAX_PATH is Windows-specific; this negative control needs real Windows execution to be meaningful (no such limit exists to trigger on this platform)"
+  )
+
+  base_dir <- tempfile("p_gap1_print_or_save_neg_")
+  dir.create(base_dir)
+  on.exit(unlink(base_dir, recursive = TRUE), add = TRUE)
+
+  long_dir <- build_gap1_long_dir(base_dir)
+  path <- file.path(long_dir, "gap1_neg_control_runlog.txt")
+  expect_true(nchar(path) > 260)
+
+  testthat::local_mocked_bindings(windows_long_path = function(path, ...) path)
+
+  # see the sibling saveFiles() negative control above for why the warning
+  # is expected here too, and suppressed rather than left as noise.
+  suppressWarnings(
+    expect_error(print_or_save("should fail without windows_long_path() protection", savedata = TRUE, filename = path))
+  )
+})
+
 test_that("no ifelse(is.null(batchName)... pattern survives anywhere in R/", {
   # P1-12's acceptance criteria (2026-08-03 update) explicitly includes:
   # `grep -rn "ifelse(is.null(batchName)" R/` returns no matches anywhere in

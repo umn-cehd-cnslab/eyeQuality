@@ -464,7 +464,15 @@ get_qcsummary_output_path <- function(inputFile, batchName = NULL, outputDir = N
   # its own ~300-character path limit on Windows, distinct from (and not
   # fixed by) windows_long_path()/windows_safe_read_*() -- a real,
   # confirmed failure point for a long inputFile path, independent of
-  # whichever adapter/software produced it.
+  # whichever adapter/software produced it. NOTE this fixes only the
+  # basename-extraction step: fs::path_dir()/fs::path() below (used to
+  # assemble the rest of this function's return value) have their OWN
+  # separate ~260-character internal length rejection, unrelated to and not
+  # closed by this fix -- see create_new_filename()'s matching comment in
+  # R/saveFiles.R for the full explanation and why closing that gap needs a
+  # larger rewrite (base R path assembly instead of fs::path()'s family) than
+  # this fix's scope. A sufficiently long inputFile can still make this
+  # whole function error, just past a slightly later point than before.
   filename <- .safe_basename(fs::path_ext_remove(inputFile))
   directory <- fs::path_dir(inputFile)
   newdirectory <- if (is.null(outputDir)) {
