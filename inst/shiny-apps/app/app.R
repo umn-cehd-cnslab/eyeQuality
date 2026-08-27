@@ -498,7 +498,25 @@ ui <- navbarPage(
                   actionButton("gaze_define_aoi", "Define AOI..."),
                   actionButton("gaze_clear_aoi", "Clear AOI"),
                   br(), br(),
-                  uiOutput("gaze_aoi_status")
+                  uiOutput("gaze_aoi_status"),
+                  hr(),
+                  # "Onion-skin" playback (repo-owner feature request): plays
+                  # the current time-range window back sample-by-sample, with
+                  # a fading trail leading up to the current position -- see
+                  # analyze_helpers.R's "Gaze Explorer onion-skin playback"
+                  # section header comment for the full design, and the
+                  # output$gaze_trajectory_plot/gaze_anim_* reactives below
+                  # for the server-side wiring. gaze_play_toggle's label is
+                  # flipped between "Play"/"Pause" from the server
+                  # (updateActionButton()) rather than set here, since it
+                  # reflects gaze_anim_playing() state, not a fixed label.
+                  h4("Playback"),
+                  actionButton("gaze_play_toggle", "Play"),
+                  br(), br(),
+                  sliderInput(
+                    "gaze_trail_length", "Trail length (samples)",
+                    min = 10, max = 300, value = 90, step = 5, width = "100%"
+                  )
                 ),
                 column(9, plotlyOutput("gaze_trajectory_plot", height = "600px"))
               )
@@ -2169,6 +2187,143 @@ server <- function(input, output, session) {
   # corners and clicked "Set AOI".
   aoi_polygon <- reactiveVal(NULL)
 
+  # --- Onion-skin playback state (repo-owner feature request) ---
+  #
+  # gaze_anim_playing: TRUE while the animated view is actively advancing,
+  # FALSE in every other state (initial load, paused, or reset). This is the
+  # single source of truth output$gaze_trajectory_plot below branches on --
+  # FALSE always means "show the plain, unchanged static
+  # build_gaze_trajectory_plot() view, exactly what this tab showed before
+  # this feature existed" (the chosen, documented behavior for Pause: it
+  # reverts to the static view rather than freezing the last animated
+  # frame, so "not playing" only ever has one visual meaning in this tab).
+  #
+  # gaze_anim_index: a 1-based row position into
+  # prepare_gaze_trajectory_data()'s cleaned/sorted view of the CURRENT
+  # filtered_trajectory() window (analyze_helpers.R) -- the "current
+  # playback position" every animated frame is drawn relative to. Reset to 1
+  # (start of window) whenever the window/file/AOI changes, per the
+  # observeEvent() immediately below.
+  gaze_anim_playing <- reactiveVal(FALSE)
+  gaze_anim_index <- reactiveVal(1L)
+
+  # gaze_anim_tick_interval_ms / gaze_anim_step_samples: fixed playback
+  # tuning constants, not exposed as controls (only "Trail length" is, per
+  # this feature's spec) -- 150ms is comfortably inside the 100-250ms range
+  # that reads as smooth, watchable playback without visibly stuttering; 5
+  # samples/tick was chosen so a several-thousand-sample window animates
+  # through in a reviewable amount of time rather than crawling one sample
+  # at a time.
+  gaze_anim_tick_interval_ms <- 150
+  gaze_anim_step_samples <- 5L
+
+  # gaze_prepared_df: prepare_gaze_trajectory_data()'s (analyze_helpers.R)
+  # cleaned/sorted view of the current filtered_trajectory() window -- the
+  # same row ordering gaze_anim_index() indexes into, and the bound used
+  # below to know when playback has reached the end of the window (for the
+  # loop-back-to-start behavior chosen for "end of range", see the tick loop
+  # below). Recomputed only when filtered_trajectory() itself changes
+  # (slider drag or file switch), not on every animation tick.
+  gaze_prepared_df <- reactive({
+    prepare_gaze_trajectory_data(filtered_trajectory())
+  })
+
+  # gaze_bg_plot: the always-visible, very-low-opacity background trace for
+  # the CURRENT window -- built once per slider/file change via this
+  # reactive's own normal memoization (it depends only on
+  # filtered_trajectory(), never on gaze_anim_index()), then reused
+  # unmodified by every animation tick's frame below. See
+  # build_gaze_trajectory_background_trace()'s own comment
+  # (analyze_helpers.R) for why this split exists: rebuilding this trace
+  # from every usable row in the window on every ~150ms tick is exactly the
+  # per-tick cost this split avoids -- only the small trail trace (at most
+  # gaze_trail_length rows) is rebuilt per tick, in output$gaze_trajectory_plot
+  # below.
+  gaze_bg_plot <- reactive({
+    build_gaze_trajectory_background_trace(filtered_trajectory())
+  })
+
+  # Stops/resets playback the instant the window this animation is playing
+  # over becomes stale -- a different file, a moved time-range slider, or a
+  # newly defined/cleared AOI all invalidate "the current playback position
+  # means something", so continuing to play would either error against an
+  # out-of-range index or silently animate a now-inconsistent window/AOI
+  # combination. Mirrors the observeEvent(selected_source_file(), ...) reset
+  # pattern immediately below (and is intentionally a SEPARATE observer from
+  # it, not merged in, since this one also needs to fire on slider moves and
+  # AOI changes that observer doesn't reset for).
+  observeEvent(list(selected_source_file(), input$gaze_time_range, aoi_polygon()), {
+    gaze_anim_playing(FALSE)
+    gaze_anim_index(1L)
+  }, ignoreInit = TRUE)
+
+  # Play/Pause toggle: flips gaze_anim_playing() and, when transitioning INTO
+  # "playing", starts from the beginning of the window unless resuming from
+  # a genuine mid-window pause (gaze_anim_index() not yet at/past the end) --
+  # so pressing Play again right after Pause continues from where playback
+  # left off, while pressing Play after a completed/looped run (or on first
+  # use) starts over from sample 1. isolate()d reads throughout: this
+  # handler is meant to fire only on the button click, not re-run whenever
+  # gaze_anim_index()/gaze_prepared_df() themselves change.
+  observeEvent(input$gaze_play_toggle, {
+    now_playing <- !isTRUE(isolate(gaze_anim_playing()))
+    if (now_playing) {
+      prepared <- isolate(gaze_prepared_df())
+      if (is.null(prepared) || nrow(prepared) == 0) {
+        return(invisible(NULL))
+      }
+      if (isolate(gaze_anim_index()) >= nrow(prepared)) {
+        gaze_anim_index(1L)
+      }
+    }
+    gaze_anim_playing(now_playing)
+  })
+
+  observeEvent(gaze_anim_playing(), {
+    updateActionButton(
+      session, "gaze_play_toggle",
+      label = if (isTRUE(gaze_anim_playing())) "Pause" else "Play"
+    )
+  })
+
+  # The tick loop: the standard shiny conditional-polling pattern used
+  # elsewhere in this app (see e.g. the batch-run progress-bar poll and the
+  # "Live auto-refresh" observer, both above) -- invalidateLater() is only
+  # ever reached, and therefore only ever reschedules itself, while
+  # gaze_anim_playing() is TRUE; the instant it flips FALSE (Pause, or the
+  # reset observer above firing), the early return() is hit instead and this
+  # chain simply stops. gaze_prepared_df()/gaze_anim_index() are read via
+  # isolate() so this observer's only real reactive dependency is
+  # gaze_anim_playing() itself, not a self-triggering loop off of the very
+  # index value it writes each tick.
+  #
+  # End-of-range behavior (a deliberate choice, not left to error): when the
+  # next step would run past the end of the current window, playback loops
+  # back to sample 1 and keeps playing, rather than stopping -- chosen so a
+  # user reviewing a segment can watch it repeat without re-clicking Play
+  # each time it finishes.
+  observe({
+    if (!isTRUE(gaze_anim_playing())) {
+      return(invisible(NULL))
+    }
+    n <- isolate({
+      prepared <- gaze_prepared_df()
+      if (is.null(prepared)) 0L else nrow(prepared)
+    })
+    if (n == 0) {
+      gaze_anim_playing(FALSE)
+      return(invisible(NULL))
+    }
+
+    next_idx <- isolate(gaze_anim_index()) + gaze_anim_step_samples
+    if (next_idx > n) {
+      next_idx <- 1L
+    }
+    gaze_anim_index(next_idx)
+
+    invalidateLater(gaze_anim_tick_interval_ms, session)
+  })
+
   # Resets every piece of this tab's per-file state -- the time-range
   # slider's bounds and any previously defined AOI -- the instant a
   # DIFFERENT file becomes selected (default ignoreNULL = TRUE: this simply
@@ -2263,12 +2418,40 @@ server <- function(input, output, session) {
     data[!is.na(ts) & ts >= rng[1] & ts <= rng[2], , drop = FALSE]
   })
 
+  # output$gaze_trajectory_plot: branches between the plain, unchanged
+  # static view (gaze_anim_playing() FALSE -- the only value it ever has
+  # outside of an active Play session, per the reset observer and Pause
+  # behavior documented above) and the animated onion-skin view. The
+  # animated branch reuses gaze_bg_plot()'s CACHED background trace and only
+  # rebuilds the small trail trace here, per-tick -- see this section's
+  # earlier header comment on why that split matters for a several-thousand-
+  # sample recording.
   output$gaze_trajectory_plot <- renderPlotly({
     df <- filtered_trajectory()
     validate(need(nrow(df) > 0, "No gaze samples in the current time range."))
-    plot <- build_gaze_trajectory_plot(df, aoi_polygon())
-    validate(need(!is.null(plot), "No usable (non-missing) gaze coordinates in the current time range."))
-    plot
+
+    if (!isTRUE(gaze_anim_playing())) {
+      plot <- build_gaze_trajectory_plot(df, aoi_polygon())
+      validate(need(!is.null(plot), "No usable (non-missing) gaze coordinates in the current time range."))
+      return(plot)
+    }
+
+    bg <- gaze_bg_plot()
+    validate(need(!is.null(bg), "No usable (non-missing) gaze coordinates in the current time range."))
+
+    trail_length <- input$gaze_trail_length
+    if (is.null(trail_length) || is.na(trail_length) || trail_length < 1) {
+      trail_length <- 90
+    }
+
+    plot <- build_gaze_trajectory_trail_trace(bg, df, gaze_anim_index(), trail_length)
+    plot <- add_aoi_overlay_trace(plot, aoi_polygon())
+    plotly::layout(
+      plot,
+      xaxis = list(title = "gazeX.preprocessed_px"),
+      yaxis = list(title = "gazeY.preprocessed_px"),
+      showlegend = TRUE
+    )
   })
 
   # gaze_aoi_result: compute_aoi_percent()'s (analyze_helpers.R) output for

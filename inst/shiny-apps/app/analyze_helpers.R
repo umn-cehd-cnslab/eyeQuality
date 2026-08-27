@@ -2032,6 +2032,210 @@ build_gaze_trajectory_plot <- function(
 }
 
 # ---------------------------------------------------------------------------
+# Gaze Explorer "onion-skin" playback (repo-owner feature request): an
+# alternate, animated rendering of the SAME filtered_trajectory() window
+# build_gaze_trajectory_plot() draws statically above, used only while the
+# Gaze Explorer tab's Play/Pause control (app.R) is in the "playing" state.
+# build_gaze_trajectory_plot() itself is untouched by any of this -- these
+# are new, independent functions, not a refactor of it.
+#
+# Design (server-driven polling, not plotly's client-side animation-frames
+# API -- see app.R's own observe()/invalidateLater() loop): every sample in
+# the current window is always visible as a static, very-low-opacity
+# background trace, with a small trailing "comet" of the most recent
+# trail_length samples up to the current playback position drawn on top,
+# opacity ramping from near-0 (oldest trail point) to fully opaque (current
+# position). Split into three pieces below specifically so the expensive
+# part (the background trace, built from every usable row in the window) is
+# only ever built ONCE per slider/file change, not on every ~150ms
+# animation tick -- app.R's server caches build_gaze_trajectory_background_trace()'s
+# result in a reactive() keyed only on filtered_trajectory(), and re-derives
+# each tick's frame by composing that cached object with a freshly-built
+# (cheap: at most trail_length rows) trail trace via
+# build_gaze_trajectory_trail_trace() + add_aoi_overlay_trace().
+# build_gaze_trajectory_animation_plot() below, which builds all three from
+# scratch in one call, exists as the simple, directly-testable entry point
+# for that same composition (and for any standalone/one-off caller) -- it is
+# NOT what app.R calls on every tick.
+# ---------------------------------------------------------------------------
+
+# prepare_gaze_trajectory_data: the same "usable rows only, sorted by time"
+# prep build_gaze_trajectory_plot() does internally before thinning, factored
+# out here so both the background trace and the trail trace below index into
+# an IDENTICAL row ordering -- current_index (a 1-based row position) would
+# silently point at different samples in each trace otherwise. Deliberately
+# not extracted out of build_gaze_trajectory_plot() itself (kept unchanged
+# per this feature's own scope) -- this is a fresh, small helper, not a
+# refactor of that function.
+#
+# Returns the cleaned/sorted data.frame, or NULL under the same conditions
+# build_gaze_trajectory_plot() itself returns NULL for (missing columns, or
+# 0 usable rows after dropping NA coordinates/timestamps).
+prepare_gaze_trajectory_data <- function(
+    df,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px") {
+  if (is.null(df) || !all(c(time_col, x_col, y_col) %in% names(df))) {
+    return(NULL)
+  }
+  usable <- !is.na(df[[x_col]]) & !is.na(df[[y_col]]) & !is.na(df[[time_col]])
+  df <- df[usable, , drop = FALSE]
+  if (nrow(df) == 0) {
+    return(NULL)
+  }
+  df[order(df[[time_col]]), , drop = FALSE]
+}
+
+# build_gaze_trajectory_background_trace: the always-visible, very-low-
+# opacity context trace -- every usable sample in the window (thinned for
+# display the same way build_gaze_trajectory_plot()'s main trace is, via
+# thin_for_display()/gaze_trajectory_display_cap, for the same rendering-
+# performance reason documented there), with no per-tick dependency at all.
+#
+# Returns a plotly object with just this one trace, or NULL when
+# prepare_gaze_trajectory_data() returns NULL (nothing usable to show).
+build_gaze_trajectory_background_trace <- function(
+    df,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px",
+    opacity = 0.08) {
+  prepared <- prepare_gaze_trajectory_data(df, time_col, x_col, y_col)
+  if (is.null(prepared)) {
+    return(NULL)
+  }
+  plot_df <- thin_for_display(prepared)
+
+  plotly::add_trace(
+    plotly::plot_ly(),
+    x = plot_df[[x_col]], y = plot_df[[y_col]],
+    type = "scatter", mode = "markers",
+    marker = list(size = 5, color = sprintf("rgba(120,120,120,%.3f)", opacity)),
+    hoverinfo = "skip",
+    name = "All samples (context)"
+  )
+}
+
+# build_gaze_trajectory_trail_trace: adds the fading "comet trail" trace --
+# the most recent trail_length samples up to (and including) current_index,
+# NOT thinned (trail_length is small by design, in the tens-to-low-hundreds
+# of samples, so there's nothing to thin) -- on top of an existing plotly
+# object `p` (ordinarily build_gaze_trajectory_background_trace()'s cached
+# result, per this section's header comment).
+#
+# current_index: a 1-based row position into prepare_gaze_trajectory_data()'s
+#   cleaned/sorted output for THIS SAME df -- clamped into [1, n] so an
+#   out-of-range value (e.g. leftover from a just-narrowed slider window)
+#   degrades to the nearest valid frame rather than erroring or silently
+#   drawing nothing.
+# trail_length: how many trailing samples to draw, >= 1. Points before the
+#   start of the window (current_index - trail_length + 1 < 1) are simply
+#   not available yet and are excluded, not padded -- the trail is always
+#   shorter than trail_length right after playback starts or loops.
+#
+# Opacity ramps from 0.08 (oldest trail point) to 1.0 (current position) via
+# a linear seq() -- a single-point trail (trail_length == 1, or a frame at
+# the very start of the window) is fully opaque, not near-invisible. The
+# current/most-recent point is also drawn larger (size 12 vs. 7) so "this is
+# the current gaze position" reads clearly even before the opacity ramp is
+# consciously noticed.
+#
+# Returns `p` unchanged if `p` or the prepared data is NULL (nothing to draw
+# the trail onto, or nothing usable in df).
+build_gaze_trajectory_trail_trace <- function(
+    p, df, current_index, trail_length = 90,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px") {
+  if (is.null(p)) {
+    return(p)
+  }
+  prepared <- prepare_gaze_trajectory_data(df, time_col, x_col, y_col)
+  if (is.null(prepared)) {
+    return(p)
+  }
+
+  n <- nrow(prepared)
+  trail_length <- max(1L, as.integer(trail_length))
+  current_index <- max(1L, min(as.integer(current_index), n))
+  start_idx <- max(1L, current_index - trail_length + 1L)
+  trail_df <- prepared[start_idx:current_index, , drop = FALSE]
+
+  m <- nrow(trail_df)
+  opacities <- if (m <= 1) 1 else seq(0.08, 1, length.out = m)
+  sizes <- rep(7, m)
+  sizes[m] <- 12 # the current/most-recent point, drawn larger
+
+  plotly::add_trace(
+    p,
+    x = trail_df[[x_col]], y = trail_df[[y_col]],
+    type = "scatter", mode = "markers",
+    marker = list(size = sizes, color = sprintf("rgba(30,144,255,%.3f)", opacities)),
+    text = paste0("t = ", round(trail_df[[time_col]]), " ms"),
+    hoverinfo = "text+x+y",
+    name = "Current position (trail)"
+  )
+}
+
+# add_aoi_overlay_trace: the same AOI polygon overlay trace
+# build_gaze_trajectory_plot() draws, factored out here as its own small
+# helper so the animation composition below can add it on top of a trail
+# frame without duplicating build_gaze_trajectory_plot()'s internals or
+# calling (and thereby not touching) that function. Returns `p` unchanged
+# when `p` is NULL or `aoi` isn't a usable (>= 3 vertex) polygon.
+add_aoi_overlay_trace <- function(p, aoi) {
+  if (is.null(p) || is.null(aoi) || length(aoi$x) < 3 || length(aoi$x) != length(aoi$y)) {
+    return(p)
+  }
+  plotly::add_trace(
+    p,
+    x = c(aoi$x, aoi$x[1]), y = c(aoi$y, aoi$y[1]),
+    type = "scatter", mode = "lines",
+    fill = "toself", fillcolor = "rgba(220,20,60,0.15)",
+    line = list(color = "crimson", width = 2),
+    name = "AOI", hoverinfo = "skip"
+  )
+}
+
+# build_gaze_trajectory_animation_plot: the one-call composer of a single
+# animation frame -- background trace + trail trace + AOI overlay + layout,
+# built fresh from df every call. This is the directly-testable pure
+# function this feature's tests exercise below; app.R's per-tick hot path
+# does NOT call this (it reuses a cached background trace instead -- see
+# this section's header comment) but the two produce the same frame for the
+# same arguments, since both are thin compositions of the same three pieces.
+#
+# df: the (already time-range-filtered) trajectory data.frame, same contract
+#   as build_gaze_trajectory_plot()'s own `df` argument.
+# current_index / trail_length: see build_gaze_trajectory_trail_trace().
+# aoi: NULL, or list(x = ..., y = ...), same contract as
+#   build_gaze_trajectory_plot()'s own `aoi` argument.
+#
+# Returns a plotly object, or NULL under the same "nothing usable" condition
+# build_gaze_trajectory_plot() itself returns NULL for.
+build_gaze_trajectory_animation_plot <- function(
+    df, current_index, trail_length = 90, aoi = NULL,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px",
+    background_opacity = 0.08) {
+  p <- build_gaze_trajectory_background_trace(df, time_col, x_col, y_col, opacity = background_opacity)
+  if (is.null(p)) {
+    return(NULL)
+  }
+  p <- build_gaze_trajectory_trail_trace(p, df, current_index, trail_length, time_col, x_col, y_col)
+  p <- add_aoi_overlay_trace(p, aoi)
+
+  plotly::layout(
+    p,
+    xaxis = list(title = paste(x_col)),
+    yaxis = list(title = paste(y_col)),
+    showlegend = TRUE
+  )
+}
+
+# ---------------------------------------------------------------------------
 # Shared per-tab file selector: a search/dropdown control repeated at the top
 # of the QC flags, Plots, and Gaze Explorer tabs (three separate widget
 # instances -- a single Shiny input can't render itself in three places on

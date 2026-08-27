@@ -2618,6 +2618,207 @@ test_that("compute_aoi_percent() against the full untrimmed data can give a diff
 })
 
 # ---------------------------------------------------------------------------
+# "Gaze Explorer" onion-skin playback: prepare_gaze_trajectory_data(),
+# build_gaze_trajectory_background_trace(), build_gaze_trajectory_trail_trace(),
+# add_aoi_overlay_trace(), build_gaze_trajectory_animation_plot() -- the
+# repo-owner-requested animated playback feature. plotly_build() is used
+# throughout to inspect the actual resolved trace data (x/y/marker/name),
+# rather than the raw pre-build plotly object, which stores add_trace()
+# calls as deferred/unevaluated attrs -- the same technique plotly's own
+# package tests use to assert on trace contents without a browser.
+# ---------------------------------------------------------------------------
+
+# animation_test_df: 5 rows, already in time order, with distinct x/y values
+# (1..5) so a specific row is identifiable by its coordinate alone in the
+# assertions below -- deliberately not reusing compute_aoi_percent()'s own
+# small fixture, which repeats coordinate values across rows.
+animation_test_df <- function() {
+  data.frame(
+    recordingTimestamp_ms = c(0, 10, 20, 30, 40),
+    gazeX.preprocessed_px = c(1, 2, 3, 4, 5),
+    gazeY.preprocessed_px = c(1, 2, 3, 4, 5)
+  )
+}
+
+# ---------------------------------------------------------------------------
+# prepare_gaze_trajectory_data()
+# ---------------------------------------------------------------------------
+
+test_that("prepare_gaze_trajectory_data sorts by time_col and drops rows with any NA coordinate/timestamp", {
+  df <- data.frame(
+    recordingTimestamp_ms = c(20, 0, 10, NA, 30),
+    gazeX.preprocessed_px = c(3, 1, NA, 4, 5),
+    gazeY.preprocessed_px = c(3, 1, 2, 4, NA)
+  )
+  result <- prepare_gaze_trajectory_data(df)
+
+  # rows 1 (t=20,x=3,y=3) and 2 (t=0,x=1,y=1) are the only fully-usable rows;
+  # sorted by time, row 2 (t=0) comes first.
+  expect_equal(result$recordingTimestamp_ms, c(0, 20))
+  expect_equal(result$gazeX.preprocessed_px, c(1, 3))
+})
+
+test_that("prepare_gaze_trajectory_data returns NULL for missing columns or 0 usable rows", {
+  expect_null(prepare_gaze_trajectory_data(data.frame(a = 1)))
+  expect_null(prepare_gaze_trajectory_data(NULL))
+
+  all_na <- data.frame(
+    recordingTimestamp_ms = NA_real_, gazeX.preprocessed_px = NA_real_, gazeY.preprocessed_px = NA_real_
+  )
+  expect_null(prepare_gaze_trajectory_data(all_na))
+})
+
+# ---------------------------------------------------------------------------
+# build_gaze_trajectory_background_trace()
+# ---------------------------------------------------------------------------
+
+test_that("build_gaze_trajectory_background_trace returns a single low-opacity context trace covering every usable row", {
+  skip_if_not_installed("plotly")
+
+  plot <- build_gaze_trajectory_background_trace(animation_test_df(), opacity = 0.1)
+  built <- plotly::plotly_build(plot)
+
+  expect_length(built$x$data, 1)
+  trace <- built$x$data[[1]]
+  expect_equal(trace$name, "All samples (context)")
+  expect_equal(as.numeric(trace$x), c(1, 2, 3, 4, 5))
+  expect_true(all(grepl("rgba\\(120,120,120,0\\.100\\)", trace$marker$color)))
+})
+
+test_that("build_gaze_trajectory_background_trace returns NULL when there's nothing usable to show", {
+  skip_if_not_installed("plotly")
+  expect_null(build_gaze_trajectory_background_trace(data.frame(a = 1)))
+})
+
+# ---------------------------------------------------------------------------
+# build_gaze_trajectory_trail_trace()
+# ---------------------------------------------------------------------------
+
+test_that("build_gaze_trajectory_trail_trace draws only the trailing trail_length points up to current_index, oldest-to-current", {
+  skip_if_not_installed("plotly")
+
+  df <- animation_test_df()
+  bg <- build_gaze_trajectory_background_trace(df)
+  plot <- build_gaze_trajectory_trail_trace(bg, df, current_index = 4, trail_length = 3)
+  built <- plotly::plotly_build(plot)
+
+  expect_length(built$x$data, 2)
+  trail <- built$x$data[[2]]
+  expect_equal(trail$name, "Current position (trail)")
+  # current_index = 4 (x = 4), trail_length = 3 -> rows 2:4 (x = 2, 3, 4)
+  expect_equal(as.numeric(trail$x), c(2, 3, 4))
+})
+
+test_that("build_gaze_trajectory_trail_trace's per-point opacity ramps from near-0 (oldest) to 1.0 (current), and the current point is drawn larger", {
+  skip_if_not_installed("plotly")
+
+  df <- animation_test_df()
+  bg <- build_gaze_trajectory_background_trace(df)
+  plot <- build_gaze_trajectory_trail_trace(bg, df, current_index = 4, trail_length = 3)
+  trail <- plotly::plotly_build(plot)$x$data[[2]]
+
+  opacities <- as.numeric(sub("rgba\\(30,144,255,([0-9.]+)\\)", "\\1", trail$marker$color))
+  expect_equal(opacities, c(0.08, 0.54, 1.00), tolerance = 1e-6)
+  expect_equal(as.numeric(trail$marker$size), c(7, 7, 12))
+})
+
+test_that("build_gaze_trajectory_trail_trace draws a single, fully-opaque point when current_index is at the very start of the window", {
+  skip_if_not_installed("plotly")
+
+  df <- animation_test_df()
+  bg <- build_gaze_trajectory_background_trace(df)
+  plot <- build_gaze_trajectory_trail_trace(bg, df, current_index = 1, trail_length = 3)
+  trail <- plotly::plotly_build(plot)$x$data[[2]]
+
+  expect_equal(as.numeric(trail$x), 1)
+  expect_true(grepl("rgba\\(30,144,255,1(\\.0+)?\\)", trail$marker$color))
+})
+
+test_that("build_gaze_trajectory_trail_trace clamps an out-of-range current_index into [1, n] rather than erroring", {
+  skip_if_not_installed("plotly")
+
+  df <- animation_test_df()
+  bg <- build_gaze_trajectory_background_trace(df)
+
+  too_high <- build_gaze_trajectory_trail_trace(bg, df, current_index = 999, trail_length = 3)
+  trail_high <- plotly::plotly_build(too_high)$x$data[[2]]
+  expect_equal(as.numeric(trail_high$x), c(3, 4, 5)) # clamped to n = 5
+
+  too_low <- build_gaze_trajectory_trail_trace(bg, df, current_index = -5, trail_length = 3)
+  trail_low <- plotly::plotly_build(too_low)$x$data[[2]]
+  expect_equal(as.numeric(trail_low$x), 1) # clamped to 1
+})
+
+test_that("build_gaze_trajectory_trail_trace returns p unchanged for NULL p or a df with nothing usable", {
+  skip_if_not_installed("plotly")
+
+  expect_null(build_gaze_trajectory_trail_trace(NULL, animation_test_df(), 1, 3))
+
+  bg <- build_gaze_trajectory_background_trace(animation_test_df())
+  unchanged <- build_gaze_trajectory_trail_trace(bg, data.frame(a = 1), 1, 3)
+  expect_length(plotly::plotly_build(unchanged)$x$data, 1)
+})
+
+# ---------------------------------------------------------------------------
+# add_aoi_overlay_trace()
+# ---------------------------------------------------------------------------
+
+test_that("add_aoi_overlay_trace adds a closed, filled polygon trace named 'AOI' when the polygon is usable", {
+  skip_if_not_installed("plotly")
+
+  bg <- build_gaze_trajectory_background_trace(animation_test_df())
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+  plot <- add_aoi_overlay_trace(bg, aoi)
+  built <- plotly::plotly_build(plot)
+
+  expect_length(built$x$data, 2)
+  aoi_trace <- built$x$data[[2]]
+  expect_equal(aoi_trace$name, "AOI")
+  # closed back to the first vertex
+  expect_equal(as.numeric(aoi_trace$x), c(0, 10, 10, 0, 0))
+  expect_equal(as.numeric(aoi_trace$y), c(0, 0, 10, 10, 0))
+})
+
+test_that("add_aoi_overlay_trace leaves p unchanged for a NULL aoi or fewer than 3 vertices", {
+  skip_if_not_installed("plotly")
+
+  bg <- build_gaze_trajectory_background_trace(animation_test_df())
+  expect_length(plotly::plotly_build(add_aoi_overlay_trace(bg, NULL))$x$data, 1)
+  expect_length(
+    plotly::plotly_build(add_aoi_overlay_trace(bg, list(x = c(0, 10), y = c(0, 10))))$x$data,
+    1
+  )
+  expect_null(add_aoi_overlay_trace(NULL, list(x = c(0, 10, 10), y = c(0, 0, 10))))
+})
+
+# ---------------------------------------------------------------------------
+# build_gaze_trajectory_animation_plot()
+# ---------------------------------------------------------------------------
+
+test_that("build_gaze_trajectory_animation_plot composes background + trail (+ AOI when given) into one figure", {
+  skip_if_not_installed("plotly")
+
+  df <- animation_test_df()
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+
+  no_aoi <- plotly::plotly_build(build_gaze_trajectory_animation_plot(df, current_index = 4, trail_length = 3))
+  expect_length(no_aoi$x$data, 2)
+  expect_equal(no_aoi$x$data[[1]]$name, "All samples (context)")
+  expect_equal(no_aoi$x$data[[2]]$name, "Current position (trail)")
+
+  with_aoi <- plotly::plotly_build(
+    build_gaze_trajectory_animation_plot(df, current_index = 4, trail_length = 3, aoi = aoi)
+  )
+  expect_length(with_aoi$x$data, 3)
+  expect_equal(with_aoi$x$data[[3]]$name, "AOI")
+})
+
+test_that("build_gaze_trajectory_animation_plot returns NULL when there's nothing usable in df", {
+  skip_if_not_installed("plotly")
+  expect_null(build_gaze_trajectory_animation_plot(data.frame(a = 1), current_index = 1))
+})
+
+# ---------------------------------------------------------------------------
 # "Gaze Explorer" tab: live app.R reactive wiring (shiny::testServer())
 # ---------------------------------------------------------------------------
 
@@ -2895,6 +3096,351 @@ test_that("the app-level wiring passes the untrimmed filtered_trajectory() to co
     result <- gaze_aoi_result()
     expect_equal(result$n_total, 6000)
     expect_equal(result$n_inside, 1) # would be 0 if wired against the thinned copy instead
+  })
+})
+
+# ---------------------------------------------------------------------------
+# "Gaze Explorer" onion-skin playback: live app.R reactive wiring
+# (shiny::testServer()) -- gaze_anim_playing()/gaze_anim_index() are the
+# server's own reactiveVals, directly readable inside testServer()'s
+# evaluation environment exactly like selected_source_file()/aoi_polygon()
+# above; session$elapse(millis) (same technique the auto-refresh tests above
+# use, see that section's own header comment on how MockShinySession$elapse()
+# advances invalidateLater() ticks deterministically) drives the tick loop.
+#
+# One quirk confirmed directly against this app's actual reactive graph
+# before writing any assertion below (never assumed): the tick-loop
+# observe() block re-runs SYNCHRONOUSLY, within the same flush, the instant
+# gaze_anim_playing() flips TRUE -- i.e. clicking Play (or resuming from
+# Pause) already advances gaze_anim_index() by gaze_anim_step_samples (5)
+# BEFORE any session$elapse() call, not only after the first 150ms tick
+# elapses. Every index expectation below accounts for this "immediate first
+# step" the same way the pre-existing auto-refresh tests account for their
+# own analogous quirk (see this file's "P10: Analyze app -- auto-refresh"
+# section header comment).
+# ---------------------------------------------------------------------------
+
+# build_gaze_anim_fixture: two files, each 20 clean (NA-free), evenly-spaced
+# gaze samples 10ms apart -- unlike build_gaze_explorer_fixture's file A
+# (which has 2 deliberate NA rows for its own AOI-percentage arithmetic),
+# this fixture is NA-free so prepare_gaze_trajectory_data()'s row count is
+# always exactly the row count written here, making the tick loop's
+# advance-by-5-samples-per-tick and end-of-window wrap-around math exactly
+# hand-computable rather than fought against an unrelated NA-drop. File B has
+# a wholly different (non-overlapping) recordingTimestamp_ms range, for the
+# file-switch-stops-playback test below.
+build_gaze_anim_fixture <- function() {
+  dir <- tempfile("p10_gaze_anim_")
+  dir.create(dir)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_desc-animA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      recordingTimestamp_ms = seq(0, 190, by = 10),
+      gazeX.preprocessed_px = seq_len(20),
+      gazeY.preprocessed_px = seq_len(20)
+    ),
+    file.path(dir, "sub-a_ses-1_desc-animA_preproc.tsv")
+  )
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-b_ses-1_desc-animB_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      recordingTimestamp_ms = seq(1000, 1190, by = 10),
+      gazeX.preprocessed_px = seq_len(20),
+      gazeY.preprocessed_px = seq_len(20)
+    ),
+    file.path(dir, "sub-b_ses-1_desc-animB_preproc.tsv")
+  )
+
+  normalizePath(dir, winslash = "/", mustWork = TRUE)
+}
+
+# gaze_trace_names: the "name" of each trace in a session$getOutput()'d
+# renderPlotly output, for asserting on which BRANCH of
+# output$gaze_trajectory_plot rendered without depending on plotly's exact
+# internal JSON layout beyond that one field -- build_gaze_trajectory_plot()
+# (static) names its single trace "Gaze path" (analyze_helpers.R), while the
+# animated branch's two traces are named "All samples (context)" and
+# "Current position (trail)" (also analyze_helpers.R) -- confirmed directly
+# against this app's real output before relying on it here.
+gaze_trace_names <- function(plot_output) {
+  parsed <- jsonlite::fromJSON(plot_output, simplifyVector = FALSE)
+  vapply(parsed$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
+}
+
+test_that("clicking Play starts the trail advancing over several simulated invalidateLater() ticks, wrapping back to the start at the end of the window", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1) # file A: 20 usable rows
+    # Reflect the browser echo of file A's own full [0, 190] slider bounds by
+    # hand -- see the pre-existing Gaze Explorer tests above on why this is
+    # necessary under a bare MockShinySession.
+    session$setInputs(gaze_time_range = c(0, 190))
+
+    expect_equal(gaze_anim_index(), 1L)
+    expect_false(gaze_anim_playing())
+
+    session$setInputs(gaze_play_toggle = 1)
+    expect_true(gaze_anim_playing())
+    expect_equal(gaze_anim_index(), 6L) # immediate first step, see header comment
+
+    session$elapse(150)
+    expect_equal(gaze_anim_index(), 11L)
+
+    session$elapse(150)
+    expect_equal(gaze_anim_index(), 16L)
+
+    # next step (16 + 5 = 21) would run past the 20-row window -- loops back
+    # to 1 and keeps playing, rather than stopping or erroring.
+    session$elapse(150)
+    expect_true(gaze_anim_playing())
+    expect_equal(gaze_anim_index(), 1L)
+
+    session$elapse(150)
+    expect_equal(gaze_anim_index(), 6L)
+  })
+})
+
+test_that("clicking Pause reverts output$gaze_trajectory_plot to the plain static (non-animated) view", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 190))
+
+    session$setInputs(gaze_play_toggle = 1) # Play
+    playing_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
+    expect_true("Current position (trail)" %in% playing_names)
+    expect_false("Gaze path" %in% playing_names)
+
+    session$setInputs(gaze_play_toggle = 1) # Pause
+    expect_false(gaze_anim_playing())
+    paused_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
+    expect_true("Gaze path" %in% paused_names)
+    expect_false("Current position (trail)" %in% paused_names)
+  })
+})
+
+test_that("moving the time-range slider while playing stops playback rather than silently animating against a now-stale window", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 190))
+
+    session$setInputs(gaze_play_toggle = 1)
+    expect_true(gaze_anim_playing())
+
+    session$setInputs(gaze_time_range = c(0, 150)) # drag either handle
+    expect_false(gaze_anim_playing())
+    expect_equal(gaze_anim_index(), 1L)
+
+    # Confirm it's really stopped, not just paused-in-place: no further
+    # advancement even if a stray invalidateLater() were somehow still live.
+    session$elapse(300)
+    expect_false(gaze_anim_playing())
+    expect_equal(gaze_anim_index(), 1L)
+  })
+})
+
+test_that("switching to a different selected_source_file() while playing stops/resets playback rather than continuing to animate the previous file's data", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1) # file A
+    session$setInputs(gaze_time_range = c(0, 190))
+
+    session$setInputs(gaze_play_toggle = 1)
+    expect_true(gaze_anim_playing())
+    session$elapse(150)
+    expect_equal(gaze_anim_index(), 11L)
+
+    session$setInputs(qc_table_rows_selected = 2) # file B: different file entirely
+    expect_false(gaze_anim_playing())
+    expect_equal(gaze_anim_index(), 1L)
+
+    session$elapse(300)
+    expect_false(gaze_anim_playing())
+  })
+})
+
+test_that("defining or clearing an AOI while playing stops playback", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 190))
+
+    session$setInputs(gaze_play_toggle = 1) # Play
+    expect_true(gaze_anim_playing())
+
+    session$setInputs(gaze_define_aoi = 1)
+    session$setInputs(
+      gaze_aoi1x = 0, gaze_aoi1y = 0,
+      gaze_aoi2x = 10, gaze_aoi2y = 0,
+      gaze_aoi3x = 10, gaze_aoi3y = 10,
+      gaze_aoi4x = 0, gaze_aoi4y = 10
+    )
+    session$setInputs(gaze_aoi_submit = 1) # defining an AOI
+    expect_false(gaze_anim_playing())
+
+    # Play again, then clear the AOI -- clearing must ALSO stop playback,
+    # not just defining one in the first place.
+    session$setInputs(gaze_play_toggle = 1)
+    expect_true(gaze_anim_playing())
+    session$setInputs(gaze_clear_aoi = 1)
+    expect_null(aoi_polygon())
+    expect_false(gaze_anim_playing())
+  })
+})
+
+test_that("changing the trail length while playing does NOT stop playback, and the rendered trail trace reflects the new length", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 190))
+
+    session$setInputs(gaze_play_toggle = 1)
+    session$elapse(150) # gaze_anim_index() == 11
+    expect_equal(gaze_anim_index(), 11L)
+
+    parsed_before <- jsonlite::fromJSON(session$getOutput("gaze_trajectory_plot"), simplifyVector = FALSE)
+    names_before <- vapply(parsed_before$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
+    trail_before <- parsed_before$x$data[[which(names_before == "Current position (trail)")]]
+    expect_equal(length(trail_before$x), 11) # min(current_index, trail_length=90) == 11
+
+    session$setInputs(gaze_trail_length = 5)
+    expect_true(gaze_anim_playing()) # NOT a reset trigger, unlike the 3 tests above
+    expect_equal(gaze_anim_index(), 11L) # index itself untouched by this change
+
+    parsed_after <- jsonlite::fromJSON(session$getOutput("gaze_trajectory_plot"), simplifyVector = FALSE)
+    names_after <- vapply(parsed_after$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
+    trail_after <- parsed_after$x$data[[which(names_after == "Current position (trail)")]]
+    expect_equal(length(trail_after$x), 5) # min(current_index=11, trail_length=5) == 5
+
+    # ...and it keeps ticking normally afterward.
+    session$elapse(150)
+    expect_equal(gaze_anim_index(), 16L)
+  })
+})
+
+test_that("pausing mid-playback then pressing Play again resumes from the paused index rather than restarting at 1", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 190))
+
+    session$setInputs(gaze_play_toggle = 1) # Play: index -> 6 (immediate first step)
+    session$elapse(150) # -> 11
+    expect_equal(gaze_anim_index(), 11L)
+
+    session$setInputs(gaze_play_toggle = 1) # Pause
+    expect_false(gaze_anim_playing())
+    expect_equal(gaze_anim_index(), 11L) # frozen at the paused index, not reset
+
+    session$setInputs(gaze_play_toggle = 1) # Play again: resume, not restart
+    expect_true(gaze_anim_playing())
+    # Resuming from a genuine mid-window pause (11 < 20 rows) continues from
+    # 11 with the same immediate-first-step advance documented above, NOT a
+    # restart to 1 (which would instead read as index == 6 here).
+    expect_equal(gaze_anim_index(), 16L)
+  })
+})
+
+test_that("pressing Play again after playback has already reached/passed the end of the window restarts at sample 1 (not a mid-window resume)", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    # Narrow to a 16-row window (0..150ms, step 10ms = 16 samples) so a whole
+    # number of 5-sample ticks (6, 11, 16) lands EXACTLY on the last row --
+    # the "at/past the end" boundary this test needs, rather than the 20-row
+    # full window above (whose tick sequence 6/11/16 never lands exactly on
+    # row 20, only overshoots past it on the NEXT tick).
+    session$setInputs(gaze_time_range = c(0, 150))
+    expect_equal(nrow(gaze_prepared_df()), 16L)
+
+    session$setInputs(gaze_play_toggle = 1) # Play: index -> 6 (immediate first step)
+    session$elapse(150) # -> 11
+    session$elapse(150) # -> 16 == nrow(prepared): exactly at the end
+    expect_equal(gaze_anim_index(), 16L)
+
+    session$setInputs(gaze_play_toggle = 1) # Pause at the boundary
+    expect_false(gaze_anim_playing())
+    expect_equal(gaze_anim_index(), 16L)
+
+    session$setInputs(gaze_play_toggle = 1) # Play again: restart at 1, not resume from 16
+    expect_true(gaze_anim_playing())
+    # Restart-to-1 followed by the same immediate-first-step advance (1 + 5)
+    # documented above -- NOT a continuation past 16 (which would error/wrap
+    # against a stale index the reset observer already zeroed conceptually).
+    expect_equal(gaze_anim_index(), 6L)
   })
 })
 
