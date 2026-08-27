@@ -40,6 +40,32 @@ test_that("windows_long_path() does not double-prefix an already-extended-length
   expect_equal(windows_long_path(already_prefixed_unc, os_type = "windows"), already_prefixed_unc)
 })
 
+test_that("windows_long_path() trims a stray leading/trailing space before checking absoluteness, rather than misclassifying the path as relative", {
+  # Regression guard for a real bug found in field testing: a leading space
+  # before the drive letter (e.g. a copy-pasted or hand-typed directory path
+  # with an accidental space) made .windows_is_absolute_path()'s regex --
+  # which requires the drive letter at literal position 0 -- return FALSE,
+  # so the path was treated as RELATIVE and had getwd() prepended in front
+  # of it, producing a garbled result that concatenates the current working
+  # directory with the still-space-prefixed original path. That garbled
+  # string, handed to a real fs::dir_create() call downstream, produces
+  # exactly the "[EINVAL] Failed to make directory ' C:'"-style error a real
+  # user hit in the field -- confirmed by direct reproduction against a real
+  # long path on Windows, not a hypothetical.
+  expect_equal(
+    windows_long_path(" C:/Users/foo/bar/baz.tsv", os_type = "windows"),
+    "\\\\?\\C:\\Users\\foo\\bar\\baz.tsv"
+  )
+  expect_equal(
+    windows_long_path("C:/Users/foo/bar/baz.tsv  ", os_type = "windows"),
+    "\\\\?\\C:\\Users\\foo\\bar\\baz.tsv"
+  )
+  expect_equal(
+    windows_long_path("  C:/Users/foo/bar/baz.tsv  ", os_type = "windows"),
+    "\\\\?\\C:\\Users\\foo\\bar\\baz.tsv"
+  )
+})
+
 test_that("windows_long_path() prefixes a plain absolute path with \\\\?\\", {
   expect_equal(
     windows_long_path("C:/Users/foo/bar/baz.tsv", os_type = "windows"),

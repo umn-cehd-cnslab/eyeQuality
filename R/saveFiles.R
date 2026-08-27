@@ -68,6 +68,21 @@ saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = 
 #' @export
 
 create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL) {
+  # trimws(): a stray leading/trailing space in inputfile/outputDir (e.g. a
+  # copy-pasted path, or a directoryBIDS value loaded from a hand-edited
+  # batch_config.yaml) propagates straight through fs::path_dir()/fs::path()
+  # below into fs::dir_create(newdirectory) a few lines down, which then
+  # rejects the space-corrupted path with a confusing "[EINVAL] Failed to
+  # make directory ' C:'"-style error that gives no hint the actual problem
+  # is whitespace -- confirmed by direct reproduction, not theoretical. The
+  # Shiny apps already trim at their own directory-selection reactive (the
+  # more likely entry point in practice), but this function is also called
+  # directly (not just via the apps), so it defends itself here too rather
+  # than relying only on callers to have already done so.
+  inputfile <- trimws(inputfile)
+  if (!is.null(outputDir)) {
+    outputDir <- trimws(outputDir)
+  }
   # Remove file extension (assuming the last occurrence of "." denotes the extension)
   # .safe_basename() (see R/windowsLongPath.R): base R's own basename() has
   # its own ~300-character path limit on Windows, distinct from (and not

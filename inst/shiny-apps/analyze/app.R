@@ -379,12 +379,19 @@ server <- function(input, output, session) {
   directory_override <- reactiveVal(getShinyOption("analyze_initialDirectory", NULL))
 
   selected_dir <- reactive({
+    # trimws(): see the Setup app's identical fix (inst/shiny-apps/setup/app.R)
+    # for the full write-up -- a stray leading/trailing space here propagates
+    # into every downstream file path this app reads and, more importantly,
+    # into any output directory a real batch run tries to create for it,
+    # producing a confusing "[EINVAL] Failed to make directory ' C:'"-style
+    # error with no hint the actual problem is whitespace. Confirmed by
+    # direct reproduction, not theoretical.
     if (!is.null(input$directory) && is.list(input$directory)) {
-      return(shinyFiles::parseDirPath(volumes, input$directory))
+      return(trimws(shinyFiles::parseDirPath(volumes, input$directory)))
     }
     override <- directory_override()
     if (!is.null(override) && nzchar(override)) {
-      return(override)
+      return(trimws(override))
     }
     character(0)
   })

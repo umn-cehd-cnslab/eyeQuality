@@ -71,6 +71,26 @@ windows_long_path <- function(path, os_type = .Platform$OS.type) {
     return(path)
   }
 
+  # trimws() FIRST, unconditionally: a stray leading space before a drive
+  # letter (e.g. " C:/Users/...", picked up from string concatenation, a
+  # copy-pasted path, or a text input field) is real, confirmed-reproduced
+  # data this function was otherwise mishandling catastrophically --
+  # .windows_is_absolute_path()'s regex requires the drive letter at literal
+  # position 0, so a leading-space path was being misclassified as
+  # RELATIVE, triggering the getwd()-prepending branch below and producing
+  # a garbled result that concatenates the current working directory in
+  # front of the (still space-prefixed) original path -- e.g.
+  # " C:/Users/glick094" became something like
+  # "\\\\?\\C:\\...\\eyeQuality\\ C:\\Users\\glick094", which is neither the
+  # original path nor a sane one, and is exactly the shape of a real
+  # "Failed to make directory ' C:'"-style EINVAL a caller further downstream
+  # (e.g. fs::dir_create()) would then hit. A trailing space is equally
+  # nonsensical as part of a path and trimmed for the same reason.
+  path <- trimws(path)
+  if (!nzchar(path)) {
+    return(path)
+  }
+
   extended_prefix <- "\\\\?\\" # literal \\?\
 
   if (startsWith(path, extended_prefix)) {

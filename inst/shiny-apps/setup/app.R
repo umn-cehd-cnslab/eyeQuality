@@ -155,12 +155,25 @@ server <- function(input, output, session) {
   directory_override <- reactiveVal(NULL)
 
   selected_dir <- reactive({
+    # trimws(): a stray leading/trailing space here (typed into
+    # directory_override()'s source -- a pasted path, or a directoryBIDS
+    # value loaded from a hand-edited batch_config.yaml -- shinyFiles'
+    # parseDirPath() itself is a less likely but not excluded source)
+    # propagates into every file path listBidsFiles() discovers under this
+    # directory, and from there into every real output directory
+    # eyeQualityBatch() tries to create per file. fs::dir_create() rejects a
+    # leading-space path outright with a confusing "[EINVAL] Failed to make
+    # directory ' C:'"-style error that gives no hint the actual problem is
+    # whitespace -- confirmed by direct reproduction, not theoretical.
+    # Trimmed once here, at the single reactive every downstream consumer
+    # of the selected directory reads from, rather than chasing every
+    # possible place a space could otherwise sneak in.
     if (!is.null(input$directory) && is.list(input$directory)) {
-      return(shinyFiles::parseDirPath(volumes, input$directory))
+      return(trimws(shinyFiles::parseDirPath(volumes, input$directory)))
     }
     override <- directory_override()
     if (!is.null(override) && nzchar(override)) {
-      return(override)
+      return(trimws(override))
     }
     character(0)
   })

@@ -50,6 +50,31 @@ test_that("create_new_filename() extracts filename and extension from a Windows-
   expect_equal(fs::path(result), fs::path(out_dir, "baz_desc-preproc.tsv"))
 })
 
+test_that("create_new_filename() trims a stray leading/trailing space from inputfile and outputDir rather than propagating it into fs::dir_create()", {
+  # Regression guard for a real bug found in field testing: a leading space
+  # in inputfile/outputDir (e.g. a copy-pasted directory path, or a
+  # directoryBIDS value loaded from a hand-edited batch_config.yaml)
+  # propagated straight through fs::path_dir()/fs::path() into
+  # fs::dir_create(newdirectory) a few lines down, which rejects the
+  # space-corrupted path with a confusing "[EINVAL] Failed to make
+  # directory ' C:'"-style error that gives no hint the actual problem is
+  # whitespace -- confirmed by direct reproduction on real Windows, not a
+  # hypothetical. The Shiny apps also trim at their own directory-selection
+  # reactive (the more likely entry point in practice), but this function
+  # is called directly too, so it defends itself here rather than relying
+  # only on callers having already done so.
+  out_dir <- tempfile("p210_trim_out_")
+  dir.create(out_dir)
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
+  inputfile <- "  C:/Users/foo/bar/baz.tsv  "
+  padded_out_dir <- paste0("  ", out_dir, "  ")
+
+  result <- create_new_filename(inputfile, "_desc-preproc", ".tsv", outputDir = padded_out_dir)
+
+  expect_equal(fs::path(result), fs::path(out_dir, "baz_desc-preproc.tsv"))
+})
+
 test_that("create_new_filename() extracts filename and extension from a raw Windows-style backslash input path when outputDir is supplied", {
   # Using outputDir here sidesteps fs::path_dir()'s POSIX/backslash
   # limitation (see file header) entirely, since the output directory is

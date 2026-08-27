@@ -107,6 +107,20 @@ windows_long_path <- function(path) {
   if (is.null(path) || length(path) != 1 || is.na(path) || !nzchar(path)) {
     return(path)
   }
+
+  # trimws() FIRST, unconditionally: a stray leading space before a drive
+  # letter (e.g. " C:/Users/...") makes the absolute-path check below
+  # misclassify a genuinely-absolute path as relative, triggering a
+  # getwd()-prepending fallback that produces a garbled result -- confirmed
+  # by direct reproduction, not theoretical; see R/windowsLongPath.R's
+  # sibling copy of this function for the full write-up of exactly what
+  # went wrong and why it looks like a "Failed to make directory ' C:'"
+  # EINVAL from a downstream fs::dir_create()/similar caller.
+  path <- trimws(path)
+  if (!nzchar(path)) {
+    return(path)
+  }
+
   if (startsWith(path, "\\\\?\\")) {
     return(path)
   }
