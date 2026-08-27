@@ -26,8 +26,8 @@
       smoothed_Y                                         0    0.00                 0
       smoothed_pupil                                     0    0.00                 0
       smoothed_distZ                                     0    0.00                 0
-      smoothed_velocity_X                               NA      NA                NA
-      smoothed_velocity_Y                               NA      NA                NA
+      smoothed_velocity_X                                0    0.00                 0
+      smoothed_velocity_Y                                0    0.00                 0
       ivt_fixations                                    198    0.99               198
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2
@@ -218,7 +218,7 @@
       final_na                                           0    0.00                 0
       final_valid                                      200    1.00               200
       interpolated_LeftEye                               0    0.00                 0
-      interpolated_RightEye                             NA      NA                NA
+      interpolated_RightEye                              0    0.00                 0
       eye_select_LeftOnly                              200    1.00               200
       eye_select_RightOnly                               0    0.00                 0
       eye_select_mean                                    0    0.00                 0
@@ -230,8 +230,8 @@
       smoothed_Y                                         0    0.00                 0
       smoothed_pupil                                     0    0.00                 0
       smoothed_distZ                                     0    0.00                 0
-      smoothed_velocity_X                               NA      NA                NA
-      smoothed_velocity_Y                               NA      NA                NA
+      smoothed_velocity_X                                0    0.00                 0
+      smoothed_velocity_Y                                0    0.00                 0
       ivt_fixations                                    198    0.99               198
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2
@@ -434,8 +434,8 @@
       smoothed_Y                                         0    0.00                 0
       smoothed_pupil                                     0    0.00                 0
       smoothed_distZ                                     0    0.00                 0
-      smoothed_velocity_X                               NA      NA                NA
-      smoothed_velocity_Y                               NA      NA                NA
+      smoothed_velocity_X                                0    0.00                 0
+      smoothed_velocity_Y                                0    0.00                 0
       ivt_fixations                                    198    0.99               198
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2
@@ -626,7 +626,7 @@
       final_na                                           0    0.00                 0
       final_valid                                      200    1.00               200
       interpolated_LeftEye                               0    0.00                 0
-      interpolated_RightEye                             NA      NA                NA
+      interpolated_RightEye                              0    0.00                 0
       eye_select_LeftOnly                              200    1.00               200
       eye_select_RightOnly                               0    0.00                 0
       eye_select_mean                                    0    0.00                 0
@@ -638,8 +638,8 @@
       smoothed_Y                                         0    0.00                 0
       smoothed_pupil                                     0    0.00                 0
       smoothed_distZ                                     0    0.00                 0
-      smoothed_velocity_X                               NA      NA                NA
-      smoothed_velocity_Y                               NA      NA                NA
+      smoothed_velocity_X                                0    0.00                 0
+      smoothed_velocity_Y                                0    0.00                 0
       ivt_fixations                                    198    0.99               198
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2

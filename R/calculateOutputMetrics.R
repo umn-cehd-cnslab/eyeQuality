@@ -54,56 +54,56 @@ calculateOutputMetrics <- function(data) {
       # interpolated gaps filled
       total_rows_interpolated_LeftX = sum(
         ifelse(
-          .data$gazeLeftX.valid %>% replace(is.na(.data), 0) != .data$gazeLeftX.int %>% replace(is.na(.data), 0),
+          .data$gazeLeftX.valid %>% replace(is.na(.), 0) != .data$gazeLeftX.int %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightX = sum(
         ifelse(
-          .data$gazeRightX.valid %>% replace(is.na(.data), 0) != .data$gazeRightX.int %>% replace(is.na(.data), 0),
+          .data$gazeRightX.valid %>% replace(is.na(.), 0) != .data$gazeRightX.int %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftY = sum(
         ifelse(
-          .data$gazeLeftY.valid %>% replace(is.na(.data), 0) != .data$gazeLeftY.int %>% replace(is.na(.data), 0),
+          .data$gazeLeftY.valid %>% replace(is.na(.), 0) != .data$gazeLeftY.int %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightY = sum(
         ifelse(
-          .data$gazeRightY.valid %>% replace(is.na(.data), 0) != .data$gazeRightY.int %>% replace(is.na(.data), 0),
+          .data$gazeRightY.valid %>% replace(is.na(.), 0) != .data$gazeRightY.int %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftPupil = sum(
         ifelse(
-          .data$pupilLeft.valid %>% replace(is.na(.data), 0) != .data$pupilLeft.int %>% replace(is.na(.data), 0),
+          .data$pupilLeft.valid %>% replace(is.na(.), 0) != .data$pupilLeft.int %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightPupil = sum(
         ifelse(
-          .data$pupilRight.valid %>% replace(is.na(.data), 0) != .data$pupilRight.int %>% replace(is.na(.data), 0),
+          .data$pupilRight.valid %>% replace(is.na(.), 0) != .data$pupilRight.int %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_LeftDistZ = sum(
         ifelse(
-          .data$distanceLeftZ.valid %>% replace(is.na(.data), 0) != .data$distanceLeftZ.int %>% replace(is.na(.data), 0),
+          .data$distanceLeftZ.valid %>% replace(is.na(.), 0) != .data$distanceLeftZ.int %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_interpolated_RightDistZ = sum(
         ifelse(
-          .data$distanceRightZ.valid %>% replace(is.na(.data), 0) != .data$distanceRightZ.int %>% replace(is.na(.data), 0),
+          .data$distanceRightZ.valid %>% replace(is.na(.), 0) != .data$distanceRightZ.int %>% replace(is.na(.), 0),
           1,
           0
         )
@@ -112,28 +112,28 @@ calculateOutputMetrics <- function(data) {
       # eye select
       # total_rows_eye_select_LeftX = sum(
       #   ifelse(
-      #     .data$gazeLeftX.int %>% replace(is.na(.data), 0) != .data$gpLeft.X.temp %>% replace(is.na(.data), 0),
+      #     .data$gazeLeftX.int %>% replace(is.na(.), 0) != .data$gpLeft.X.temp %>% replace(is.na(.), 0),
       #     1,
       #     0
       #   )
       # ),
       # total_rows_eye_select_RightX = sum(
       #   ifelse(
-      #     .data$gazeRightX.int %>% replace(is.na(.data), 0) != .data$gpRight.X.temp %>% replace(is.na(.data), 0),
+      #     .data$gazeRightX.int %>% replace(is.na(.), 0) != .data$gpRight.X.temp %>% replace(is.na(.), 0),
       #     1,
       #     0
       #   )
       # ),
       # total_rows_eye_select_LeftY = sum(
       #   ifelse(
-      #     .data$gazeLeftY.int %>% replace(is.na(.data), 0) != .data$gpLeft.Y.temp %>% replace(is.na(.data), 0),
+      #     .data$gazeLeftY.int %>% replace(is.na(.), 0) != .data$gpLeft.Y.temp %>% replace(is.na(.), 0),
       #     1,
       #     0
       #   )
       # ),
       # total_rows_eye_select_RightY = sum(
       #   ifelse(
-      #     .data$gazeRightY.int %>% replace(is.na(.data), 0) != .data$gpRight.Y.temp %>% replace(is.na(.data), 0),
+      #     .data$gazeRightY.int %>% replace(is.na(.), 0) != .data$gpRight.Y.temp %>% replace(is.na(.), 0),
       #     1,
       #     0
       #   )
@@ -268,14 +268,14 @@ calculateOutputMetrics <- function(data) {
       # smoothing
       total_rows_denoise_X = sum(
         ifelse(
-          .data$gazeX.eyeSelect %>% replace(is.na(.data), 0) != .data$gazeX.smooth %>% replace(is.na(.data), 0),
+          .data$gazeX.eyeSelect %>% replace(is.na(.), 0) != .data$gazeX.smooth %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_denoise_Y = sum(
         ifelse(
-          .data$gazeY.eyeSelect %>% replace(is.na(.data), 0) != .data$gazeY.smooth %>% replace(is.na(.data), 0),
+          .data$gazeY.eyeSelect %>% replace(is.na(.), 0) != .data$gazeY.smooth %>% replace(is.na(.), 0),
           1,
           0
         )
@@ -286,14 +286,14 @@ calculateOutputMetrics <- function(data) {
       sd_abs_diff_denoise_Y = sd(abs(.data$gazeY.smooth - .data$gazeY.eyeSelect), na.rm = TRUE),
       total_rows_denoise_pupil = sum(
         ifelse(
-          .data$pupil.eyeSelect %>% replace(is.na(.data), 0) != .data$pupil.smooth %>% replace(is.na(.data), 0),
+          .data$pupil.eyeSelect %>% replace(is.na(.), 0) != .data$pupil.smooth %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_denoise_distZ = sum(
         ifelse(
-          .data$distanceZ.eyeSelect %>% replace(is.na(.data), 0) != .data$distanceZ.smooth %>% replace(is.na(.data), 0),
+          .data$distanceZ.eyeSelect %>% replace(is.na(.), 0) != .data$distanceZ.smooth %>% replace(is.na(.), 0),
           1,
           0
         )
@@ -326,14 +326,14 @@ calculateOutputMetrics <- function(data) {
       # velocity smoothing
       total_rows_smoothVA_X = sum(
         ifelse(
-          .data$velocityX_va_ms %>% replace(is.na(.data), 0) != .data$velocityX.smooth_va_ms %>% replace(is.na(.data), 0),
+          .data$velocityX_va_ms %>% replace(is.na(.), 0) != .data$velocityX.smooth_va_ms %>% replace(is.na(.), 0),
           1,
           0
         )
       ),
       total_rows_smoothVA_Y = sum(
         ifelse(
-          .data$velocityY_va_ms %>% replace(is.na(.data), 0) != .data$velocityY.smooth_va_ms %>% replace(is.na(.data), 0),
+          .data$velocityY_va_ms %>% replace(is.na(.), 0) != .data$velocityY.smooth_va_ms %>% replace(is.na(.), 0),
           1,
           0
         )
