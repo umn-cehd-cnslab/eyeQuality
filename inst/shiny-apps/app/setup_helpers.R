@@ -146,6 +146,13 @@ null_to_blank <- function(x) {
 # would use (see app.R), for the same reproducibility purpose the plan calls
 # for -- without adding a numberCores input to the launch form itself.
 #
+# outputStructure/copyRawFile (P9-08): the Setup form's "Use BIDS-structured
+#   output"/"Also copy raw file into output structure" checkboxes (P7-07's
+#   eyeQualityBatch() parameters of the same names). Plain form fields, not
+#   special-cased like `numberCores` above -- both checkboxes always have a
+#   real value (FALSE/"flat" by default), so there's nothing for `extra` to
+#   need to fill in when this session never loaded a config.
+#
 # extra: NULL, or a full config list (typically from `read_batch_config()`)
 #   whose fields the form doesn't itself control should be preserved through
 #   this save.
@@ -168,6 +175,8 @@ build_batch_config_from_form <- function(directoryBIDS,
                                           outputDir,
                                           validityThreshold,
                                           eyeSelection_method,
+                                          outputStructure = "flat",
+                                          copyRawFile = FALSE,
                                           extra = NULL,
                                           defaultNumberCores = NULL) {
   extra <- if (is.null(extra)) list() else extra
@@ -189,6 +198,8 @@ build_batch_config_from_form <- function(directoryBIDS,
     outputDir = blank_to_null(outputDir),
     validityThreshold = blank_to_null(validityThreshold),
     eyeSelection_method = eyeSelection_method,
+    outputStructure = outputStructure,
+    copyRawFile = isTRUE(copyRawFile),
     numberCores = numberCores
   )
 

@@ -1162,3 +1162,298 @@ test_that("runSetupApp() resolves the SAME merged app directory runAnalyzeApp() 
   expect_equal(captured_app_dir, setup_app_dir)
   expect_true(file.exists(file.path(captured_app_dir, "app.R")))
 })
+
+# ---------------------------------------------------------------------------
+# P9-08: expose P7-07's outputStructure/copyRawFile in the Setup tab UI
+# (useBidsOutput/copyRawFile checkboxes)
+# ---------------------------------------------------------------------------
+#
+# Coverage note on mechanism choice: this repo has no shinytest2 (or
+# chromote/headless-browser) infrastructure at all -- confirmed directly
+# (requireNamespace("shinytest2")/requireNamespace("chromote") both FALSE
+# against the authoritative Windows R 4.2.1 install this suite runs
+# against), and it isn't in DESCRIPTION's Suggests. Standing up that
+# infrastructure (a new heavy Suggests dependency plus a downloaded headless
+# Chrome binary) is a real scope expansion beyond this task's own test
+# coverage, so it isn't added here without that being a deliberate call --
+# flagging it explicitly rather than silently adding it.
+#
+# What's tested here instead, without a live browser:
+#   - the actual conditionalPanel() wiring in the rendered `ui` object
+#     (collect_display_if_chain() below) -- this is the real, single source
+#     of truth for which condition string gates each checkbox's visibility,
+#     and directly fails if that wrapping/condition/nesting is ever changed
+#     or removed. What it does NOT prove is that shiny.js's own client-side
+#     data-display-if handling actually toggles the DOM correctly at
+#     runtime -- that's unmodified, long-standing shiny library behavior
+#     already relied on by every other conditionalPanel in this same file
+#     (layout bids/glob, qcflags_show_detail), not something this task's own
+#     code could plausibly break without also breaking those.
+#   - that nothing server-side (no observer keyed on input$outputDir)
+#     programmatically resets useBidsOutput/copyRawFile when outputDir
+#     toggles blank/non-blank -- the actual server-side half of the "hide,
+#     don't disable" design decision (app.R's own comment on
+#     useBidsOutput/copyRawFile), and the one part of flow 6 a
+#     testServer()-level test genuinely can regress-guard.
+#   - the full save/load/launch flows (3, 4, 5 in the originating task),
+#     which are ordinary reactive-state-level testServer() coverage, no
+#     different in kind from this file's existing P9-04/P10-12 tests above.
+
+# collect_display_if_chain: walks a shiny.tag/shiny.tag.list structure
+# looking for a tag whose `id` attribute equals `target_id` (checkboxInput()
+# places `id` on the innermost <input> element, confirmed directly via
+# as.character(checkboxInput(...))), accumulating every ancestor
+# conditionalPanel()'s `data-display-if` condition string along the way (in
+# outside-in order). Returns NULL if `target_id` isn't found anywhere in the
+# tree, or a character vector of 1+ condition strings (outermost first) if it
+# is -- character(0) would mean "found, but not inside any conditionalPanel",
+# which doesn't happen for either checkbox under test here.
+collect_display_if_chain <- function(tag, target_id, chain = character(0)) {
+  if (is.null(tag)) {
+    return(NULL)
+  }
+  if (inherits(tag, "shiny.tag")) {
+    new_chain <- chain
+    if (!is.null(tag$attribs[["data-display-if"]])) {
+      new_chain <- c(chain, tag$attribs[["data-display-if"]])
+    }
+    if (!is.null(tag$attribs[["id"]]) && identical(tag$attribs[["id"]], target_id)) {
+      return(new_chain)
+    }
+    for (child in tag$children) {
+      result <- collect_display_if_chain(child, target_id, new_chain)
+      if (!is.null(result)) {
+        return(result)
+      }
+    }
+    return(NULL)
+  }
+  if (is.list(tag)) {
+    for (child in tag) {
+      result <- collect_display_if_chain(child, target_id, chain)
+      if (!is.null(result)) {
+        return(result)
+      }
+    }
+  }
+  NULL
+}
+
+# load_setup_app_ui: sources app.R's top-level `ui <- navbarPage(...)`
+# assignment into a fresh environment, the same way shiny::runApp()/
+# shiny::testServer() do internally (both require the app directory to be
+# the working directory, since app.R's own source("setup_helpers.R", local =
+# TRUE) etc. calls are relative paths resolved against getwd(), not against
+# app.R's own location) -- but WITHOUT starting a real Shiny session, since
+# building the `ui` object itself has no Shiny-session dependency at all.
+load_setup_app_ui <- function() {
+  old_wd <- setwd(setup_app_dir)
+  on.exit(setwd(old_wd), add = TRUE)
+  ui_env <- new.env()
+  source("app.R", local = ui_env)
+  ui_env$ui
+}
+
+test_that("useBidsOutput checkbox is gated by conditionalPanel(input.outputDir != '') (flows 1/2: hidden until outputDir is non-blank)", {
+  skip_on_cran()
+
+  ui <- load_setup_app_ui()
+  chain <- collect_display_if_chain(ui, "useBidsOutput")
+
+  expect_equal(chain, "input.outputDir != ''")
+})
+
+test_that("copyRawFile checkbox is nested inside BOTH conditionalPanel(outputDir set) AND conditionalPanel(useBidsOutput checked) (flow 2: only revealed once useBidsOutput is checked)", {
+  skip_on_cran()
+
+  ui <- load_setup_app_ui()
+  chain <- collect_display_if_chain(ui, "copyRawFile")
+
+  expect_equal(chain, c("input.outputDir != ''", "input.useBidsOutput == true"))
+})
+
+test_that("toggling input$outputDir blank -> non-blank -> blank never triggers a server-side update*Input() on useBidsOutput/copyRawFile, and input$useBidsOutput itself is left untouched (flow 6: 'hide, don't disable' has no server-side reset to regress)", {
+  skip_on_cran()
+
+  cap <- capturing_update_session()
+  shiny::testServer(setup_app_dir, {
+    prime_and_clear(session, cap$calls)
+
+    session$setInputs(outputDir = "/some/dir", useBidsOutput = TRUE)
+    session$setInputs(outputDir = "")
+    session$setInputs(outputDir = "/some/other/dir")
+
+    expect_null(cap$calls[["useBidsOutput"]])
+    expect_null(cap$calls[["copyRawFile"]])
+    # no server-side observer silently unsets the underlying input value either
+    expect_true(isolate(input$useBidsOutput))
+  }, session = cap$session)
+})
+
+test_that("Setup app launch with useBidsOutput + copyRawFile checked produces BIDS-structured derivatives output plus a raw file copy on disk, exactly per P7-07's acceptance criteria (flow 3)", {
+  skip_on_cran()
+  skip_if_not_installed("later")
+
+  src <- testthat::test_path("fixtures", "bids")
+  dest <- tempfile("p908_bidsrun_")
+  fs::dir_copy(src, dest)
+  on.exit(unlink(dest, recursive = TRUE), add = TRUE)
+  dest <- normalizePath(dest, winslash = "/", mustWork = TRUE)
+  data_segments <- rel_home_segments(dest)
+
+  out_dir <- tempfile("p908_bidsrun_out_")
+  dir.create(out_dir, recursive = TRUE)
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = data_segments))
+    session$setInputs(
+      layout = "bids",
+      subjectPattern_regex = "sub-[A-Z0-9]+",
+      sessionPattern_regex = "ses-[0-9]+",
+      recursiveSearch = FALSE,
+      modalityPattern_regex = "",
+      displayDimensionX_mm = 594,
+      displayDimensionY_mm = 344,
+      eyeSelection_method = "Maximize",
+      validityThreshold = NA,
+      outputDir = out_dir,
+      useBidsOutput = TRUE,
+      copyRawFile = TRUE,
+      batchName = "p908bidsrun"
+    )
+    session$setInputs(preview = 1)
+    expect_equal(preview_result()$matched_count, 4)
+
+    session$setInputs(launch = 1)
+
+    # future/promises resolution needs the later event loop pumped manually
+    # (no running Shiny app to do it automatically) -- same technique as the
+    # P9-04 launch e2e test above.
+    deadline <- Sys.time() + 60
+    repeat {
+      later::run_now(timeoutSecs = 1)
+      if (!identical(progress_state$status, "running")) break
+      if (Sys.time() > deadline) break
+    }
+    expect_equal(progress_state$status, "done")
+    expect_equal(progress_state$n_done, 4)
+  })
+
+  # Derivative outputs land under <outputDir>/derivatives/eyeQuality-v1/sub-XX/ses-XX/,
+  # never flat directly under out_dir.
+  qcsummary_files <- list.files(
+    file.path(out_dir, "derivatives", "eyeQuality-v1"),
+    pattern = "qcsummary\\.tsv$", recursive = TRUE, full.names = TRUE
+  )
+  expect_length(qcsummary_files, 4)
+  flat_leftover <- list.files(out_dir, pattern = "qcsummary\\.tsv$", recursive = FALSE, full.names = TRUE)
+  expect_length(flat_leftover, 0)
+
+  # Raw copies land at <outputDir>/sub-XX/ses-XX/<original filename>, sibling
+  # to derivatives/eyeQuality-v1/, unmodified.
+  for (sub in c("sub-1", "sub-2")) {
+    for (ses in c("ses-1", "ses-2")) {
+      filename <- sprintf("%s_%s_recording-eyetracking_physio.tsv", sub, ses)
+      raw_copy <- file.path(out_dir, sub, ses, filename)
+      expect_true(file.exists(raw_copy), info = raw_copy)
+      original <- file.path(dest, sub, ses, filename)
+      expect_equal(readLines(raw_copy), readLines(original))
+    }
+  }
+})
+
+test_that("Setup tab's reconciled save/load round-trip preserves useBidsOutput/copyRawFile checked state (flow 4)", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p908_save_bids_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+  data_segments <- rel_home_segments(data_dir)
+
+  save_dir <- tempfile("p908_save_bids_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "bids_both_checked.yaml")
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = data_segments))
+    session$setInputs(
+      layout = "bids",
+      batchName = "p908_save_bids",
+      displayDimensionX_mm = 594,
+      displayDimensionY_mm = 344,
+      eyeSelection_method = "Maximize",
+      outputDir = "/some/central/outputs",
+      useBidsOutput = TRUE,
+      copyRawFile = TRUE
+    )
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "bids_both_checked.yaml", type = "yaml"
+    ))
+    expect_true(config_io_status()$ok)
+  })
+
+  expect_true(file.exists(save_path))
+  loaded <- read_batch_config(save_path)
+  expect_equal(loaded$outputStructure, "bids")
+  expect_true(loaded$copyRawFile)
+
+  # ...and reloading that same file pushes both checkboxes back to checked.
+  cap <- capturing_update_session()
+  shiny::testServer(setup_app_dir, {
+    prime_and_clear(session, cap$calls)
+
+    session$setInputs(load_config_file = data.frame(
+      name = "bids_both_checked.yaml",
+      datapath = save_path,
+      stringsAsFactors = FALSE
+    ))
+
+    expect_true(config_io_status()$ok)
+    expect_true(as.logical(cap$calls[["useBidsOutput"]][[1]]$value))
+    expect_true(as.logical(cap$calls[["copyRawFile"]][[1]]$value))
+  }, session = cap$session)
+})
+
+test_that("Setup tab's reconciled load falls back to flat/no-copy (unchecked) defaults for a pre-P9-08 config missing outputStructure/copyRawFile entirely (flow 5)", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p908_load_predate_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+
+  # a hand-authored, pre-P9-08/P7-07-style config: no outputStructure/
+  # copyRawFile keys at all, exactly the shape every config saved before
+  # this task existed would have.
+  cfg_path <- tempfile("p908_load_predate_cfg_", fileext = ".yaml")
+  on.exit(unlink(cfg_path), add = TRUE)
+  yaml::write_yaml(list(
+    schemaVersion = 1,
+    batchName = "predates_p908",
+    directoryBIDS = normalizePath(data_dir, winslash = "/"),
+    layout = "bids",
+    displayDimensionX_mm = 500,
+    displayDimensionY_mm = 300
+  ), cfg_path)
+
+  cap <- capturing_update_session()
+  shiny::testServer(setup_app_dir, {
+    prime_and_clear(session, cap$calls)
+
+    session$setInputs(load_config_file = data.frame(
+      name = "predates_p908.yaml",
+      datapath = cfg_path,
+      stringsAsFactors = FALSE
+    ))
+
+    # loads cleanly -- no error surfaced, same as any other complete-enough config
+    status <- config_io_status()
+    expect_true(status$ok)
+
+    expect_false(as.logical(cap$calls[["useBidsOutput"]][[1]]$value))
+    expect_false(as.logical(cap$calls[["copyRawFile"]][[1]]$value))
+  }, session = cap$session)
+})

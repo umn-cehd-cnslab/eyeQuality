@@ -162,6 +162,33 @@ ui <- navbarPage(
           step = 0.05
         ),
         textInput("outputDir", "Output directory (blank = default location alongside each input file)", value = ""),
+        # P9-08: outputStructure/copyRawFile (P7-07) are only meaningful when
+        # outputDir is set -- eyeQualityBatch()'s own outputStructure = "bids"
+        # branch only changes anything when outputDir is non-NULL (see
+        # create_new_filename()'s comment in R/saveFiles.R), so both checkboxes
+        # are simply hidden rather than shown-but-disabled while outputDir is
+        # blank. Hiding (not disabling) is enough here: a hidden checkbox's
+        # underlying input value is retained, not reset, so toggling outputDir
+        # blank and back doesn't lose whatever the user had checked -- and
+        # since the value has no effect at all while outputDir is blank
+        # anyway, there's nothing to protect against by additionally
+        # disabling it server-side.
+        conditionalPanel(
+          condition = "input.outputDir != ''",
+          checkboxInput(
+            "useBidsOutput",
+            "Use BIDS-structured output (derivatives/eyeQuality-v1/sub-XX/ses-XX/...)",
+            value = FALSE
+          ),
+          conditionalPanel(
+            condition = "input.useBidsOutput == true",
+            checkboxInput(
+              "copyRawFile",
+              "Also copy raw file into output structure",
+              value = FALSE
+            )
+          )
+        ),
         textInput("batchName", "Batch name (used to label output files)", value = "run1"),
         actionButton("preview", "Preview matched files", class = "btn-primary"),
         hr(),
@@ -763,6 +790,17 @@ server <- function(input, output, session) {
         batchName = batch_name,
         numberCores = DEFAULT_GUI_NUMBER_CORES, # see background_run.R for why this default, not eyeQualityBatch()'s auto-detect
         outputDir = blank_to_null(input$outputDir),
+        # P9-08: outputStructure/copyRawFile (P7-07) -- forwarded to
+        # eyeQualityBatch() via start_background_batch()'s `...` passthrough.
+        # Both checkboxes are only visible/meaningful once outputDir is set
+        # (see the UI's conditionalPanel above), but read unconditionally
+        # here regardless of visibility -- a hidden checkboxInput still has a
+        # real value, and eyeQualityBatch()/create_new_filename() themselves
+        # already ignore outputStructure = "bids"/copyRawFile whenever
+        # outputDir is NULL (P7-07), so there's no need to duplicate that
+        # gating here.
+        outputStructure = if (isTRUE(input$useBidsOutput)) "bids" else "flat",
+        copyRawFile = isTRUE(input$copyRawFile),
         displayDimensionX_mm = input$displayDimensionX_mm,
         displayDimensionY_mm = input$displayDimensionY_mm,
         eyeSelection_method = input$eyeSelection_method,
@@ -989,6 +1027,8 @@ server <- function(input, output, session) {
       outputDir = input$outputDir,
       validityThreshold = input$validityThreshold,
       eyeSelection_method = input$eyeSelection_method,
+      outputStructure = if (isTRUE(input$useBidsOutput)) "bids" else "flat",
+      copyRawFile = isTRUE(input$copyRawFile),
       extra = loaded_config_extra(),
       defaultNumberCores = DEFAULT_GUI_NUMBER_CORES
     )
@@ -1091,6 +1131,13 @@ server <- function(input, output, session) {
       value = if (is.null(config$validityThreshold)) NA else config$validityThreshold
     )
     updateSelectInput(session, "eyeSelection_method", selected = config$eyeSelection_method)
+    # P9-08: outputStructure/copyRawFile (P7-07) -- default_batch_config()'s
+    # modifyList() fill-in (R/batchConfig.R) already guarantees both fields
+    # are present on `config` here even when the loaded file predates this
+    # task (outputStructure = "flat", copyRawFile = FALSE), so no extra
+    # is.null() fallback is needed at this call site.
+    updateCheckboxInput(session, "useBidsOutput", value = identical(config$outputStructure, "bids"))
+    updateCheckboxInput(session, "copyRawFile", value = isTRUE(config$copyRawFile))
 
     # P10-12: also populate the Analyze tabs' own QC threshold inputs, the
     # same filter-then-fallback-to-default logic the standalone Analyze
