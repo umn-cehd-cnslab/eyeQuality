@@ -60,6 +60,36 @@ test_that("count_completed_qcsummary_files only counts outputs matching the give
   expect_length(count_completed_qcsummary_files(root, batchName = "run2"), 1)
 })
 
+test_that("count_completed_qcsummary_files finds real output even when batchName contains regex metacharacters", {
+  # Real root cause of the reported "progress bar never updates while a
+  # batch is running" bug: batchName is free-text a user types into the
+  # Setup form (e.g. a study/session label), but used to be interpolated
+  # directly into list.files()'s own `pattern` argument -- a regex, not a
+  # literal string. A batchName as ordinary as "pilot (v2)" (parentheses),
+  # "study+2" ("+"), or "cohort[A]" (brackets) silently changed what that
+  # pattern actually matched, in each of these cases matching NOTHING even
+  # though the real, correctly-named qcsummary output existed on disk --
+  # confirmed directly, and NOT reproduced by a plain "." (an unescaped "."
+  # is a regex superset, not narrower, so it still matched its own literal
+  # "." coincidentally; it takes an actual grouping/quantifier/class
+  # metacharacter to break the match outright). app.R's live-polling
+  # observe() calls this function every 2 seconds while a run is "running";
+  # if it always returns character(0) for the whole run regardless of real
+  # progress on disk, the rendered progress bar never moves off 0% until the
+  # run's own completion promise flips progress_state$status to "done"
+  # independently -- exactly the reported symptom.
+  root <- tempfile("p905_qc_regex_")
+  dir.create(root, recursive = TRUE)
+  on.exit(unlink(root, recursive = TRUE), add = TRUE)
+
+  metachar_batch_names <- c("pilot (v2)", "study+2", "cohort[A]", "study^A", "a{2}b")
+  for (batch_name in metachar_batch_names) {
+    touch_qcsummary(file.path(root, "sub-01", "a_recording-eyetracking_physio.tsv"), batchName = batch_name)
+    found <- count_completed_qcsummary_files(root, batchName = batch_name)
+    expect_length(found, 1)
+  }
+})
+
 test_that("count_completed_qcsummary_files returns empty character vector when nothing has completed yet", {
   root <- tempfile("p905_qc_")
   dir.create(root, recursive = TRUE)

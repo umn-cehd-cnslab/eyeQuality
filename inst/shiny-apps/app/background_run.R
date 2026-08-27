@@ -135,6 +135,38 @@ start_background_batch <- function(directoryBIDS,
 # every file's own nested "<file_dir>/derivatives/eyeQuality-v1/" location
 # the default outputDir = NULL case writes to).
 #
+# batchName is free-text a user types into the Setup form (a study/session
+# label), not a regex -- it used to be interpolated directly into
+# list.files()'s own `pattern` argument (a regex), which silently broke
+# matching for a batchName containing any regex metacharacter. Confirmed by
+# direct reproduction: batch names as ordinary as "pilot (v2)", "study+2", or
+# "cohort[A]" made this function return character(0) for the ENTIRE run, even
+# though eyeQualityBatch() was genuinely writing real qcsummary.tsv output to
+# disk the whole time -- the live-polling observe() in app.R (see its
+# invalidateLater(2000, session) loop) would then show the progress bar stuck
+# at 0% for the whole run before jumping straight to the final count once the
+# batch's own completion promise resolves (which reaches "done" independent
+# of this file count). A plain "." in batchName does NOT reproduce this (a
+# literal "." coincidentally still matches "." in the real filename, since
+# unescaped "." is a regex superset, not a narrower match) -- it takes an
+# actual grouping/quantifier/class metacharacter to break the match outright,
+# which is why this was worth confirming with more than one example rather
+# than concluding "." alone was safe.
+#
+# Fixed by escaping batchName's own regex metacharacters (escape_regex_literal(),
+# below) before it's interpolated into list.files()'s `pattern` regex, rather
+# than restructuring the match into a separate broad-scan-then-filter pass --
+# an earlier version of this fix did exactly that (list every
+# "*_preproc_qcsummary.tsv" file under `root` unconditionally, then filter by
+# a literal endsWith() check against each candidate's basename), which is
+# also correct, but measurably changes what a single recursive list.files()
+# call over `root` can return; when `root` is a heavily-populated, long-lived
+# directory (as it can be against a real, months-old study directory a user
+# points this at repeatedly), a broader first-pass match returns a bigger
+# intermediate candidate list than a batchName-scoped one, for no benefit --
+# escaping keeps this function's cost profile identical to a single,
+# specifically-scoped list.files() call, the same shape it always was.
+#
 # Returns a character vector of matched qcsummary filepaths (possibly empty).
 count_completed_qcsummary_files <- function(directoryBIDS, batchName, outputDir = NULL) {
   root <- if (!is.null(outputDir)) outputDir else directoryBIDS
@@ -142,8 +174,21 @@ count_completed_qcsummary_files <- function(directoryBIDS, batchName, outputDir 
     return(character(0))
   }
 
-  pattern <- paste0("_desc-", batchName, "_preproc_qcsummary\\.tsv$")
+  pattern <- paste0("_desc-", escape_regex_literal(batchName), "_preproc_qcsummary\\.tsv$")
   list.files(root, pattern = pattern, recursive = TRUE, full.names = TRUE)
+}
+
+# escape_regex_literal: escape every POSIX extended regex metacharacter in a
+# plain string so it can be interpolated into another regex (e.g. list.files()'s
+# own `pattern` argument) and only ever match itself literally. Base R has no
+# built-in equivalent (unlike e.g. Python's re.escape()) -- this covers every
+# character TRE (R's default regex engine, see ?regex) treats specially:
+# . \ | ( ) [ ] { } ^ $ * + ?. Note the `]` placed immediately after the
+# opening `[` in the character class below is a standard regex idiom for
+# including a literal "]" as the class's first member without needing its own
+# escape, since a `]` immediately following `[` can't close the class yet.
+escape_regex_literal <- function(x) {
+  gsub("([]\\[{}()+*^$.|?\\\\])", "\\\\\\1", x)
 }
 
 # poll_batch_progress: filesystem-based progress snapshot for an in-flight or

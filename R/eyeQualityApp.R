@@ -73,7 +73,9 @@ eyeQualityApp <- function(initialDirectory = NULL, ...) {
   }
 
   # app_initialTab: read by app.R's navbarPage(selected = ...) so this app
-  # always opens on the Setup & Run tab.
+  # always opens on the Setup & Run tab. "1. " prefix must match app.R's own
+  # tabPanel() title string exactly -- navbarPage()'s `selected =` matches by
+  # exact label text, not by tab index/id.
   #
   # analyze_initialDirectory: the only way to hand a value into an app
   # launched via runApp(appDir) (rather than a shinyApp(ui, server) object
@@ -88,7 +90,7 @@ eyeQualityApp <- function(initialDirectory = NULL, ...) {
   # "open pointed at an existing directory from outside this app" case
   # described above.
   shiny::shinyOptions(
-    app_initialTab = "Setup & Run",
+    app_initialTab = "1. Setup & Run",
     analyze_initialDirectory = initialDirectory
   )
 

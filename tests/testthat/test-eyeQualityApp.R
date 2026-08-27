@@ -25,7 +25,7 @@ test_that("eyeQualityApp() always sets shinyOptions(app_initialTab = 'Setup & Ru
 
   eyeQuality::eyeQualityApp()
 
-  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "Setup & Run")
+  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "1. Setup & Run")
 })
 
 test_that("eyeQualityApp() with a non-NULL initialDirectory still sets app_initialTab = 'Setup & Run', not an Analyze-specific tab", {
@@ -44,7 +44,7 @@ test_that("eyeQualityApp() with a non-NULL initialDirectory still sets app_initi
 
   eyeQuality::eyeQualityApp(initialDirectory = "/some/study/outputs")
 
-  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "Setup & Run")
+  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "1. Setup & Run")
 })
 
 test_that("eyeQualityApp() forwards a valid single-string initialDirectory to shinyOptions(analyze_initialDirectory = ...) before shiny::runApp() would be reached", {

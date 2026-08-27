@@ -74,13 +74,23 @@ ui <- navbarPage(
   # (R/eyeQualityApp.R) before shiny::runApp() is called, the same
   # shinyOptions()/getShinyOption() mechanism P9-07 already used for
   # analyze_initialDirectory below. eyeQualityApp() always sets this to
-  # "Setup & Run"; the getShinyOption() default below only matters when
+  # "1. Setup & Run"; the getShinyOption() default below only matters when
   # sourcing/launching this app.R directly with no shinyOption set at all,
   # which still opens somewhere sensible.
-  selected = getShinyOption("app_initialTab", "Setup & Run"),
+  #
+  # "1. "/"2. " prefixes on both tab labels below (and everywhere else that
+  # references them by exact string -- R/eyeQualityApp.R's own
+  # app_initialTab default, and the updateNavbarPage() hand-off further down)
+  # are a plain-text numeral marker, not a new feature -- field feedback was
+  # that the intended left-to-right Setup-then-Analyze workflow order wasn't
+  # visually obvious from two same-weight tab labels. navbarPage()'s own
+  # `selected =`/updateNavbarPage()'s own `selected =` both match tabs by
+  # this exact label string, so every one of those call sites has to agree,
+  # not just the two tabPanel() titles themselves.
+  selected = getShinyOption("app_initialTab", "1. Setup & Run"),
 
   tabPanel(
-    "Setup & Run",
+    "1. Setup & Run",
     h3("Setup & Run"),
     p(
       "Choose the top-level directory containing your eye-tracking data files, ",
@@ -232,7 +242,7 @@ ui <- navbarPage(
   ),
 
   tabPanel(
-    "Analyze / QC Explorer",
+    "2. Analyze / QC Explorer",
     h3("Analyze / QC Explorer"),
     p(
       "Choose the output directory a batch run wrote (or pointed outputDir at), ",
@@ -887,7 +897,24 @@ server <- function(input, output, session) {
             "Processed: %d   Remaining: %d", progress_state$n_done, n_remaining
           )),
           if (!is.na(progress_state$n_failed)) p(sprintf("Failed so far: %d", progress_state$n_failed)),
-          if (!is.na(eta_label)) p(sprintf("Estimated time remaining: %s", eta_label))
+          if (!is.na(eta_label)) p(sprintf("Estimated time remaining: %s", eta_label)),
+          # Before this, the only visible link into the Analyze tabs
+          # (output$post_run_link, below) only appears once a run is fully
+          # "done" -- there was no way to discover, while still watching a
+          # run in progress here, that qcsummary.tsv outputs can already be
+          # browsed as they land. This note doesn't do any hand-off itself
+          # (unlike output$post_run_link's own "Review results" button,
+          # which also loads the directory automatically) -- the Analyze
+          # tabs' directory field isn't necessarily known yet this early in a
+          # run without an explicit outputDir set, so the user is pointed at
+          # the manual controls (its own directory picker, "Load qcsummary
+          # files", and "Auto-refresh") rather than a button that assumes one.
+          div(
+            class = "alert alert-info",
+            "You can switch to the \"2. Analyze / QC Explorer\" tab right now to watch results ",
+            "land as this run completes them -- choose this run's directory there, click ",
+            "\"Load qcsummary files\" once, then check \"Auto-refresh\" to keep it updating live."
+          )
         )
       },
       "done" = {
@@ -920,7 +947,15 @@ server <- function(input, output, session) {
 
   output$failed_files_table <- renderTable({
     req(progress_state$failed_detail)
-    progress_state$failed_detail
+    df <- progress_state$failed_detail
+    # get_failed_file_details() names this column "error" (it holds the
+    # actual per-file error message) -- relabeled to "notes" for display
+    # only, since "Failed files" already says these are errors and the
+    # repeated "error" column heading read as redundant/alarming next to
+    # it. Local to this table; the underlying error/message contract is
+    # unchanged everywhere else that reads get_failed_file_details().
+    names(df)[names(df) == "error"] <- "notes"
+    df
   })
 
   # P9-07/P10-12: hand the finished run's output directory to the Analyze
@@ -970,7 +1005,7 @@ server <- function(input, output, session) {
     req(analyze_dir, nzchar(analyze_dir))
 
     do_analyze_load(analyze_dir, recursive = TRUE)
-    updateNavbarPage(session, "top_nav", selected = "Analyze / QC Explorer")
+    updateNavbarPage(session, "top_nav", selected = "2. Analyze / QC Explorer")
   })
 
   # --- P9-04/P10-07/P10-12: save/load one reconciled batch_config.yaml -----
