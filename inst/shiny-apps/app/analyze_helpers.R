@@ -550,6 +550,48 @@ derive_batch_name <- function(qcsummary_path) {
   m[2]
 }
 
+# derive_task_label: pull the BIDS "task-<label>" entity back out of a
+# recording label (derive_recording_label()'s own output, e.g.
+# "sub-01_ses-1_task-x_recording-eyetracking_physio") -- useful for studies
+# where the same sub/ses is recorded multiple times under different tasks and
+# a user wants to narrow the "Compare files" tab down to one task, or compare
+# across all of them together.
+#
+# Unlike derive_batch_name(), which recovers its value from the qcsummary
+# OUTPUT filename's own "_desc-<batchName>_" naming convention,
+# derive_task_label() reads the "task-<label>" entity out of the ORIGINAL
+# recording's BIDS-style name -- i.e. it operates on derive_recording_label()'s
+# return value, not on a qcsummary path directly. Callers that only have a
+# qcsummary path should pass derive_recording_label(path) in.
+#
+# Not every recording is BIDS-named with a task- entity at all (a non-BIDS
+# filename, or a BIDS name that simply omits "task-"), so this returns
+# NA_character_ when absent -- the same "NA is a real, expected value" contract
+# derive_batch_name() documents for its own no-batchName case. Deliberately
+# unanchored (matches "task-<label>" anywhere in the string, not just
+# immediately after "sub-.../ses-..."), since BIDS entities may appear in any
+# order once the sub-/ses- prefix is satisfied. BIDS entity labels are
+# alphanumeric only (no "_" or "-"), which is what lets [A-Za-z0-9]+ stop
+# cleanly at the next "_"-separated entity or the end of the string, without
+# needing to anchor on a trailing "_" or "$" itself.
+#
+# recording_label: a single character string (typically
+#   derive_recording_label()'s output). NULL, NA, or a zero-length string all
+#   fall through to the NA_character_ branch below, same as a string with no
+#   "task-" entity at all.
+#
+# Returns a single character string.
+derive_task_label <- function(recording_label) {
+  if (is.null(recording_label) || length(recording_label) != 1 || is.na(recording_label) || !nzchar(recording_label)) {
+    return(NA_character_)
+  }
+  m <- regmatches(recording_label, regexec("task-([A-Za-z0-9]+)", recording_label))[[1]]
+  if (length(m) < 2 || !nzchar(m[2])) {
+    return(NA_character_)
+  }
+  m[2]
+}
+
 # build_zero_match_diagnostic: human-readable explanation for why
 # discover_qcsummary_files() found nothing under a directory, in the same
 # diagnostic spirit as the Setup app's zero-match handling (P7-06) -- this
@@ -590,8 +632,8 @@ build_zero_match_diagnostic <- function(directory, recursive) {
 }
 
 # read_one_qcsummary: read a single qcsummary.tsv file and attach the
-# identifying columns (recording, batch_name, source_file) a combined
-# multi-file table needs to tell rows from different files apart.
+# identifying columns (recording, task_name, batch_name, source_file) a
+# combined multi-file table needs to tell rows from different files apart.
 # calculateOutputMetrics()'s output (see R/calculateOutputMetrics.R) is one
 # row per qc_metric, not one row per file -- saveFiles() writes it with a
 # leading "qc_metric" column plus whatever stat columns
@@ -610,14 +652,27 @@ build_zero_match_diagnostic <- function(directory, recursive) {
 # if the file isn't parseable as a delimited qcsummary.tsv.
 read_one_qcsummary <- function(path) {
   qc <- windows_safe_read_tsv(path, show_col_types = FALSE, progress = FALSE)
-  qc$recording <- derive_recording_label(path)
+  # Computed once, as a genuine scalar, before assignment -- assigning
+  # derive_recording_label(path)'s result into qc$recording first and then
+  # deriving task_name from qc$recording would instead hand derive_task_label()
+  # an already-recycled, nrow(qc)-length vector (harmless for derive_task_label()
+  # itself when nrow(qc) == 1, but silently wrong -- always NA_character_,
+  # via its own length(recording_label) != 1 guard -- for every real
+  # multi-metric-row qcsummary.tsv, which is every real file this app loads).
+  recording_label <- derive_recording_label(path)
+  qc$recording <- recording_label
+  qc$task_name <- derive_task_label(recording_label)
   qc$batch_name <- derive_batch_name(path)
   qc$source_file <- path
 
   # Identifying columns first, then whatever calculateOutputMetrics() wrote
-  # (led by "qc_metric"), so the combined table reads recording/batch/metric
-  # left-to-right rather than burying them after a dozen stat columns.
-  id_cols <- c("recording", "batch_name", "source_file")
+  # (led by "qc_metric"), so the combined table reads
+  # recording/task/batch/metric left-to-right rather than burying them after
+  # a dozen stat columns. task_name is placed right after recording (ahead of
+  # batch_name) since it's intrinsic to the original recording's own BIDS
+  # name (see derive_task_label()), whereas batch_name instead describes
+  # which processing RUN produced this particular qcsummary output.
+  id_cols <- c("recording", "task_name", "batch_name", "source_file")
   dplyr::relocate(qc, dplyr::all_of(id_cols), .before = 1)
 }
 
@@ -1329,6 +1384,77 @@ filter_by_batch_name <- function(table, selected) {
   table[keep, , drop = FALSE]
 }
 
+# --- Compare files tab: task_name filter ---
+#
+# Mirror of the batch_name (run) filter directly above, for the analogous
+# scenario of the same sub/ses recording having multiple task-<label>
+# recordings (e.g. task-x and task-y under the same subject/session) that a
+# user wants to narrow the "Compare files" view down to one task, or leave
+# showing every task together. Composes with the batch_name filter above --
+# app.R applies both in sequence -- rather than replacing it, since the two
+# filters narrow on independent axes (which processing run vs. which original
+# task recording).
+
+# task_name_none_sentinel: the literal UI choice/selected value standing in
+# for the NA_character_ "no task- entity" case derive_task_label() documents
+# as a real, expected value (a non-BIDS filename, or a BIDS name that simply
+# omits "task-"). Kept as its own function (rather than reusing
+# batch_name_none_sentinel() directly) even though the display string is
+# identical, since the two sentinels stand in for NA on two independently
+# documented, unrelated columns -- keeping them as separate functions means a
+# future change to either display string (or either column's "what does NA
+# mean here" contract) doesn't have to worry about the other silently
+# following along.
+task_name_none_sentinel <- function() {
+  "(none)"
+}
+
+# compare_task_name_choices: every distinct task_name value in the currently
+# loaded table, sorted, with any NA_character_ entries collapsed to one
+# trailing task_name_none_sentinel() choice -- exactly compare_batch_name_choices()'s
+# own shape, applied to task_name instead of batch_name.
+#
+# table: the combined qcsummary table (load_result()$table), or NULL.
+#
+# Returns a character vector.
+compare_task_name_choices <- function(table) {
+  if (is.null(table) || !"task_name" %in% names(table)) {
+    return(character(0))
+  }
+  values <- unique(table$task_name)
+  non_na_sorted <- sort(values[!is.na(values)])
+  if (any(is.na(values))) {
+    c(non_na_sorted, task_name_none_sentinel())
+  } else {
+    non_na_sorted
+  }
+}
+
+# filter_by_task_name: narrow a combined qcsummary table down to only the
+# rows whose task_name is one of `selected` -- exactly filter_by_batch_name()'s
+# own shape, applied to task_name instead of batch_name.
+#
+# table: the combined qcsummary table to filter. NULL or missing a task_name
+#   column is returned unchanged -- there's nothing sensible to filter on.
+# selected: character vector of task_name values (plus
+#   task_name_none_sentinel() for "no task- entity") to keep. NULL or
+#   zero-length deliberately returns a 0-row subset rather than `table`
+#   unchanged, same reasoning as filter_by_batch_name()'s own `selected` doc.
+#
+# Returns a data.frame (a row subset of `table`).
+filter_by_task_name <- function(table, selected) {
+  if (is.null(table) || !"task_name" %in% names(table)) {
+    return(table)
+  }
+  if (is.null(selected) || length(selected) == 0) {
+    return(table[0, , drop = FALSE])
+  }
+  keep_none <- task_name_none_sentinel() %in% selected
+  keep_named <- setdiff(selected, task_name_none_sentinel())
+  keep <- (table$task_name %in% keep_named) | (keep_none & is.na(table$task_name))
+  table[keep, , drop = FALSE]
+}
+
 # --- P10-05: export "flagged for review" file list ---
 #
 # build_flagged_export_table: per-recording rollup of the currently flagged
@@ -1358,6 +1484,18 @@ filter_by_batch_name <- function(table, selected) {
 # qc_metric row, columns:
 #   recording, batch_name, source_file: the same identifying columns every
 #     other view in this app keys on.
+#   task_name: only present when table_flagged itself already carries a
+#     task_name column (read_one_qcsummary() always attaches one in real
+#     production use -- see analyze_helpers.R's "Compare files tab: task_name
+#     filter" section -- so in practice this is present whenever there's real
+#     data to export). Deliberately NOT added to `required_cols` below the way
+#     recording/batch_name/source_file are: unlike those three, a
+#     hand-built/legacy table_flagged that never carried task_name at all
+#     (e.g. every synthetic table this function's own tests build) is still a
+#     perfectly valid, exportable table -- there's just nothing to report for
+#     a column that was never there, so this degrades gracefully by omitting
+#     the column entirely rather than failing the whole export or fabricating
+#     NA values for it.
 #   n_flagged_metrics: count of flagged qc_metric rows for that recording.
 #   flagged_metrics: comma-separated qc_metric names that were flagged, so a
 #     reviewer opening the CSV can see *why* without reopening this app.
@@ -1384,13 +1522,21 @@ build_flagged_export_table <- function(table_flagged, notes = NULL) {
     return(NULL)
   }
 
-  flagged_rows <- table_flagged[table_flagged$qc_flag, required_cols, drop = FALSE]
+  # task_name rides along whenever it's actually present (see this function's
+  # own `task_name` return-value doc above), but is deliberately excluded from
+  # required_cols -- a table_flagged that never carried it is still a valid
+  # input, not a malformed one.
+  has_task_name <- "task_name" %in% names(table_flagged)
+  select_cols <- c(required_cols, if (has_task_name) "task_name")
+  group_cols <- c("recording", if (has_task_name) "task_name", "batch_name", "source_file")
+
+  flagged_rows <- table_flagged[table_flagged$qc_flag, select_cols, drop = FALSE]
   if (nrow(flagged_rows) == 0) {
     return(NULL)
   }
 
   result <- flagged_rows %>%
-    dplyr::group_by(recording, batch_name, source_file) %>%
+    dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) %>%
     dplyr::summarise(
       n_flagged_metrics = dplyr::n(),
       flagged_metrics = paste(qc_metric, collapse = ", "),

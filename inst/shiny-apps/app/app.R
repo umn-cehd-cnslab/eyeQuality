@@ -537,6 +537,21 @@ ui <- navbarPage(
               "compare_batch_name_filter", "Filter to batch_name (run)",
               choices = character(0), multiple = TRUE
             ),
+            # Mirror of the batch_name filter directly above, for studies
+            # where the same sub/ses BIDS recording has multiple task-<label>
+            # recordings (e.g. task-x and task-y) and a user wants to compare
+            # one specific task, or every task together. Composes with the
+            # batch_name filter -- both are applied in sequence wherever
+            # either is applied below -- since they narrow on independent
+            # axes (which processing run vs. which original task recording).
+            # The "(none)" choice stands in for derive_task_label()'s
+            # NA_character_ case (analyze_helpers.R) -- a non-BIDS filename,
+            # or a BIDS name that simply omits "task-", is a real, expected
+            # case here, not a data error.
+            selectizeInput(
+              "compare_task_name_filter", "Filter to task_name",
+              choices = character(0), multiple = TRUE
+            ),
             h4("Metric(s) across files"),
             # multiple = TRUE, maxItems = 2: 1 selected metric renders the
             # original bar chart (build_qc_comparison_plot()), 2 renders a
@@ -2417,6 +2432,20 @@ server <- function(input, output, session) {
     )
   }, ignoreInit = TRUE)
 
+  # Repopulates the task_name filter, exact mirror of the batch_name (run)
+  # observer directly above -- same manual_load_trigger()-only reasoning,
+  # same "default to every currently loaded task_name selected" behavior
+  # (compare_task_name_choices(), analyze_helpers.R, sorted with a trailing
+  # "(none)" for derive_task_label()'s NA_character_ case), same
+  # no-auto-select-on-a-later-tick behavior for a newly appeared task_name.
+  observeEvent(manual_load_trigger(), {
+    choices <- compare_task_name_choices(current_load_result()$table)
+    updateSelectizeInput(
+      session, "compare_task_name_filter",
+      choices = choices, selected = choices
+    )
+  }, ignoreInit = TRUE)
+
   output$compare_status_ui <- renderUI({
     if (length(compare_metric_choices()) == 0) {
       return(div(class = "alert alert-info", "Load qcsummary files first to compare metrics across files."))
@@ -2446,6 +2475,7 @@ server <- function(input, output, session) {
       tbl <- qc_table_flagged()
       req(tbl)
       tbl <- filter_by_batch_name(tbl, input$compare_batch_name_filter)
+      tbl <- filter_by_task_name(tbl, input$compare_task_name_filter)
       plot <- if (length(metrics) == 1) {
         build_qc_comparison_plot(tbl, metrics[1], qc_thresholds())
       } else {
@@ -2476,6 +2506,7 @@ server <- function(input, output, session) {
       }
       if (length(metrics) == 1) {
         tbl <- filter_by_batch_name(tbl, input$compare_batch_name_filter)
+        tbl <- filter_by_task_name(tbl, input$compare_task_name_filter)
         n <- sum(tbl$qc_metric == metrics[1], na.rm = TRUE)
         return(max(500, n * 28 + 120))
       }
@@ -2499,6 +2530,7 @@ server <- function(input, output, session) {
     metrics <- input$compare_metrics_table
     validate(need(length(metrics) > 0, "Select at least one QC metric above."))
     filtered <- filter_by_batch_name(current_load_result()$table, input$compare_batch_name_filter)
+    filtered <- filter_by_task_name(filtered, input$compare_task_name_filter)
     tbl <- build_qc_comparison_table(filtered, metrics)
     validate(need(!is.null(tbl), "No data available for the selected metric(s)."))
 

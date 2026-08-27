@@ -135,6 +135,34 @@ test_that("derive_batch_name returns NA for the batchName == NULL naming form", 
 })
 
 # ---------------------------------------------------------------------------
+# derive_task_label()
+# ---------------------------------------------------------------------------
+
+test_that("derive_task_label recovers the task-<label> entity from a BIDS-style recording label", {
+  expect_equal(
+    derive_task_label("sub-01_ses-1_task-x_recording-eyetracking_physio"),
+    "x"
+  )
+})
+
+test_that("derive_task_label recovers a multi-character task label", {
+  expect_equal(
+    derive_task_label("sub-01_ses-1_task-freeview_recording-eyetracking_physio"),
+    "freeview"
+  )
+})
+
+test_that("derive_task_label returns NA for a recording label with no task- entity at all", {
+  expect_true(is.na(derive_task_label("sub-01_ses-1_recording-eyetracking_physio")))
+})
+
+test_that("derive_task_label returns NA for NULL, NA, or an empty-string recording label", {
+  expect_true(is.na(derive_task_label(NULL)))
+  expect_true(is.na(derive_task_label(NA_character_)))
+  expect_true(is.na(derive_task_label("")))
+})
+
+# ---------------------------------------------------------------------------
 # build_zero_match_diagnostic()
 # ---------------------------------------------------------------------------
 
@@ -213,7 +241,7 @@ test_that("load_qcsummary_table combines a real 4-file batch run into one table 
   # robustness_* rows -- assigned dynamically further down), not one row per
   # file, so 4 files combine to 4 * 32 = 128 rows.
   expect_equal(nrow(result$table), 128)
-  expect_equal(colnames(result$table)[1:3], c("recording", "batch_name", "source_file"))
+  expect_equal(colnames(result$table)[1:4], c("recording", "task_name", "batch_name", "source_file"))
 
   expect_equal(
     sort(unique(result$table$recording)),
@@ -226,6 +254,9 @@ test_that("load_qcsummary_table combines a real 4-file batch run into one table 
   )
   expect_true(all(result$table$batch_name == "p1001combine"))
   expect_length(unique(result$table$source_file), 4)
+  # None of the fixture's filenames are BIDS-named with a task- entity, so
+  # derive_task_label() correctly falls through to NA for every row here.
+  expect_true(all(is.na(result$table$task_name)))
 
   # exactly one qc_metric row set (32 rows) per recording -- not merged
   # across files and not duplicated
@@ -1890,6 +1921,85 @@ test_that("filter_by_batch_name returns the input unchanged for a NULL table or 
   expect_identical(filter_by_batch_name(tbl, "runA"), tbl)
 })
 
+# ---------------------------------------------------------------------------
+# "Compare files" tab: task_name filter -- exact mirror of the batch_name
+# (run) filter tests directly above (task_name_none_sentinel(),
+# compare_task_name_choices(), filter_by_task_name()).
+# ---------------------------------------------------------------------------
+
+# task_name_filter_test_table: a minimal table carrying only the columns
+# compare_task_name_choices()/filter_by_task_name() actually read (task_name,
+# plus the identifying/metric columns the two Compare-tab builder functions
+# expect) -- same shape as batch_name_filter_test_table() above.
+task_name_filter_test_table <- function(task_names) {
+  n <- length(task_names)
+  data.frame(
+    recording = paste0("rec-", seq_len(n)),
+    task_name = task_names,
+    source_file = paste0("/data/rec-", seq_len(n), "_qcsummary.tsv"),
+    qc_metric = "valid_raw_data",
+    percent = seq(0.1, by = 0.1, length.out = n),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("task_name_none_sentinel returns the literal '(none)' string", {
+  expect_equal(task_name_none_sentinel(), "(none)")
+})
+
+test_that("compare_task_name_choices returns sorted distinct task_name values with a single trailing '(none)' entry for NA rows", {
+  tbl <- task_name_filter_test_table(c("y", "x", NA, "x"))
+  expect_equal(compare_task_name_choices(tbl), c("x", "y", "(none)"))
+})
+
+test_that("compare_task_name_choices omits the '(none)' entry entirely when there are no NA task_name rows", {
+  tbl <- task_name_filter_test_table(c("y", "x"))
+  expect_equal(compare_task_name_choices(tbl), c("x", "y"))
+})
+
+test_that("compare_task_name_choices returns character(0) for a NULL table or one missing the task_name column", {
+  expect_equal(compare_task_name_choices(NULL), character(0))
+
+  tbl <- task_name_filter_test_table("x")
+  tbl$task_name <- NULL
+  expect_equal(compare_task_name_choices(tbl), character(0))
+})
+
+test_that("filter_by_task_name keeps only the matching rows for a real multi-task_name table", {
+  tbl <- task_name_filter_test_table(c("x", "y", "x"))
+  result <- filter_by_task_name(tbl, "x")
+
+  expect_equal(nrow(result), 2)
+  expect_true(all(result$task_name == "x"))
+})
+
+test_that("filter_by_task_name honors '(none)' in selected as a stand-in for keeping the NA task_name rows", {
+  tbl <- task_name_filter_test_table(c("x", NA, "y", NA))
+  result <- filter_by_task_name(tbl, task_name_none_sentinel())
+
+  expect_equal(nrow(result), 2)
+  expect_true(all(is.na(result$task_name)))
+})
+
+test_that("filter_by_task_name returns a 0-row subset -- not the unfiltered table -- for a NULL or zero-length selected", {
+  tbl <- task_name_filter_test_table(c("x", "y"))
+
+  result_null <- filter_by_task_name(tbl, NULL)
+  expect_equal(nrow(result_null), 0)
+  expect_equal(colnames(result_null), colnames(tbl))
+
+  result_empty <- filter_by_task_name(tbl, character(0))
+  expect_equal(nrow(result_empty), 0)
+})
+
+test_that("filter_by_task_name returns the input unchanged for a NULL table or one missing the task_name column", {
+  expect_null(filter_by_task_name(NULL, "x"))
+
+  tbl <- task_name_filter_test_table("x")
+  tbl$task_name <- NULL
+  expect_identical(filter_by_task_name(tbl, "x"), tbl)
+})
+
 # capturing_update_session: a MockShinySession whose sendInputMessage() --
 # a documented no-op in a bare MockShinySession (see test-runSetupApp.R's own
 # file-level comment on update*Input() calls never reflecting into input$...
@@ -1996,8 +2106,13 @@ test_that("narrowing the Compare files batch_name filter narrows output$compare_
     # (see capturing_update_session()'s own comment on why input$<id> doesn't
     # do this automatically here), plus the metric selectors' own defaults,
     # so output$compare_plot/output$compare_table have something to render.
+    # None of this test's fixture files are BIDS-named with a task- entity,
+    # so task_name_none_sentinel() is this test's own "select all" state for
+    # the newly added task_name filter, exactly mirroring the batch_name
+    # filter's own default-selection reasoning just above.
     session$setInputs(
       compare_batch_name_filter = c("batchA", "batchB"),
+      compare_task_name_filter = task_name_none_sentinel(),
       compare_metric_plot = "valid_raw_data",
       compare_metrics_table = "valid_raw_data"
     )
@@ -2073,6 +2188,116 @@ test_that("narrowing the Compare files batch_name filter narrows output$compare_
     expect_equal(nrow(post_tick), 1)
     expect_equal(post_tick$recording, "sub-a_ses-1")
     expect_equal(session$getOutput("compare_plot")$height, 500)
+    expect_true(nzchar(session$getOutput("compare_table")))
+  }, session = cs$session)
+})
+
+test_that("Compare files task_name filter defaults to every loaded task_name selected (including the '(none)' case) on a real manual load", {
+  skip_on_cran()
+
+  dir <- tempfile("p1004_taskfilter_default_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_task-x_desc-batchA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-b_ses-1_task-y_desc-batchB_preproc_qcsummary.tsv")
+  )
+  # No task- entity at all -- the "(none)" case.
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.6),
+    file.path(dir, "sub-c_ses-1_desc-preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+
+    calls <- get("compare_task_name_filter", envir = cs$calls)
+    expect_length(calls, 1)
+    expect_setequal(calls[[1]]$value, c("x", "y", "(none)"))
+  }, session = cs$session)
+})
+
+test_that("the batch_name and task_name filters compose (AND, not OR) when both narrow output$compare_plot/output$compare_table", {
+  skip_on_cran()
+
+  dir <- tempfile("p1004_bothfilters_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  # Two tasks under the same batch (batchA), plus a second batch (batchB)
+  # sharing one of those same task labels -- the scenario this task's own
+  # motivating description calls out (same sub/ses BIDS recording, multiple
+  # task-XX recordings), crossed with the existing batch_name axis to confirm
+  # the two filters narrow independently rather than one overriding the other.
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(dir, "sub-a_ses-1_task-x_desc-batchA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.5),
+    file.path(dir, "sub-a_ses-1_task-y_desc-batchA_preproc_qcsummary.tsv")
+  )
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.3),
+    file.path(dir, "sub-b_ses-1_task-x_desc-batchB_preproc_qcsummary.tsv")
+  )
+
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
+    )
+    session$setInputs(load = 1)
+    expect_equal(current_load_result()$n_files, 3L)
+
+    session$setInputs(
+      compare_batch_name_filter = c("batchA", "batchB"),
+      compare_task_name_filter = c("x", "y"),
+      compare_metric_plot = "valid_raw_data",
+      compare_metrics_table = "valid_raw_data"
+    )
+
+    compose_now <- function() {
+      filtered <- filter_by_batch_name(current_load_result()$table, input$compare_batch_name_filter)
+      filtered <- filter_by_task_name(filtered, input$compare_task_name_filter)
+      build_qc_comparison_table(filtered, input$compare_metrics_table)
+    }
+
+    all_selected <- compose_now()
+    expect_equal(nrow(all_selected), 3)
+
+    # Narrow to batchA only -- 2 of the 3 rows (task-x and task-y, both batchA).
+    session$setInputs(compare_batch_name_filter = "batchA")
+    batch_only <- compose_now()
+    expect_equal(nrow(batch_only), 2)
+    expect_true(all(grepl("task-x|task-y", batch_only$recording)))
+
+    # Further narrow to task-x within batchA -- exactly the one row that
+    # matches BOTH filters (batchA AND task-x), not the batchB task-x row too.
+    session$setInputs(compare_task_name_filter = "x")
+    both <- compose_now()
+    expect_equal(nrow(both), 1)
+    expect_equal(both$recording, "sub-a_ses-1_task-x")
+    expect_equal(both$valid_raw_data, 0.9)
+
+    expect_false(is.null(session$getOutput("compare_plot")))
     expect_true(nzchar(session$getOutput("compare_table")))
   }, session = cs$session)
 })
@@ -3422,6 +3647,10 @@ test_that("selecting exactly 1 Compare-files metric still renders the original p
     session$setInputs(load = 1)
     session$setInputs(
       compare_batch_name_filter = "cmpbar",
+      # None of this test's fixture files are BIDS-named with a task-
+      # entity -- task_name_none_sentinel() is this test's "select all" state
+      # for the task_name filter, mirroring the batch_name selection above.
+      compare_task_name_filter = task_name_none_sentinel(),
       compare_metric_plot = "valid_raw_data",
       compare_metrics_table = "valid_raw_data"
     )
@@ -3455,6 +3684,7 @@ test_that("selecting 2 Compare-files metrics switches to the fixed-height scatte
     session$setInputs(load = 1)
     session$setInputs(
       compare_batch_name_filter = "cmpscatter",
+      compare_task_name_filter = task_name_none_sentinel(),
       compare_metric_plot = c("valid_raw_data", "robustness_proportion_valid_data_to_all_data"),
       compare_metrics_table = "valid_raw_data"
     )
@@ -3656,11 +3886,14 @@ test_that("read_one_qcsummary/load_qcsummary_table/load_plot_data/load_gaze_traj
   windows_safe_write_tsv(events_df, events_path)
 
   # read_one_qcsummary() -- exercises windows_safe_read_tsv() AND
-  # .safe_basename() (via derive_recording_label()/derive_batch_name()).
+  # .safe_basename() (via derive_recording_label()/derive_batch_name()), plus
+  # derive_task_label() against a real BIDS task- entity (rather than only
+  # the hand-built strings the dedicated derive_task_label() tests use above).
   qc_row <- read_one_qcsummary(qcsummary_path)
   expect_s3_class(qc_row, "data.frame")
   expect_equal(nrow(qc_row), 4)
   expect_equal(qc_row$recording[1], "sub-UMN7001_ses-06_task-A1CalibrationVerificationStart_ET")
+  expect_equal(qc_row$task_name[1], "A1CalibrationVerificationStart")
   expect_equal(qc_row$batch_name[1], "01")
 
   # load_qcsummary_table() -- exercises discover_qcsummary_files()'s
