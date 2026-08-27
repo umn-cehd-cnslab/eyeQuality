@@ -922,7 +922,7 @@ load_plot_data <- function(qcsummary_path) {
   tryCatch(
     {
       data <- windows_safe_read_tsv(preproc_path, show_col_types = FALSE, progress = FALSE)
-      plots <- generateEyeTrackingPlots(data)
+      plots <- eyeQuality::generateEyeTrackingPlots(data)
       list(ok = TRUE, preproc_path = preproc_path, data = data, plots = plots)
     },
     error = function(e) {
