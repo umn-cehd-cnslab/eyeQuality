@@ -11,7 +11,8 @@ saveFiles(
   timing,
   summaryData,
   batchName = NULL,
-  outputDir = NULL
+  outputDir = NULL,
+  outputStructure = c("flat", "bids")
 )
 }
 \arguments{
@@ -28,6 +29,15 @@ saveFiles(
 \item{batchName}{batch name to insert into save files, useful for running batches with different parameters and/or for specific trials}
 
 \item{outputDir}{optional directory to write output files to, overriding the default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default NULL}
+
+\item{outputStructure}{one of \code{"flat"} (default) or \code{"bids"} (P7-07).
+\code{"flat"} reproduces this function's original behavior exactly: every
+output file is written directly into \code{outputDir} (or the default
+\verb{<input_dir>/derivatives/eyeQuality-v1/} location when \code{outputDir} is
+\code{NULL}), keyed only by filename. \code{"bids"} is only meaningful when
+\code{outputDir} is also set -- see \code{create_new_filename()}'s own
+\code{outputStructure} documentation for the derivatives-directory layout it
+produces and its fallback behavior for a non-BIDS-named \code{inputFile}.}
 }
 \description{
 Save Files

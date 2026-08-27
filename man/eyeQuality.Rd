@@ -20,6 +20,7 @@ eyeQuality(
   timeEnd = NULL,
   batchName = NULL,
   outputDir = NULL,
+  outputStructure = c("flat", "bids"),
   verbose = FALSE,
   ...
 )
@@ -64,6 +65,11 @@ native \code{0}-\code{4} scale directly and had no meaning for Tobii Pro.}
 \item{batchName}{optional string to append output files with a specific batch run label. Default NULL}
 
 \item{outputDir}{optional directory to write output files to when saveData = TRUE, overriding the default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default NULL}
+
+\item{outputStructure}{one of \code{"flat"} (default) or \code{"bids"} (P7-07),
+passed through to \code{create_new_filename()}/\code{saveFiles()} when
+\code{saveData = TRUE}. See \code{?create_new_filename} for the full behavior;
+only meaningful when \code{outputDir} is also set.}
 
 \item{verbose}{optional Boolean. When \code{TRUE}, emits additional structured,
 human-readable diagnostic messages during processing for

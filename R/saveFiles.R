@@ -7,13 +7,23 @@
 #' @param summaryData data from the calculateOutputMetrics function
 #' @param batchName batch name to insert into save files, useful for running batches with different parameters and/or for specific trials
 #' @param outputDir optional directory to write output files to, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL
+#' @param outputStructure one of `"flat"` (default) or `"bids"` (P7-07).
+#'   `"flat"` reproduces this function's original behavior exactly: every
+#'   output file is written directly into `outputDir` (or the default
+#'   `<input_dir>/derivatives/eyeQuality-v1/` location when `outputDir` is
+#'   `NULL`), keyed only by filename. `"bids"` is only meaningful when
+#'   `outputDir` is also set -- see `create_new_filename()`'s own
+#'   `outputStructure` documentation for the derivatives-directory layout it
+#'   produces and its fallback behavior for a non-BIDS-named `inputFile`.
 #' @import dplyr
 #' @import tidyr
 #' @importFrom utils write.table
 #' @export
 
 # saveFiles <- function(inputFile, args, data, events, timing, summaryData, batchName = NULL) {
-saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = NULL, outputDir = NULL) {
+saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = NULL, outputDir = NULL, outputStructure = c("flat", "bids")) {
+  outputStructure <- match.arg(outputStructure)
+
   eventdesc <- paste0("_desc-", if (is.null(batchName)) "" else paste0(batchName, "_"), "events")
   preprocdesc <- paste0("_desc-", if (is.null(batchName)) "" else paste0(batchName, "_"), "preproc")
   runtimesdesc <- paste0("_desc-", if (is.null(batchName)) "" else paste0(batchName, "_"), "preproc_runtimes")
@@ -28,32 +38,66 @@ saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = 
   # long BIDS-style "_desc-..._preproc_qcsummary.tsv" filenames.
   write.table(
     data.frame("raw_data_row" = rownames(events), events),
-    file = windows_long_path(create_new_filename(inputFile, eventdesc, ".tsv", outputDir = outputDir)),
+    file = windows_long_path(create_new_filename(inputFile, eventdesc, ".tsv", outputDir = outputDir, outputStructure = outputStructure)),
     row.names = FALSE,
     sep = "\t"
   )
   # save raw data
   write.table(
     data.frame("raw_data_row" = rownames(data), data),
-    file = windows_long_path(create_new_filename(inputFile, preprocdesc, ".tsv", outputDir = outputDir)),
+    file = windows_long_path(create_new_filename(inputFile, preprocdesc, ".tsv", outputDir = outputDir, outputStructure = outputStructure)),
     row.names = FALSE,
     sep = "\t"
   )
   # save timing data
   write.table(
     timing,
-    file = windows_long_path(create_new_filename(inputFile, runtimesdesc, ".tsv", outputDir = outputDir)),
+    file = windows_long_path(create_new_filename(inputFile, runtimesdesc, ".tsv", outputDir = outputDir, outputStructure = outputStructure)),
     row.names = FALSE,
     sep = "\t"
   )
   # save output summary data
   write.table(
     data.frame("qc_metric" = rownames(summaryData), summaryData),
-    file = windows_long_path(create_new_filename(inputFile, qcsummarydesc, ".tsv", outputDir = outputDir)),
+    file = windows_long_path(create_new_filename(inputFile, qcsummarydesc, ".tsv", outputDir = outputDir, outputStructure = outputStructure)),
     row.names = FALSE,
     sep = "\t"
   )
   print("--- FILES SAVED ---")
+}
+
+# .parse_bids_sub_ses (internal): extract "sub-<label>"/"ses-<label>"
+# identifiers directly from a file's own basename (P7-07) -- deliberately NOT
+# derived from any directory structure inputfile happens to sit in, so
+# outputStructure = "bids" placement works identically whether the file was
+# discovered via listBidsFiles(layout = "bids")'s subject/session
+# subdirectories or layout = "glob"'s flatter matching, and works the same
+# even called directly (not via listBidsFiles() at all). Matches each
+# identifier's first occurrence anywhere in the basename via
+# "sub-[A-Za-z0-9]+"/"ses-[A-Za-z0-9]+" -- e.g.
+# "sub-01_ses-02_task-x_recording-eyetracking_physio.tsv" yields
+# sub = "sub-01", ses = "ses-02". Shared by create_new_filename() (the
+# derivatives-output side of the bids/flat split),
+# get_qcsummary_output_path() (R/eyeQualityBatch.R's resumability check, kept
+# in sync with create_new_filename()'s own placement logic), and
+# eyeQualityBatch()'s copyRawFile raw-file-copy step (the raw side of the
+# split), so all three agree on exactly which files count as BIDS-named.
+#
+# @param path a file path (or bare filename); basename is extracted
+#   internally via .safe_basename() rather than base::basename(), for the
+#   same long-path-safety reason used throughout this file.
+# @return a list(sub = <character>, ses = <character>) if both identifiers
+#   are present in the basename, or NULL if either is missing.
+# @keywords internal
+# @noRd
+.parse_bids_sub_ses <- function(path) {
+  base <- .safe_basename(path)
+  sub_match <- regmatches(base, regexpr("sub-[A-Za-z0-9]+", base))
+  ses_match <- regmatches(base, regexpr("ses-[A-Za-z0-9]+", base))
+  if (length(sub_match) == 0 || length(ses_match) == 0) {
+    return(NULL)
+  }
+  list(sub = sub_match, ses = ses_match)
 }
 
 #' create_new_filename: create new output filename from save directory and data file
@@ -62,12 +106,34 @@ saveFiles <- function(inputFile, data, events, timing, summaryData, batchName = 
 #' @param appendname text to append before the file extension
 #' @param newFileExtension new file extension to use, if different from filename
 #' @param outputDir optional directory to write the output file to, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL
+#' @param outputStructure one of `"flat"` (default) or `"bids"` (P7-07),
+#'   opt-in and only meaningful when `outputDir` is also set. `"flat"` (the
+#'   default) reproduces this function's pre-P7-07 behavior exactly: every
+#'   file is written directly under `outputDir` (or the default
+#'   `<input_dir>/derivatives/eyeQuality-v1/` location when `outputDir` is
+#'   `NULL`), keyed only by filename -- no sub-/ses- structure. `"bids"`
+#'   parses `sub-<label>`/`ses-<label>` identifiers directly out of
+#'   `inputfile`'s own basename (via
+#'   `"sub-[A-Za-z0-9]+"`/`"ses-[A-Za-z0-9]+"`, not from any directory
+#'   structure `inputfile` happens to sit in -- this works the same way
+#'   whether the file was discovered via `listBidsFiles(layout = "bids")` or
+#'   `layout = "glob"`) and writes to
+#'   `<outputDir>/derivatives/eyeQuality-v1/sub-<label>/ses-<label>/`
+#'   instead, mirroring the formal BIDS derivatives convention (the raw side
+#'   of that same split, a copy of the original input file under
+#'   `<outputDir>/sub-<label>/ses-<label>/`, is handled separately by
+#'   `eyeQualityBatch()`'s `copyRawFile` argument -- this function only ever
+#'   writes derivative output). A file whose basename does not match both
+#'   identifiers falls back to this function's `"flat"` placement (with a
+#'   `warning()`, not an error) rather than failing outright -- this keeps a
+#'   mixed-naming batch from aborting entirely over one oddly-named file.
 #'
 #' @import fs
 #'
 #' @export
 
-create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL) {
+create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL, outputStructure = c("flat", "bids")) {
+  outputStructure <- match.arg(outputStructure)
   # trimws(): a stray leading/trailing space in inputfile/outputDir (e.g. a
   # copy-pasted path, or a directoryBIDS value loaded from a hand-edited
   # batch_config.yaml) propagates straight through fs::path_dir()/fs::path()
@@ -90,8 +156,32 @@ create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, 
   # failure point for a long inputfile path.
   filename <- .safe_basename(fs::path_ext_remove(inputfile))
   directory <- fs::path_dir(inputfile)
+
+  # P7-07: outputStructure = "bids" only changes anything when outputDir is
+  # also set -- with no outputDir, the default <input_dir>/derivatives/
+  # eyeQuality-v1/ location already preserves each file's own directory, so
+  # there is no "flattening" for "bids" mode to undo. bids_ids stays NULL
+  # (falling through to the same flat placement as outputStructure = "flat")
+  # whenever outputDir is NULL, outputStructure is "flat", or inputfile's
+  # basename doesn't carry both a sub-/ses- identifier -- see
+  # .parse_bids_sub_ses()'s own header comment.
+  bids_ids <- NULL
+  if (identical(outputStructure, "bids") && !is.null(outputDir)) {
+    bids_ids <- .parse_bids_sub_ses(inputfile)
+    if (is.null(bids_ids)) {
+      warning(
+        "create_new_filename: '", .safe_basename(inputfile), "' does not match the expected ",
+        "sub-<label>...ses-<label> naming pattern required for outputStructure = \"bids\"; ",
+        "falling back to flat output placement for this file.",
+        call. = FALSE
+      )
+    }
+  }
+
   newdirectory <- if (is.null(outputDir)) {
     fs::path(directory, "derivatives", "eyeQuality-v1")
+  } else if (!is.null(bids_ids)) {
+    fs::path(outputDir, "derivatives", "eyeQuality-v1", bids_ids$sub, bids_ids$ses)
   } else {
     fs::path(outputDir)
   }

@@ -399,7 +399,7 @@ test_that("saveFiles() writes all four output files to a real, genuinely >260-ch
 
   long_dir <- build_gap1_long_dir(base_dir)
 
-  mock_create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL) {
+  mock_create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL, outputStructure = c("flat", "bids")) {
     ext <- if (is.null(newFileExtension)) "tsv" else sub("^\\.", "", newFileExtension)
     file.path(long_dir, paste0("gap1out", appendname, ".", ext))
   }
@@ -450,7 +450,7 @@ test_that("saveFiles()'s write.table() calls actually depend on windows_long_pat
 
   long_dir <- build_gap1_long_dir(base_dir)
 
-  mock_create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL) {
+  mock_create_new_filename <- function(inputfile, appendname, newFileExtension = NULL, outputDir = NULL, outputStructure = c("flat", "bids")) {
     ext <- if (is.null(newFileExtension)) "tsv" else sub("^\\.", "", newFileExtension)
     file.path(long_dir, paste0("gap1negout", appendname, ".", ext))
   }

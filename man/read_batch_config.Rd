@@ -50,6 +50,20 @@ passed to \code{eyeQualityBatch()}/\code{eyeQuality()}.}
 \code{NULL}, passed to \code{eyeQuality(validityThreshold =)}.}
 \item{\code{outputDir}}{character or \code{NULL}, passed to
 \code{eyeQualityBatch(outputDir =)}.}
+\item{\code{outputStructure}}{\code{"flat"} (default) or \code{"bids"} (P7-07),
+passed to \code{eyeQualityBatch(outputStructure =)}. Only meaningful
+when \code{outputDir} is also set -- see \code{?create_new_filename} for the
+full \code{"bids"}-mode layout. Absent entirely in any config written
+before this field existed -- \code{"flat"} (this function's own
+\code{default_batch_config()} fill-in) is the correct, fully
+backward-compatible reading for that case, reproducing that
+config's original output layout exactly.}
+\item{\code{copyRawFile}}{logical (P7-07), passed to
+\code{eyeQualityBatch(copyRawFile =)}. Only meaningful when
+\code{outputStructure} is \code{"bids"} and \code{outputDir} is set. Absent
+entirely in any config written before this field existed --
+\code{FALSE} (this function's own \code{default_batch_config()} fill-in) is
+the correct, fully backward-compatible reading for that case.}
 \item{\code{numberCores}}{positive integer or \code{NULL}, passed to
 \code{eyeQualityBatch(numberCores =)}.}
 \item{\code{qcThresholds}}{named list or \code{NULL} (P10-07). Optional QC

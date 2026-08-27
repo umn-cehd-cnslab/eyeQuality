@@ -13,6 +13,8 @@ eyeQualityBatch(
   displayDimensionY_mm = 344,
   verbose = FALSE,
   outputDir = NULL,
+  outputStructure = c("flat", "bids"),
+  copyRawFile = FALSE,
   force = FALSE,
   ...
 )
@@ -39,6 +41,33 @@ through to \code{eyeQuality()}/\code{saveFiles()} for every file in the batch an
 also used to locate each file's existing \code{qcsummary} output (if any) for
 the resumability check described under \code{force} below. Overrides the
 default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default \code{NULL}.}
+
+\item{outputStructure}{one of \code{"flat"} (default) or \code{"bids"} (P7-07),
+passed through to \code{eyeQuality()}/\code{saveFiles()}/\code{create_new_filename()}
+for every file in the batch, and also used by the resumability check
+(\code{get_qcsummary_output_path()}) so a resumed run looks for existing
+output in the same place this run would write it. Only meaningful when
+\code{outputDir} is also set -- see \code{?create_new_filename} for the full
+\code{"bids"}-mode placement and its per-file fallback behavior for a
+non-BIDS-named input file (a \code{warning()}, not a batch-ending error).
+Default \code{"flat"}, which reproduces this function's pre-P7-07 output
+layout exactly.}
+
+\item{copyRawFile}{optional Boolean (P7-07). Only meaningful when
+\code{outputStructure == "bids"} and \code{outputDir} is set -- ignored otherwise.
+When \code{TRUE}, copies (never moves) each candidate file's own raw input
+file, unmodified and under its original filename, to
+\verb{<outputDir>/sub-<label>/ses-<label>/} -- the raw side of the BIDS
+raw/derivatives split, sibling to \verb{derivatives/eyeQuality-v1/} (see
+\code{outputStructure} above for the derivatives side). Applied to every
+candidate file discovered this run (not just files actually dispatched
+for reprocessing this run under resumability), so enabling this on a
+later resumed run still backfills the raw copy for files whose
+derivative output was already produced by an earlier run without it.
+A candidate file whose basename doesn't match the expected
+\verb{sub-<label>...ses-<label>} naming pattern has its raw-file copy step
+skipped with a \code{warning()}, rather than failing the batch (its
+derivative processing, if any, is unaffected). Default \code{FALSE}.}
 
 \item{force}{optional Boolean controlling resumability. \code{eyeQualityBatch()}
 checks, for every candidate file, whether a \code{qcsummary} output already

@@ -84,6 +84,27 @@ validityThreshold: null
 # default <directoryBIDS>/derivatives/eyeQuality-v1/ location.
 outputDir: null
 
+# How to lay out files under outputDir (ignored when outputDir is null).
+# "flat" (the default): every output file is written directly into
+#   outputDir, keyed only by filename.
+# "bids": sub-<label>/ses-<label> identifiers are parsed directly from each
+#   input file's own filename (not its folder location), and derivative
+#   output is written to
+#   <outputDir>/derivatives/eyeQuality-v1/sub-<label>/ses-<label>/ instead.
+#   A file whose name doesn't carry both identifiers falls back to flat
+#   placement (with a warning) rather than failing the whole batch.
+# Example:
+# outputStructure: "bids"
+outputStructure: "flat"
+
+# Only used when outputStructure is "bids" and outputDir is set. When true,
+# also copies each matched raw input file, unmodified and under its original
+# filename, to <outputDir>/sub-<label>/ses-<label>/ -- the raw side of the
+# BIDS raw/derivatives split, alongside derivatives/eyeQuality-v1/.
+# Example:
+# copyRawFile: true
+copyRawFile: false
+
 # Number of CPU cores to use for parallel processing. Leave null to
 # automatically use most of the available cores.
 numberCores: null

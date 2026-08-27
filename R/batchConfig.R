@@ -65,6 +65,8 @@ default_batch_config <- function() {
     eyeSelection_method = "Maximize",
     validityThreshold = NULL,
     outputDir = NULL,
+    outputStructure = "flat",
+    copyRawFile = FALSE,
     numberCores = NULL,
     qcThresholds = NULL
   )
@@ -235,6 +237,18 @@ validate_batch_config <- function(config) {
     add_problem("`numberCores` must be NULL or a single positive integer")
   }
 
+  # --- outputStructure / copyRawFile (P7-07, output layout) -----------
+  outputStructure <- config[["outputStructure"]]
+  valid_output_structures <- c("flat", "bids")
+  if (!is_scalar_character(outputStructure) || !(outputStructure %in% valid_output_structures)) {
+    add_problem("`outputStructure` must be one of: ", paste(shQuote(valid_output_structures), collapse = ", "))
+  }
+
+  copyRawFile <- config[["copyRawFile"]]
+  if (!is.logical(copyRawFile) || length(copyRawFile) != 1 || is.na(copyRawFile)) {
+    add_problem("`copyRawFile` must be a single TRUE/FALSE")
+  }
+
   # --- qcThresholds (P10-07, optional) ---------------------------------
   # Analyze app (P10-02) QC threshold overrides, saved alongside a batch
   # run's own parameters in the same file rather than a second config
@@ -374,6 +388,20 @@ write_batch_config <- function(config, path) {
 #'       `NULL`, passed to `eyeQuality(validityThreshold =)`.}
 #'     \item{`outputDir`}{character or `NULL`, passed to
 #'       `eyeQualityBatch(outputDir =)`.}
+#'     \item{`outputStructure`}{`"flat"` (default) or `"bids"` (P7-07),
+#'       passed to `eyeQualityBatch(outputStructure =)`. Only meaningful
+#'       when `outputDir` is also set -- see `?create_new_filename` for the
+#'       full `"bids"`-mode layout. Absent entirely in any config written
+#'       before this field existed -- `"flat"` (this function's own
+#'       `default_batch_config()` fill-in) is the correct, fully
+#'       backward-compatible reading for that case, reproducing that
+#'       config's original output layout exactly.}
+#'     \item{`copyRawFile`}{logical (P7-07), passed to
+#'       `eyeQualityBatch(copyRawFile =)`. Only meaningful when
+#'       `outputStructure` is `"bids"` and `outputDir` is set. Absent
+#'       entirely in any config written before this field existed --
+#'       `FALSE` (this function's own `default_batch_config()` fill-in) is
+#'       the correct, fully backward-compatible reading for that case.}
 #'     \item{`numberCores`}{positive integer or `NULL`, passed to
 #'       `eyeQualityBatch(numberCores =)`.}
 #'     \item{`qcThresholds`}{named list or `NULL` (P10-07). Optional QC

@@ -25,6 +25,10 @@
 #' @param timeEnd optional Recording Timestamp of the last data point to include. Default NULL
 #' @param batchName optional string to append output files with a specific batch run label. Default NULL
 #' @param outputDir optional directory to write output files to when saveData = TRUE, overriding the default `<input_dir>/derivatives/eyeQuality-v1/` location. Default NULL
+#' @param outputStructure one of `"flat"` (default) or `"bids"` (P7-07),
+#'   passed through to `create_new_filename()`/`saveFiles()` when
+#'   `saveData = TRUE`. See `?create_new_filename` for the full behavior;
+#'   only meaningful when `outputDir` is also set.
 #' @param verbose optional Boolean. When `TRUE`, emits additional structured,
 #'   human-readable diagnostic messages during processing for
 #'   data-quality-relevant events a user wouldn't necessarily think to check
@@ -91,8 +95,11 @@ eyeQuality <- function(filepath,
                        timeEnd = NULL,
                        batchName = NULL,
                        outputDir = NULL,
+                       outputStructure = c("flat", "bids"),
                        verbose = FALSE,
                        ...) {
+  outputStructure <- match.arg(outputStructure)
+
   # Wrapper
   runtime_start <- getCurrentTime()
 
@@ -123,7 +130,8 @@ eyeQuality <- function(filepath,
           "preproc_runlog"
         ),
         ".txt",
-        outputDir = outputDir
+        outputDir = outputDir,
+        outputStructure = outputStructure
       )
     # if we are saving the output, sink all cmd messages to file
     sinkToOutputFile(runtime_Log)
@@ -747,7 +755,8 @@ eyeQuality <- function(filepath,
       timingData,
       summaryMetrics,
       batchName,
-      outputDir
+      outputDir,
+      outputStructure
     )
     sinkReset()
   } else {

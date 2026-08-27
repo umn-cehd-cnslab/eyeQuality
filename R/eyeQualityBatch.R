@@ -16,6 +16,31 @@
 #'   also used to locate each file's existing `qcsummary` output (if any) for
 #'   the resumability check described under `force` below. Overrides the
 #'   default `<input_dir>/derivatives/eyeQuality-v1/` location. Default `NULL`.
+#' @param outputStructure one of `"flat"` (default) or `"bids"` (P7-07),
+#'   passed through to `eyeQuality()`/`saveFiles()`/`create_new_filename()`
+#'   for every file in the batch, and also used by the resumability check
+#'   (`get_qcsummary_output_path()`) so a resumed run looks for existing
+#'   output in the same place this run would write it. Only meaningful when
+#'   `outputDir` is also set -- see `?create_new_filename` for the full
+#'   `"bids"`-mode placement and its per-file fallback behavior for a
+#'   non-BIDS-named input file (a `warning()`, not a batch-ending error).
+#'   Default `"flat"`, which reproduces this function's pre-P7-07 output
+#'   layout exactly.
+#' @param copyRawFile optional Boolean (P7-07). Only meaningful when
+#'   `outputStructure == "bids"` and `outputDir` is set -- ignored otherwise.
+#'   When `TRUE`, copies (never moves) each candidate file's own raw input
+#'   file, unmodified and under its original filename, to
+#'   `<outputDir>/sub-<label>/ses-<label>/` -- the raw side of the BIDS
+#'   raw/derivatives split, sibling to `derivatives/eyeQuality-v1/` (see
+#'   `outputStructure` above for the derivatives side). Applied to every
+#'   candidate file discovered this run (not just files actually dispatched
+#'   for reprocessing this run under resumability), so enabling this on a
+#'   later resumed run still backfills the raw copy for files whose
+#'   derivative output was already produced by an earlier run without it.
+#'   A candidate file whose basename doesn't match the expected
+#'   `sub-<label>...ses-<label>` naming pattern has its raw-file copy step
+#'   skipped with a `warning()`, rather than failing the batch (its
+#'   derivative processing, if any, is unaffected). Default `FALSE`.
 #' @param force optional Boolean controlling resumability. `eyeQualityBatch()`
 #'   checks, for every candidate file, whether a `qcsummary` output already
 #'   exists for the given `batchName` (and `outputDir`, if set) before
@@ -83,9 +108,12 @@ eyeQualityBatch <-
            displayDimensionY_mm = 344,
            verbose = FALSE,
            outputDir = NULL,
+           outputStructure = c("flat", "bids"),
+           copyRawFile = FALSE,
            force = FALSE,
            ...) {
     # options(error=traceback)
+    outputStructure <- match.arg(outputStructure)
 
     if (is.null(batchName) ||
       !is.character(batchName) ||
@@ -144,6 +172,49 @@ eyeQualityBatch <-
       batch_run_summary
     )
 
+    # P7-07: opt-in raw-file copy -- copies each candidate file's own raw
+    # input file, unmodified and under its original filename, to
+    # <outputDir>/sub-<label>/ses-<label>/ (the raw side of the BIDS
+    # raw/derivatives split; create_new_filename()'s outputStructure = "bids"
+    # branch in R/saveFiles.R is the derivatives side). A no-op unless all
+    # three of copyRawFile = TRUE, outputStructure == "bids", and outputDir
+    # are set, per copyRawFile's documented scope. Deliberately run against
+    # every candidate file discovered this run (tsv_files_to_batch_process),
+    # not gated by the resumability skip logic below -- the raw copy is a
+    # cheap, idempotent operation (fs::dir_create()/file.copy(overwrite =
+    # TRUE)) independent of whether that file's derivative processing was
+    # skipped or (re)dispatched this run, so enabling copyRawFile on a later
+    # resumed run still backfills the raw copy for a file whose derivative
+    # output an earlier, copyRawFile = FALSE run already produced. A
+    # candidate file whose basename doesn't match the expected
+    # sub-<label>...ses-<label> pattern has its raw copy skipped with a
+    # warning() (its derivative processing, if any, proceeds unaffected) --
+    # see .parse_bids_sub_ses() (R/saveFiles.R) for the shared parsing this
+    # step, create_new_filename(), and get_qcsummary_output_path() below all
+    # rely on.
+    if (isTRUE(copyRawFile) && identical(outputStructure, "bids") && !is.null(outputDir)) {
+      for (raw_file in tsv_files_to_batch_process) {
+        bids_ids <- .parse_bids_sub_ses(raw_file)
+        if (is.null(bids_ids)) {
+          warning(
+            "eyeQualityBatch: '", .safe_basename(raw_file), "' does not match the expected ",
+            "sub-<label>...ses-<label> naming pattern required for copyRawFile; skipping the ",
+            "raw-file copy for this file (its derivative output, if any, is unaffected).",
+            call. = FALSE
+          )
+          next
+        }
+        raw_dest_dir <- fs::path(outputDir, bids_ids$sub, bids_ids$ses)
+        fs::dir_create(raw_dest_dir)
+        raw_dest_path <- fs::path(raw_dest_dir, .safe_basename(raw_file))
+        file.copy(
+          windows_long_path(raw_file),
+          windows_long_path(raw_dest_path),
+          overwrite = TRUE
+        )
+      }
+    }
+
     # P7-03: resumability. Before dispatching any work to the cluster, check
     # each candidate file for an existing qcsummary output matching this
     # batchName (and outputDir, if set) - see get_qcsummary_output_path()
@@ -165,7 +236,8 @@ eyeQualityBatch <-
           get_qcsummary_output_path,
           character(1),
           batchName = batchName,
-          outputDir = outputDir
+          outputDir = outputDir,
+          outputStructure = outputStructure
         ))
       }
       files_to_skip <- tsv_files_to_batch_process[already_done_mask]
@@ -280,6 +352,7 @@ eyeQualityBatch <-
                 batchName = batchName,
                 verbose = verbose,
                 outputDir = outputDir,
+                outputStructure = outputStructure,
                 ...
               )
               NULL
@@ -331,7 +404,8 @@ eyeQualityBatch <-
         get_qcsummary_output_path,
         character(1),
         batchName = batchName,
-        outputDir = outputDir
+        outputDir = outputDir,
+        outputStructure = outputStructure
       )
     }
     completed_mask <- if (length(qcsummary_paths_all) == 0) {
@@ -447,13 +521,24 @@ eyeQualityBatch <-
 #' @param batchName batch name, as passed to `eyeQualityBatch()`/`eyeQuality()`
 #' @param outputDir optional directory overriding the default
 #'   `<input_dir>/derivatives/eyeQuality-v1/` location. Default `NULL`.
+#' @param outputStructure one of `"flat"` (default) or `"bids"` (P7-07),
+#'   mirroring `create_new_filename()`'s own `outputStructure` argument (see
+#'   `R/saveFiles.R`) so the resumability check looks for existing output in
+#'   the same place `saveFiles()` would actually have written it. Unlike
+#'   `create_new_filename()`, a non-BIDS-named `inputFile` falls back to flat
+#'   placement here silently (no `warning()`) -- this is a pure existence
+#'   check invoked once per candidate file on every run (both before and
+#'   after dispatch), so warning here too would multiply, not add,
+#'   `create_new_filename()`'s own per-write warning for the same file.
 #'
 #' @return character filepath of the qcsummary output `saveFiles()` would
-#'   write for this file/batchName/outputDir combination (whether or not it
-#'   currently exists)
+#'   write for this file/batchName/outputDir/outputStructure combination
+#'   (whether or not it currently exists)
 #' @keywords internal
 #' @noRd
-get_qcsummary_output_path <- function(inputFile, batchName = NULL, outputDir = NULL) {
+get_qcsummary_output_path <- function(inputFile, batchName = NULL, outputDir = NULL, outputStructure = c("flat", "bids")) {
+  outputStructure <- match.arg(outputStructure)
+
   qcsummarydesc <- paste0(
     "_desc-",
     if (is.null(batchName)) "" else paste0(batchName, "_"),
@@ -475,8 +560,19 @@ get_qcsummary_output_path <- function(inputFile, batchName = NULL, outputDir = N
   # whole function error, just past a slightly later point than before.
   filename <- .safe_basename(fs::path_ext_remove(inputFile))
   directory <- fs::path_dir(inputFile)
+
+  # P7-07: same bids_ids fallback logic as create_new_filename() (see its own
+  # comment in R/saveFiles.R), minus the warning() -- see this function's own
+  # @param outputStructure doc above for why.
+  bids_ids <- NULL
+  if (identical(outputStructure, "bids") && !is.null(outputDir)) {
+    bids_ids <- .parse_bids_sub_ses(inputFile)
+  }
+
   newdirectory <- if (is.null(outputDir)) {
     fs::path(directory, "derivatives", "eyeQuality-v1")
+  } else if (!is.null(bids_ids)) {
+    fs::path(outputDir, "derivatives", "eyeQuality-v1", bids_ids$sub, bids_ids$ses)
   } else {
     fs::path(outputDir)
   }
