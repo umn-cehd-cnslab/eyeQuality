@@ -50,3 +50,7 @@ Validation_Verification_Strategy.md
 inst/doc
 /doc/
 /Meta/
+
+# Group-facing progress summary -- shared out-of-band, not via the repo
+eyeQualityUpdates.adoc
+eyeQualityUpdates.html
