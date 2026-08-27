@@ -1,7 +1,8 @@
-# P9-05: regression tests for the synchronous/pure pieces of the Setup app's
-# background batch-run mechanism (inst/shiny-apps/setup/background_run.R):
-# count_completed_qcsummary_files() and poll_batch_progress()'s counting
-# logic. Sourced via system.file() for the same reasons as
+# P9-05: regression tests for the synchronous/pure pieces of the Setup & Run
+# tab's background batch-run mechanism (inst/shiny-apps/app/background_run.R,
+# moved there from inst/shiny-apps/setup/background_run.R by P10-12's app
+# merge): count_completed_qcsummary_files() and poll_batch_progress()'s
+# counting logic. Sourced via system.file() for the same reasons as
 # test-runSetupApp.R (P9-01) -- it's the only portable way to reach inst/
 # files from tests, and doubles as a packaging-location check.
 #
@@ -16,9 +17,9 @@
 # two functions below are pure/synchronous and count-based, so they get
 # direct unit coverage instead.
 
-background_run_path <- system.file("shiny-apps", "setup", "background_run.R", package = "eyeQuality")
+background_run_path <- system.file("shiny-apps", "app", "background_run.R", package = "eyeQuality")
 if (!nzchar(background_run_path)) {
-  stop("test-background_run.R: could not locate inst/shiny-apps/setup/background_run.R via system.file()")
+  stop("test-background_run.R: could not locate inst/shiny-apps/app/background_run.R via system.file()")
 }
 source(background_run_path, local = TRUE)
 

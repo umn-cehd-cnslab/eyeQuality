@@ -26,7 +26,9 @@
 #' `normalizePath(mustWork = FALSE)` is the obvious way to get an absolute,
 #' resolved path before adding the prefix. An earlier version of this
 #' function trusted it unconditionally; a sibling fix in this codebase
-#' (`inst/shiny-apps/analyze/helpers.R`'s own `windows_long_path()`) reported
+#' (`inst/shiny-apps/app/analyze_helpers.R`'s own `windows_long_path()`,
+#' moved there from `inst/shiny-apps/analyze/helpers.R` by P10-12's app
+#' merge) reported
 #' `normalizePath(mustWork = FALSE)` silently failing to resolve a long,
 #' not-yet-existing path on its own testing. Independent re-verification here
 #' (multiple real >250-character paths, both single giant segments and real

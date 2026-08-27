@@ -2,17 +2,18 @@
 % Please edit documentation in R/runAnalyzeApp.R
 \name{runAnalyzeApp}
 \alias{runAnalyzeApp}
-\title{Launch the Analyze / QC Explorer Shiny app}
+\title{Launch the eyeQuality app, opening on its Analyze / QC Explorer tabs}
 \usage{
 runAnalyzeApp(initialDirectory = NULL, ...)
 }
 \arguments{
-\item{initialDirectory}{optional path to pre-populate the output
-directory field with on startup (e.g. the directory a Setup app
-(\code{runSetupApp()}) batch run just finished writing to). The user still
-needs to click "Load qcsummary files" themselves -- this only saves them
-re-navigating the directory picker, it does not auto-load. \code{NULL}
-(default) leaves the field empty, same as launching with no argument.}
+\item{initialDirectory}{optional path to pre-populate the Analyze tabs'
+output directory field with on startup (e.g. an existing output
+directory produced by a script-driven \code{eyeQualityBatch()} run, not this
+app's own Setup & Run tab). The user still needs to click "Load
+qcsummary files" themselves -- this only saves them re-navigating the
+directory picker, it does not auto-load. \code{NULL} (default) leaves the
+field empty, same as launching with no argument.}
 
 \item{...}{additional arguments passed through to \code{shiny::runApp()} (e.g.
 \code{launch.browser}, \code{port}).}
@@ -22,23 +23,38 @@ Nothing; called for the side effect of launching a Shiny app in
 the current R session. Does not return until the app is closed.
 }
 \description{
-Launches a Shiny app for choosing an output directory and loading every
+Launches the combined eyeQuality Shiny app (P10-12: Setup & Run and
+Analyze / QC Explorer are tabs of one app/process, not two separately
+launched apps) for choosing an output directory and loading every
 \code{qcsummary.tsv} output found under it (see \code{saveFiles()}/
 \code{eyeQualityBatch()}'s output naming convention) into a single
 sortable/filterable table.
 }
 \details{
-This app requires the \code{shiny}, \code{shinyFiles}, and \code{DT} packages, which are
-not installed automatically with this package (see \code{Suggests} in
-\code{DESCRIPTION}) since they're only needed for this optional interface, not
-the core preprocessing pipeline. Install them separately to use this
-function.
+This is one of two entry points into the same app (\code{runSetupApp()} is the
+other) -- both launch the identical \code{shiny::runApp()} process, differing
+only in which tab starts selected and, here, an optional pre-populated
+output directory. A batch run started from the Setup & Run tab hands its
+own output directory to these tabs automatically (via the "Review results
+in Analyze tabs" button shown once that run finishes) -- \code{initialDirectory}
+below exists for the separate case of opening this app already pointed at
+an existing output directory produced \emph{outside} this app (e.g. by a
+script-driven \code{eyeQualityBatch()} run).
+
+Since both tab groups now live in one process, this function requires the
+union of both tab groups' own Suggests-only dependencies (\code{shiny},
+\code{shinyFiles}, \code{future}, \code{promises} for the Setup & Run tab; \code{DT}, \code{plotly}
+for these tabs), none of which are installed automatically with this
+package (see \code{Suggests} in \code{DESCRIPTION}), since they're only needed for
+this optional interface, not the core preprocessing pipeline. Install them
+separately to use this function. \code{plotly} backs the "Gaze Explorer" tab's
+interactive trajectory/AOI view specifically.
 }
 \examples{
 \dontrun{
 runAnalyzeApp()
 
-# pre-populated with a Setup app run's output directory
+# pre-populated with an existing output directory
 runAnalyzeApp(initialDirectory = "/path/to/study/data")
 }
 }

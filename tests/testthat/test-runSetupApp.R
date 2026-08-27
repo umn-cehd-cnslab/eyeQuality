@@ -1,16 +1,19 @@
 # P9-01: regression tests for build_dry_run_preview(), the Shiny-free helper
-# behind the Setup app's dry-run preview panel (inst/shiny-apps/setup/
-# helpers.R). Sourced via system.file() rather than a relative path, both
-# because that's the only way to reach inst/ files portably from tests and
-# because it doubles as a check that the app is packaged where
-# runSetupApp() (R/runSetupApp.R) expects to find it.
+# behind the Setup tab's dry-run preview panel (inst/shiny-apps/app/
+# setup_helpers.R -- P10-12 merged the once-standalone Setup app into a
+# "Setup & Run" tab of the combined eyeQuality app; setup_helpers.R is that
+# tab's own helper file, sourced by inst/shiny-apps/app/app.R). Sourced via
+# system.file() rather than a relative path, both because that's the only way
+# to reach inst/ files portably from tests and because it doubles as a check
+# that the app is packaged where runSetupApp() (R/runSetupApp.R) expects to
+# find it.
 #
 # build_dry_run_preview() itself has no Shiny dependency, so these tests
 # don't need a running Shiny session or shinyFiles at all.
 
-helpers_path <- system.file("shiny-apps", "setup", "helpers.R", package = "eyeQuality")
+helpers_path <- system.file("shiny-apps", "app", "setup_helpers.R", package = "eyeQuality")
 if (!nzchar(helpers_path)) {
-  stop("test-runSetupApp.R: could not locate inst/shiny-apps/setup/helpers.R via system.file()")
+  stop("test-runSetupApp.R: could not locate inst/shiny-apps/app/setup_helpers.R via system.file()")
 }
 source(helpers_path, local = TRUE)
 
@@ -229,9 +232,9 @@ test_that("build_dry_run_preview's diagnostic_message is NULL whenever at least 
 # reflected, and call this out inline; this is a real gap in what testServer()
 # alone can prove for this app, not a bug in the app or in these tests.
 
-setup_app_dir <- system.file("shiny-apps", "setup", package = "eyeQuality")
+setup_app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
 if (!nzchar(setup_app_dir)) {
-  stop("test-runSetupApp.R: could not locate inst/shiny-apps/setup/ via system.file()")
+  stop("test-runSetupApp.R: could not locate inst/shiny-apps/app/ via system.file()")
 }
 
 # rel_home_segments: converts an absolute path under fs::path_home() into the
@@ -386,6 +389,20 @@ test_that("Setup app invalid config upload: validate_batch_config()'s error surf
   yaml::write_yaml(list(schemaVersion = 1, layout = "glob"), invalid_cfg_path)
 
   shiny::testServer(setup_app_dir, {
+    # P10-12: prime the session's first reactive flush BEFORE installing the
+    # capture below. The merged app's Analyze tabs carry their own
+    # unconditional per-file notes-textarea sync observer (qcflags_note_text,
+    # analyze_helpers.R/app.R), which runs once on ANY session's very first
+    # flush -- regardless of what input triggered it -- since it has no
+    # explicit event binding. Confirmed directly: even setting an unrelated
+    # input (e.g. batchName) with no config load at all pushes exactly one
+    # qcflags_note_text update the first time. That's real, but has nothing
+    # to do with the load handler under test here, so it's burned off here
+    # rather than either weakening this assertion or misreporting an
+    # unrelated tab's own startup behavior as "the config load handler
+    # partially applied the form."
+    session$flushReact()
+
     pushed_input_ids <- character(0)
     real_send <- session$sendInputMessage
     session$sendInputMessage <- function(inputId, message) {
@@ -410,6 +427,336 @@ test_that("Setup app invalid config upload: validate_batch_config()'s error surf
     expect_length(pushed_input_ids, 0)
 
     expect_null(loaded_config_extra())
+  })
+})
+
+# ---------------------------------------------------------------------------
+# P10-12: reconciled save/load -- one control now carries both Setup's own
+# run parameters AND the Analyze tabs' live qc_threshold_* values
+# ---------------------------------------------------------------------------
+#
+# Before the merge, "Save config"/"Load config" was two independent flows:
+# this one (P9-04, Setup form fields only) and a second, QC-thresholds-only
+# one on the standalone Analyze app's own sidebar (P10-07). P10-12 merged
+# both into this ONE control: build_current_config() (app.R) overlays the
+# Analyze tabs' current qc_thresholds() onto build_batch_config_from_form()'s
+# output before every save, and the load handler now also pushes
+# update*Input() calls for the Analyze tabs' own qc_threshold_* numericInputs,
+# not just Setup's fields -- and does so with validate = TRUE for the WHOLE
+# config, a deliberate behavior change from the old standalone Analyze app's
+# validate = FALSE (which let a thresholds-only file partially load). See the
+# last test in this section for that specific behavior change.
+#
+# capturing_update_session(): duplicated locally (rather than shared with
+# test-runAnalyzeApp.R) per this file's own self-containedness convention --
+# same technique as that file's own capturing_update_session(), records every
+# update*Input() call's inputId/message rather than relying on
+# MockShinySession's sendInputMessage() no-op reflecting into input$... (see
+# this file's P9-04 header comment for the full explanation of that
+# limitation). update*Input()'s own message$value is always sent as a plain
+# character string (shiny serializes it for the client-side JS regardless of
+# the input's own R-side numeric type) -- callers compare against a string,
+# or wrap in as.numeric(), not a bare numeric literal.
+capturing_update_session <- function() {
+  sess <- shiny::MockShinySession$new()
+  calls <- new.env(parent = emptyenv())
+  sess$sendInputMessage <- function(inputId, message) {
+    existing <- calls[[inputId]]
+    if (is.null(existing)) {
+      existing <- list()
+    }
+    existing[[length(existing) + 1]] <- message
+    calls[[inputId]] <- existing
+    invisible()
+  }
+  list(session = sess, calls = calls)
+}
+
+# prime_and_clear: burns off the merged app's unconditional first-flush
+# side effect (see the "invalid config upload" test above for the full
+# explanation -- the Analyze tabs' own notes-textarea sync observer pushes
+# exactly one qcflags_note_text update on ANY session's very first reactive
+# flush, unrelated to whatever load/save flow a test actually cares about)
+# before a capturing_update_session()-backed test starts asserting on
+# `calls`. Must run INSIDE the testServer() expr (a plain session$flushReact()
+# call from outside it does not have access to the server's own reactive
+# graph).
+prime_and_clear <- function(session, calls) {
+  session$flushReact()
+  rm(list = ls(calls), envir = calls)
+}
+
+test_that("Setup tab's reconciled save writes the Analyze tabs' live qc_threshold_* values into qcThresholds, not just Setup's own fields", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p1012_save_thresh_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+  data_segments <- rel_home_segments(data_dir)
+
+  save_dir <- tempfile("p1012_save_thresh_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "with_thresholds.yaml")
+
+  shiny::testServer(setup_app_dir, {
+    # directoryBIDS is a required field (validate_batch_config()) -- a real
+    # picker selection is needed for "Save config" to succeed at all, same as
+    # every other save test in this file.
+    session$setInputs(directory = list(root = "Home", path = data_segments))
+    session$setInputs(
+      layout = "bids",
+      batchName = "p1012_thresh_save",
+      displayDimensionX_mm = 594,
+      displayDimensionY_mm = 344,
+      # MockShinySession does not reflect selectInput()'s own UI default
+      # ("Maximize") the way a real browser session would -- left unset,
+      # input$eyeSelection_method is NULL/NA and validate_batch_config()
+      # rejects the save outright, same as every other save test in this
+      # file that touches eyeSelection_method explicitly.
+      eyeSelection_method = "Maximize",
+      # These live on the Analyze tabs' own sidebar, not the Setup form --
+      # setting them here directly is exactly what a real browser session
+      # would already have done before the user switches to "Setup & Run"
+      # and clicks "Save config...", since both tab groups share one input$.
+      qc_threshold_valid_pct = 65,
+      qc_threshold_robust_pct = 70,
+      qc_threshold_interp_pct = 15
+    )
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "with_thresholds.yaml", type = "yaml"
+    ))
+
+    status <- config_io_status()
+    expect_true(status$ok)
+  })
+
+  expect_true(file.exists(save_path))
+  loaded <- read_batch_config(save_path)
+  expect_equal(loaded$batchName, "p1012_thresh_save")
+  expect_equal(loaded$qcThresholds$valid_pct, 65)
+  expect_equal(loaded$qcThresholds$robust_pct, 70)
+  expect_equal(loaded$qcThresholds$interp_pct, 15)
+})
+
+test_that("Setup tab's reconciled save records each threshold's documented default when its own numericInput has never been touched this session", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p1012_save_thresh_default_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+  data_segments <- rel_home_segments(data_dir)
+
+  save_dir <- tempfile("p1012_save_thresh_default_dest_")
+  dir.create(save_dir, recursive = TRUE)
+  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
+  save_segments <- rel_home_segments(save_dir)
+  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "default_thresholds.yaml")
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = data_segments))
+    session$setInputs(
+      layout = "bids",
+      batchName = "p1012_thresh_default",
+      displayDimensionX_mm = 594,
+      displayDimensionY_mm = 344,
+      eyeSelection_method = "Maximize"
+    )
+    # deliberately never touch qc_threshold_valid_pct/robust_pct/interp_pct
+
+    session$setInputs(save_config = list(
+      root = "Home", path = save_segments, name = "default_thresholds.yaml", type = "yaml"
+    ))
+    expect_true(config_io_status()$ok)
+  })
+
+  loaded <- read_batch_config(save_path)
+  expect_equal(loaded$qcThresholds$valid_pct, 80)
+  expect_equal(loaded$qcThresholds$robust_pct, 80)
+  expect_equal(loaded$qcThresholds$interp_pct, 20)
+})
+
+test_that("Setup tab's reconciled load populates both Setup's own fields and the Analyze tabs' qc_threshold_* numericInputs from one file", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p1012_load_both_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+
+  cfg_path <- tempfile("p1012_load_both_cfg_", fileext = ".yaml")
+  on.exit(unlink(cfg_path), add = TRUE)
+  write_batch_config(
+    list(
+      batchName = "p1012_load_both",
+      directoryBIDS = normalizePath(data_dir, winslash = "/"),
+      layout = "bids",
+      displayDimensionX_mm = 500,
+      displayDimensionY_mm = 300,
+      qcThresholds = list(valid_pct = 55, robust_pct = 60, interp_pct = 30)
+    ),
+    cfg_path
+  )
+
+  cap <- capturing_update_session()
+  shiny::testServer(setup_app_dir, {
+    prime_and_clear(session, cap$calls)
+
+    session$setInputs(load_config_file = data.frame(
+      name = "p1012_load_both.yaml",
+      datapath = cfg_path,
+      stringsAsFactors = FALSE
+    ))
+
+    status <- config_io_status()
+    expect_true(status$ok)
+
+    # Setup's own fields...
+    expect_equal(cap$calls[["batchName"]][[1]]$value, "p1012_load_both")
+    expect_equal(as.numeric(cap$calls[["displayDimensionX_mm"]][[1]]$value), 500)
+    expect_equal(as.numeric(cap$calls[["displayDimensionY_mm"]][[1]]$value), 300)
+    # ...AND the Analyze tabs' own qc_threshold_* numericInputs, from the
+    # exact same file/load click -- the actual reconciliation under test.
+    expect_equal(as.numeric(cap$calls[["qc_threshold_valid_pct"]][[1]]$value), 55)
+    expect_equal(as.numeric(cap$calls[["qc_threshold_robust_pct"]][[1]]$value), 60)
+    expect_equal(as.numeric(cap$calls[["qc_threshold_interp_pct"]][[1]]$value), 30)
+  }, session = cap$session)
+})
+
+test_that("Setup tab's reconciled load falls back to each threshold's documented default for a config with no qcThresholds section at all", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p1012_load_noqc_data_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+
+  cfg_path <- tempfile("p1012_load_noqc_cfg_", fileext = ".yaml")
+  on.exit(unlink(cfg_path), add = TRUE)
+  write_batch_config(
+    list(
+      batchName = "p1012_load_noqc",
+      directoryBIDS = normalizePath(data_dir, winslash = "/"),
+      layout = "bids",
+      displayDimensionX_mm = 500,
+      displayDimensionY_mm = 300
+    ),
+    cfg_path
+  )
+
+  cap <- capturing_update_session()
+  shiny::testServer(setup_app_dir, {
+    prime_and_clear(session, cap$calls)
+
+    session$setInputs(load_config_file = data.frame(
+      name = "p1012_load_noqc.yaml",
+      datapath = cfg_path,
+      stringsAsFactors = FALSE
+    ))
+
+    expect_true(config_io_status()$ok)
+    # every threshold_id's numericInput is still explicitly set (to its
+    # documented default), not left alone -- "load" fully determines the
+    # resulting threshold state, per build_current_config()'s own comment.
+    expect_equal(as.numeric(cap$calls[["qc_threshold_valid_pct"]][[1]]$value), 80)
+    expect_equal(as.numeric(cap$calls[["qc_threshold_robust_pct"]][[1]]$value), 80)
+    expect_equal(as.numeric(cap$calls[["qc_threshold_interp_pct"]][[1]]$value), 20)
+  }, session = cap$session)
+})
+
+test_that("Setup tab's reconciled load rejects an incomplete config outright, rather than partially applying just its qcThresholds (deliberate P10-12 behavior change)", {
+  # Before P10-12, the standalone Analyze app's own load handler used
+  # validate = FALSE specifically so a QC-thresholds-only config (missing
+  # directoryBIDS/batchName/displayDimension*_mm entirely) could still load
+  # its thresholds. The ONE reconciled handler now uses validate = TRUE for
+  # everything, including thresholds -- this same hand-authored file, which
+  # WOULD have partially loaded its qcThresholds under the old standalone
+  # Analyze app, must now be rejected in full: config_io_status()$ok == FALSE
+  # and ZERO update*Input() calls for anything, including qc_threshold_*.
+  skip_on_cran()
+
+  # Missing batchName/directoryBIDS/displayDimension*_mm entirely -- only a
+  # qcThresholds section, exactly the shape the old standalone Analyze app's
+  # own "thresholds only" save would have produced.
+  thresholds_only_path <- tempfile("p1012_thresholds_only_", fileext = ".yaml")
+  on.exit(unlink(thresholds_only_path), add = TRUE)
+  yaml::write_yaml(
+    list(schemaVersion = 1, qcThresholds = list(valid_pct = 66, robust_pct = 71, interp_pct = 18)),
+    thresholds_only_path
+  )
+
+  cap <- capturing_update_session()
+  shiny::testServer(setup_app_dir, {
+    prime_and_clear(session, cap$calls)
+
+    session$setInputs(load_config_file = data.frame(
+      name = "thresholds_only.yaml",
+      datapath = thresholds_only_path,
+      stringsAsFactors = FALSE
+    ))
+
+    status <- config_io_status()
+    expect_false(status$ok)
+    expect_match(status$message, "batchName", fixed = TRUE)
+    expect_match(status$message, "directoryBIDS", fixed = TRUE)
+
+    expect_null(loaded_config_extra())
+    # No update*Input() call for ANY field -- specifically including the
+    # qc_threshold_* ones, which is the actual regression this guards
+    # against: an earlier reconciliation could plausibly have validated
+    # Setup's own fields first and only then bailed, while still having
+    # already pushed qc_threshold_* updates from a "kept" qcThresholds
+    # section evaluated before that check. Zero calls of ANY kind here rules
+    # that out.
+    expect_length(ls(cap$calls), 0)
+  }, session = cap$session)
+})
+
+# ---------------------------------------------------------------------------
+# P10-12: the two directory pickers (Setup's `directory` vs the Analyze
+# tabs' `analyze_directory`) operate independently, with no cross-talk
+# ---------------------------------------------------------------------------
+test_that("the Setup tab's directory field and the Analyze tabs' analyze_directory field resolve independently with no cross-talk", {
+  skip_on_cran()
+
+  setup_dir <- tempfile("p1012_crosstalk_setup_")
+  dir.create(file.path(setup_dir, "sub-01", "ses-01"), recursive = TRUE)
+  file.create(file.path(setup_dir, "sub-01", "ses-01", "a.tsv"))
+  on.exit(unlink(setup_dir, recursive = TRUE), add = TRUE)
+  setup_segments <- rel_home_segments(setup_dir)
+
+  analyze_dir <- tempfile("p1012_crosstalk_analyze_")
+  dir.create(analyze_dir, recursive = TRUE)
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 1),
+    file.path(analyze_dir, "sub-z_ses-1_desc-crosstalk_preproc_qcsummary.tsv")
+  )
+  on.exit(unlink(analyze_dir, recursive = TRUE), add = TRUE)
+  analyze_segments <- rel_home_segments(analyze_dir)
+
+  setup_dir_norm <- normalizePath(setup_dir, winslash = "/", mustWork = TRUE)
+  analyze_dir_norm <- normalizePath(analyze_dir, winslash = "/", mustWork = TRUE)
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(directory = list(root = "Home", path = setup_segments))
+    session$setInputs(analyze_directory = list(root = "Home", path = analyze_segments))
+
+    expect_equal(normalizePath(selected_dir(), winslash = "/"), setup_dir_norm)
+    expect_equal(normalizePath(analyze_selected_dir(), winslash = "/"), analyze_dir_norm)
+    expect_false(identical(selected_dir(), analyze_selected_dir()))
+
+    # A save's directoryBIDS reflects Setup's own picker, never the Analyze
+    # tabs' directory -- build_current_config() must not have picked up the
+    # wrong one.
+    config <- build_current_config()
+    expect_equal(as.character(config$directoryBIDS), setup_dir_norm)
+
+    # Loading the Analyze tabs' own qcsummary files must use analyze_directory,
+    # never Setup's directory -- and must not disturb Setup's own selection.
+    session$setInputs(analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    expect_equal(current_load_result()$n_files, 1L)
+    expect_equal(normalizePath(selected_dir(), winslash = "/"), setup_dir_norm)
   })
 })
 
@@ -631,7 +978,14 @@ test_that("the live-polling observe() counts completed files under run_info$outp
   })
 })
 
-test_that("Setup app's post_run_link panel shows the outputDir-resolved directory and a matching launch command once a run reaches status == 'done'", {
+test_that("Setup tab's post_run_link panel shows the outputDir-resolved directory and a 'Review results in Analyze tabs' button once a run reaches status == 'done'", {
+  # P10-12: before the merge, this panel rendered a copy-pasteable
+  # eyeQuality::runAnalyzeApp() command for a SEPARATE R console/session --
+  # now that Setup & Run and Analyze / QC Explorer are tabs of one process,
+  # it instead renders the resolved directory plus a real
+  # actionButton("review_in_analyze", ...) that does the hand-off in-process
+  # (see the "input$review_in_analyze" tests below). This test only pins down
+  # what's rendered; the button's actual behavior is exercised separately.
   skip_on_cran()
 
   shiny::testServer(setup_app_dir, {
@@ -642,15 +996,16 @@ test_that("Setup app's post_run_link panel shows the outputDir-resolved director
 
     html <- paste(as.character(session$getOutput("post_run_link")), collapse = "\n")
     expect_true(grepl("/central/outputs", html, fixed = TRUE))
-    expect_true(grepl('eyeQuality::runAnalyzeApp(initialDirectory = "/central/outputs")', html, fixed = TRUE))
+    expect_true(grepl('id="review_in_analyze"', html, fixed = TRUE))
+    expect_true(grepl("Review results in Analyze tabs", html, fixed = TRUE))
     # outputDir was set, so directoryBIDS (run_info$directory) must not be
-    # what's shown/linked -- pins down which of the two resolve_analyze_directory()
+    # what's shown -- pins down which of the two resolve_analyze_directory()
     # actually chose, not just that something plausible-looking was rendered.
     expect_false(grepl("/data/study_a", html, fixed = TRUE))
   })
 })
 
-test_that("Setup app's post_run_link panel falls back to directoryBIDS when outputDir was left blank for the run", {
+test_that("Setup tab's post_run_link panel falls back to directoryBIDS when outputDir was left blank for the run", {
   skip_on_cran()
 
   shiny::testServer(setup_app_dir, {
@@ -661,6 +1016,149 @@ test_that("Setup app's post_run_link panel falls back to directoryBIDS when outp
 
     html <- paste(as.character(session$getOutput("post_run_link")), collapse = "\n")
     expect_true(grepl("/data/study_b", html, fixed = TRUE))
-    expect_true(grepl('eyeQuality::runAnalyzeApp(initialDirectory = "/data/study_b")', html, fixed = TRUE))
+    expect_true(grepl('id="review_in_analyze"', html, fixed = TRUE))
   })
+})
+
+# ---------------------------------------------------------------------------
+# P10-12: input$review_in_analyze -- the real in-process Setup -> Analyze
+# hand-off
+# ---------------------------------------------------------------------------
+#
+# Before P10-12 this was necessarily a copy-pasteable command for a second R
+# session (see build_analyze_launch_command() above, still independently
+# tested and still a real, supported thing to hand someone opening the
+# Analyze tabs separately from a script-driven run -- just no longer what
+# app.R itself renders). Now that both tab groups share one process, clicking
+# "Review results in Analyze tabs" instead calls do_analyze_load() directly
+# (the same function body a manual "Load qcsummary files" click on the
+# Analyze tabs uses) and switches the visible tab.
+#
+# session$setInputs(top_nav = ...)/asserting input$top_nav changed doesn't
+# work in this harness: MockShinySession$sendInputMessage() -- what
+# updateNavbarPage() ultimately calls -- is a documented no-op (see this
+# file's own P9-04 header comment on the same limitation for update*Input()
+# calls). These tests instead assert the hand-off succeeded via the same
+# reactive state a real tab switch would have made visible: has_loaded_once(),
+# current_load_result()$n_files, and analyze_directory_override() -- the
+# reactiveVal do_analyze_load() itself writes into, read directly from within
+# the shared testServer() expr just like config_io_status()/loaded_config_extra()
+# are read elsewhere in this file.
+test_that("clicking 'Review results in Analyze tabs' loads the resolved output directory into the Analyze tabs' own reactive state", {
+  skip_on_cran()
+
+  out_dir <- tempfile("p1012_handoff_out_")
+  dir.create(out_dir, recursive = TRUE)
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+  readr::write_tsv(
+    data.frame(qc_metric = c("a", "b"), n = c(1, 2)),
+    file.path(out_dir, "sub-a_ses-1_desc-p1012handoff_preproc_qcsummary.tsv")
+  )
+  out_dir <- normalizePath(out_dir, winslash = "/", mustWork = TRUE)
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(outputDir = out_dir)
+    run_info$directory <- "/data/never_used_since_outputDir_is_set"
+    progress_state$status <- "done"
+    session$flushReact()
+
+    # Before the click: the Analyze tabs have never loaded anything.
+    expect_false(has_loaded_once())
+    expect_null(current_load_result())
+
+    session$setInputs(review_in_analyze = 1)
+
+    expect_true(has_loaded_once())
+    expect_equal(current_load_result()$n_files, 1L)
+    expect_equal(normalizePath(analyze_directory_override(), winslash = "/"), out_dir)
+  })
+})
+
+test_that("clicking 'Review results in Analyze tabs' resolves via directoryBIDS, matching resolve_analyze_directory()'s own fallback, when outputDir was left blank", {
+  skip_on_cran()
+
+  data_dir <- tempfile("p1012_handoff_bids_")
+  dir.create(data_dir, recursive = TRUE)
+  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
+  readr::write_tsv(
+    data.frame(qc_metric = "valid_raw_data", percent = 0.9),
+    file.path(data_dir, "sub-b_ses-1_desc-p1012handoffbids_preproc_qcsummary.tsv")
+  )
+  data_dir <- normalizePath(data_dir, winslash = "/", mustWork = TRUE)
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(outputDir = "")
+    run_info$directory <- data_dir
+    progress_state$status <- "done"
+    session$flushReact()
+
+    session$setInputs(review_in_analyze = 1)
+
+    expect_true(has_loaded_once())
+    expect_equal(current_load_result()$n_files, 1L)
+    expect_equal(normalizePath(analyze_directory_override(), winslash = "/"), data_dir)
+  })
+})
+
+test_that("input$review_in_analyze does nothing (no crash, no load) if clicked before resolve_analyze_directory() would have anything real to resolve", {
+  # req(analyze_dir, nzchar(analyze_dir)) guards the observeEvent body --
+  # run_info$directory is NULL until a run has actually launched, so
+  # resolve_analyze_directory(NULL, NULL) falls through to a NULL
+  # directoryBIDS. This mostly guards against a future regression where that
+  # guard is accidentally dropped and do_analyze_load(NULL, ...) is called.
+  skip_on_cran()
+
+  shiny::testServer(setup_app_dir, {
+    session$setInputs(review_in_analyze = 1)
+
+    expect_false(has_loaded_once())
+    expect_null(current_load_result())
+  })
+})
+
+# ---------------------------------------------------------------------------
+# P10-12: runSetupApp() resolves the merged app directory and sets
+# app_initialTab before shiny::runApp()
+# ---------------------------------------------------------------------------
+#
+# runSetupApp() itself calls shiny::runApp(), which blocks until the app is
+# closed -- not something a unit test can call for real.
+# testthat::local_mocked_bindings(..., .package = "shiny") stands in for it,
+# same technique test-runAnalyzeApp.R already uses for runAnalyzeApp()'s own
+# equivalent tests.
+
+test_that("runSetupApp() sets shinyOptions(app_initialTab = 'Setup & Run') before shiny::runApp() would be reached", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("shinyFiles")
+  skip_if_not_installed("DT")
+
+  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
+  on.exit(shiny::shinyOptions(app_initialTab = NULL), add = TRUE)
+
+  eyeQuality::runSetupApp()
+
+  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "Setup & Run")
+})
+
+test_that("runSetupApp() resolves the SAME merged app directory runAnalyzeApp() does (system.file('shiny-apps', 'app', ...)), not a separate 'setup' directory", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("shinyFiles")
+  skip_if_not_installed("DT")
+
+  captured_app_dir <- NULL
+  testthat::local_mocked_bindings(
+    runApp = function(appDir, ...) {
+      captured_app_dir <<- appDir
+      invisible(NULL)
+    },
+    .package = "shiny"
+  )
+  on.exit(shiny::shinyOptions(app_initialTab = NULL), add = TRUE)
+
+  eyeQuality::runSetupApp()
+
+  expect_equal(captured_app_dir, setup_app_dir)
+  expect_true(file.exists(file.path(captured_app_dir, "app.R")))
 })

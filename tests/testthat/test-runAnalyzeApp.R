@@ -1,5 +1,5 @@
-# P10-01: regression tests for the Analyze / QC Explorer app's Shiny-free
-# helpers (inst/shiny-apps/analyze/helpers.R) -- discover_qcsummary_files(),
+# P10-01: regression tests for the Analyze / QC Explorer tabs' Shiny-free
+# helpers (inst/shiny-apps/app/analyze_helpers.R) -- discover_qcsummary_files(),
 # derive_recording_label(), derive_batch_name(), build_zero_match_diagnostic(),
 # read_one_qcsummary(), and load_qcsummary_table(). Sourced via system.file()
 # rather than a relative path, same convention as test-runSetupApp.R, both
@@ -13,9 +13,9 @@
 # for the column-mismatch and corrupted-file edge cases that would be slow
 # or unreliable to reproduce through a real batch run.
 
-helpers_path <- system.file("shiny-apps", "analyze", "helpers.R", package = "eyeQuality")
+helpers_path <- system.file("shiny-apps", "app", "analyze_helpers.R", package = "eyeQuality")
 if (!nzchar(helpers_path)) {
-  stop("test-runAnalyzeApp.R: could not locate inst/shiny-apps/analyze/helpers.R via system.file()")
+  stop("test-runAnalyzeApp.R: could not locate inst/shiny-apps/app/analyze_helpers.R via system.file()")
 }
 source(helpers_path, local = TRUE)
 
@@ -457,7 +457,7 @@ test_that("load_plot_data returns ok = FALSE with a clear error (not a crash) wh
 test_that("row selection resolves distinct qc_table_rows_selected indices to their correct, distinct source_file/recording, matching a real 4-file, 128-row combined table", {
   skip_on_cran()
 
-  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
   expect_true(nzchar(app_dir))
 
   dir <- copy_bids_fixture_tree()
@@ -490,13 +490,13 @@ test_that("row selection resolves distinct qc_table_rows_selected indices to the
 
   # shinyDirChoose()'s "roots" include Home = fs::path_home() -- the same
   # root the app's server() constructs (see `volumes` in app.R) -- and
-  # shinyFiles::parseDirPath() resolves an input$directory value of
+  # shinyFiles::parseDirPath() resolves an input$analyze_directory value of
   # list(root = <name>, path = <segments>) as
   # path(roots[[root]], paste0(path, collapse = "/")). tempfile() dirs sit
   # under the OS temp dir, which is under the user's home directory on some
   # platforms but not others (e.g. /tmp is not under $HOME on many Linux/Mac
   # setups), so this is a real, resolvable shinyDirChoose()-style selection
-  # -- not a mocked-out selected_dir() -- only where that happens to hold;
+  # -- not a mocked-out analyze_selected_dir() -- only where that happens to hold;
   # skipped below otherwise.
   home <- normalizePath(fs::path_home(), winslash = "/")
   dir_norm <- normalizePath(dir, winslash = "/")
@@ -509,8 +509,8 @@ test_that("row selection resolves distinct qc_table_rows_selected indices to the
 
   shiny::testServer(app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = TRUE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = TRUE
     )
     session$setInputs(load = 1)
 
@@ -568,7 +568,7 @@ test_that("output$qc_table's actual rendered DT widget reflects load_result() af
   # isolation, only the actual render wiring was broken.
   skip_on_cran()
 
-  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
   expect_true(nzchar(app_dir))
 
   dir <- tempfile("p10qctablebug_")
@@ -614,8 +614,8 @@ test_that("output$qc_table's actual rendered DT widget reflects load_result() af
     }
 
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = TRUE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = TRUE
     )
     session$setInputs(load = 1)
 
@@ -796,7 +796,7 @@ test_that("compute_qc_flags returns an all-FALSE vector, not an error, when the 
 test_that("changing a QC threshold numericInput live changes qc_thresholds() and qc_table_flagged()'s qc_flag output, including the interp_pct control shared by both eyes", {
   skip_on_cran()
 
-  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
   expect_true(nzchar(app_dir))
 
   # Hand-built qcsummary.tsv fixture (not a real batch run): real
@@ -834,8 +834,8 @@ test_that("changing a QC threshold numericInput live changes qc_thresholds() and
 
   shiny::testServer(app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
 
@@ -974,16 +974,23 @@ test_that("qc_thresholds_to_percent maps a NULL or NA fraction to NA_real_ rathe
 })
 
 # ---------------------------------------------------------------------------
-# Live app.R save/load flows (shiny::testServer())
+# P10-12: the Analyze tabs' own save/load-config flow (formerly here, keyed
+# off cfg_batchName/cfg_directoryBIDS/cfg_displayDimension*_mm "study info"
+# fields unique to the standalone Analyze app) no longer exists as its own
+# thing -- P10-12 merged it into the Setup tab's single reconciled
+# save/load control, which now also carries the Analyze tabs' live
+# qc_threshold_* values. See test-runSetupApp.R's own "P10-12: reconciled
+# save/load" section for that coverage (build_current_config()'s threshold
+# overlay, one-shot save/load round-tripping both halves, and the
+# incomplete-config-now-fails-entirely behavior change). analyze_app_dir and
+# rel_home_segments_p1007 are kept here (target directory renamed only)
+# since later sections of this file still use both for Analyze-tab-only
+# shiny::testServer() coverage that has nothing to do with save/load.
 # ---------------------------------------------------------------------------
 
-analyze_app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+analyze_app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
 if (!nzchar(analyze_app_dir)) {
-  stop("test-runAnalyzeApp.R: could not locate inst/shiny-apps/analyze/ via system.file()")
-}
-setup_app_dir_p1007 <- system.file("shiny-apps", "setup", package = "eyeQuality")
-if (!nzchar(setup_app_dir_p1007)) {
-  stop("test-runAnalyzeApp.R: could not locate inst/shiny-apps/setup/ via system.file()")
+  stop("test-runAnalyzeApp.R: could not locate inst/shiny-apps/app/ via system.file()")
 }
 
 # rel_home_segments: converts an absolute path under fs::path_home() into the
@@ -1002,355 +1009,6 @@ rel_home_segments_p1007 <- function(path) {
   rel <- sub(paste0("^", home, "/?"), "", path)
   as.list(strsplit(rel, "/")[[1]])
 }
-
-test_that("Analyze app fresh save: study info + live thresholds round-trip through write_batch_config()/read_batch_config()", {
-  skip_on_cran()
-
-  save_dir <- tempfile("p1007_fresh_save_dest_")
-  dir.create(save_dir, recursive = TRUE)
-  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
-  save_segments <- rel_home_segments_p1007(save_dir)
-  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "fresh.yaml")
-
-  shiny::testServer(analyze_app_dir, {
-    session$setInputs(
-      cfg_batchName = "analyze_fresh_save",
-      cfg_directoryBIDS = "/data/analyze_fresh",
-      cfg_displayDimensionX_mm = 601,
-      cfg_displayDimensionY_mm = 401,
-      qc_threshold_valid_pct = 70,
-      qc_threshold_robust_pct = 55,
-      qc_threshold_interp_pct = 25
-    )
-
-    session$setInputs(save_config = list(
-      root = "Home", path = save_segments, name = "fresh.yaml", type = "yaml"
-    ))
-
-    status <- config_io_status()
-    expect_true(status$ok)
-  })
-
-  expect_true(file.exists(save_path))
-  loaded <- read_batch_config(save_path)
-  expect_equal(loaded$batchName, "analyze_fresh_save")
-  expect_equal(loaded$directoryBIDS, "/data/analyze_fresh")
-  expect_equal(loaded$displayDimensionX_mm, 601)
-  expect_equal(loaded$displayDimensionY_mm, 401)
-  expect_equal(loaded$qcThresholds$valid_pct, 70)
-  expect_equal(loaded$qcThresholds$robust_pct, 55)
-  expect_equal(loaded$qcThresholds$interp_pct, 25)
-  # no config was ever loaded this session, so run-parameter fields the
-  # Analyze app's own form doesn't expose fall back to default_batch_config()
-  expect_equal(loaded$layout, "bids")
-  expect_null(loaded$adapterType)
-})
-
-test_that("Analyze app fresh save with no study info filled in fails cleanly via validate_batch_config(), no partial file written", {
-  skip_on_cran()
-
-  save_dir <- tempfile("p1007_fresh_fail_dest_")
-  dir.create(save_dir, recursive = TRUE)
-  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
-  save_segments <- rel_home_segments_p1007(save_dir)
-  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "fresh_fail.yaml")
-
-  shiny::testServer(analyze_app_dir, {
-    # deliberately leave cfg_batchName/cfg_directoryBIDS/cfg_displayDimension*_mm
-    # at their blank/NA ui defaults -- only touch the thresholds
-    session$setInputs(qc_threshold_valid_pct = 65)
-
-    session$setInputs(save_config = list(
-      root = "Home", path = save_segments, name = "fresh_fail.yaml", type = "yaml"
-    ))
-
-    status <- config_io_status()
-    expect_false(status$ok)
-    expect_match(status$message, "batchName", fixed = TRUE)
-    expect_match(status$message, "directoryBIDS", fixed = TRUE)
-    expect_match(status$message, "displayDimensionX_mm", fixed = TRUE)
-    expect_match(status$message, "displayDimensionY_mm", fixed = TRUE)
-  })
-
-  expect_false(file.exists(save_path))
-})
-
-test_that("Analyze app load-Setup-only-config-then-resave: run params survive untouched, only the tweaked threshold changes", {
-  skip_on_cran()
-
-  data_dir <- tempfile("p1007_loadresave_data_")
-  dir.create(data_dir, recursive = TRUE)
-  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
-
-  # A config with no qcThresholds section at all -- exactly what the Setup
-  # app alone would have produced (P9-04), predating this task.
-  loaded_cfg_path <- tempfile("p1007_loadresave_cfg_", fileext = ".yaml")
-  on.exit(unlink(loaded_cfg_path), add = TRUE)
-  write_batch_config(
-    list(
-      batchName = "setup_only_run",
-      directoryBIDS = normalizePath(data_dir, winslash = "/"),
-      layout = "glob",
-      pathPattern = "sub-*/**/*.tsv",
-      excludePattern_regex = "deriv",
-      modalityPattern_regex = "gaze",
-      adapterType = "TobiiStudio",
-      numberCores = 6,
-      eyeSelection_method = "Left",
-      validityThreshold = 0.55,
-      outputDir = "/custom/out",
-      displayDimensionX_mm = 555,
-      displayDimensionY_mm = 333
-    ),
-    loaded_cfg_path
-  )
-
-  save_dir <- tempfile("p1007_loadresave_dest_")
-  dir.create(save_dir, recursive = TRUE)
-  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
-  save_segments <- rel_home_segments_p1007(save_dir)
-  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "resaved.yaml")
-
-  shiny::testServer(analyze_app_dir, {
-    session$setInputs(load_config_file = data.frame(
-      name = "setup_only_run.yaml",
-      datapath = loaded_cfg_path,
-      stringsAsFactors = FALSE
-    ))
-
-    load_status <- config_io_status()
-    expect_true(load_status$ok)
-
-    extra <- loaded_config_extra()
-    expect_equal(extra$layout, "glob")
-    expect_equal(extra$pathPattern, "sub-*/**/*.tsv")
-    expect_equal(extra$adapterType, "TobiiStudio")
-    expect_equal(extra$numberCores, 6)
-    expect_equal(extra$eyeSelection_method, "Left")
-    expect_equal(extra$validityThreshold, 0.55)
-    expect_equal(extra$outputDir, "/custom/out")
-    # no qcThresholds section in the loaded file -> filtered to an empty kept set
-    expect_equal(extra$qcThresholds, list())
-
-    # See this file's header comment: update*Input() calls the load handler
-    # just made are no-ops in this harness, so input$cfg_batchName/
-    # cfg_directoryBIDS/cfg_displayDimension*_mm never actually changed here
-    # the way a real browser would have reflected them. Set them explicitly to
-    # what the config just loaded, standing in for that reflection, so the
-    # resave below can succeed (validate_batch_config() requires all four) --
-    # this does not touch layout/pathPattern/adapterType/etc., which is the
-    # actual behavior under test.
-    session$setInputs(
-      cfg_batchName = "setup_only_run",
-      cfg_directoryBIDS = normalizePath(data_dir, winslash = "/"),
-      cfg_displayDimensionX_mm = 555,
-      cfg_displayDimensionY_mm = 333
-    )
-
-    # tweak exactly one threshold
-    session$setInputs(qc_threshold_interp_pct = 12)
-
-    session$setInputs(save_config = list(
-      root = "Home", path = save_segments, name = "resaved.yaml", type = "yaml"
-    ))
-    save_status <- config_io_status()
-    expect_true(save_status$ok)
-  })
-
-  expect_true(file.exists(save_path))
-  resaved <- read_batch_config(save_path)
-  expect_equal(resaved$batchName, "setup_only_run")
-  expect_equal(resaved$layout, "glob")
-  expect_equal(resaved$pathPattern, "sub-*/**/*.tsv")
-  expect_equal(resaved$excludePattern_regex, "deriv")
-  expect_equal(resaved$modalityPattern_regex, "gaze")
-  expect_equal(resaved$adapterType, "TobiiStudio")
-  expect_equal(resaved$numberCores, 6)
-  expect_equal(resaved$eyeSelection_method, "Left")
-  expect_equal(resaved$validityThreshold, 0.55)
-  expect_equal(resaved$outputDir, "/custom/out")
-  expect_equal(resaved$displayDimensionX_mm, 555)
-  expect_equal(resaved$displayDimensionY_mm, 333)
-  # tweaked threshold shows the new value...
-  expect_equal(resaved$qcThresholds$interp_pct, 12)
-  # ...while untouched thresholds fall back to their documented defaults
-  # (80/80), not to something left over from the loaded config (which had none)
-  expect_equal(resaved$qcThresholds$valid_pct, 80)
-  expect_equal(resaved$qcThresholds$robust_pct, 80)
-})
-
-test_that("Analyze app load-with-unrecognized-key: dropped gracefully with a status message, recognized key still carried forward for resave", {
-  skip_on_cran()
-
-  # Hand-edited config (not written via write_batch_config(), which would
-  # refuse this outright) with one recognized-and-sane entry, one
-  # unrecognized threshold_id, and one recognized id with an out-of-range
-  # value -- both of the latter two must be dropped, not just the first.
-  hand_edited_path <- tempfile("p1007_handedited_", fileext = ".yaml")
-  on.exit(unlink(hand_edited_path), add = TRUE)
-  yaml::write_yaml(list(
-    schemaVersion = 1,
-    batchName = "hand_edited_run",
-    directoryBIDS = "/data/hand_edited",
-    displayDimensionX_mm = 200,
-    displayDimensionY_mm = 150,
-    qcThresholds = list(valid_pct = 66, made_up_metric = 999, robust_pct = 150)
-  ), hand_edited_path)
-
-  save_dir <- tempfile("p1007_handedited_dest_")
-  dir.create(save_dir, recursive = TRUE)
-  on.exit(unlink(save_dir, recursive = TRUE), add = TRUE)
-  save_segments <- rel_home_segments_p1007(save_dir)
-  save_path <- file.path(normalizePath(save_dir, winslash = "/"), "handedited_resaved.yaml")
-
-  shiny::testServer(analyze_app_dir, {
-    session$setInputs(load_config_file = data.frame(
-      name = "hand_edited.yaml",
-      datapath = hand_edited_path,
-      stringsAsFactors = FALSE
-    ))
-
-    load_status <- config_io_status()
-    expect_true(load_status$ok) # the load itself still succeeds overall
-    expect_match(load_status$message, "made_up_metric", fixed = TRUE)
-    expect_match(load_status$message, "robust_pct", fixed = TRUE)
-
-    extra <- loaded_config_extra()
-    expect_equal(extra$qcThresholds, list(valid_pct = 66))
-
-    # See the file-level workaround comment above: reflect what a real
-    # browser's update*Input() calls would have set for the one entry that
-    # WAS kept, since MockShinySession's sendInputMessage() is a no-op here.
-    session$setInputs(
-      cfg_batchName = "hand_edited_run",
-      cfg_directoryBIDS = "/data/hand_edited",
-      cfg_displayDimensionX_mm = 200,
-      cfg_displayDimensionY_mm = 150,
-      qc_threshold_valid_pct = 66
-    )
-
-    session$setInputs(save_config = list(
-      root = "Home", path = save_segments, name = "handedited_resaved.yaml", type = "yaml"
-    ))
-    save_status <- config_io_status()
-    expect_true(save_status$ok)
-  })
-
-  resaved <- read_batch_config(save_path)
-  # the recognized/sane entry survived the drop-and-resave round trip...
-  expect_equal(resaved$qcThresholds$valid_pct, 66)
-  # ...while the dropped entries are nowhere in the resaved file: robust_pct
-  # falls back to its documented default (80), and made_up_metric never
-  # existed as a recognized key to begin with
-  expect_equal(resaved$qcThresholds$robust_pct, 80)
-  expect_false("made_up_metric" %in% names(resaved$qcThresholds))
-})
-
-test_that("Cross-app round trip: Setup app saves a config, Analyze app loads/tweaks/resaves it in place, Setup app reloads it with its own fields unaffected", {
-  skip_on_cran()
-
-  data_dir <- tempfile("p1007_crossapp_data_")
-  dir.create(data_dir, recursive = TRUE)
-  on.exit(unlink(data_dir, recursive = TRUE), add = TRUE)
-  data_segments <- rel_home_segments_p1007(data_dir)
-
-  shared_dir <- tempfile("p1007_crossapp_shared_")
-  dir.create(shared_dir, recursive = TRUE)
-  on.exit(unlink(shared_dir, recursive = TRUE), add = TRUE)
-  shared_segments <- rel_home_segments_p1007(shared_dir)
-  shared_path <- file.path(normalizePath(shared_dir, winslash = "/"), "shared.yaml")
-
-  # --- Step 1: Setup app saves the initial config -----------------------
-  shiny::testServer(setup_app_dir_p1007, {
-    session$setInputs(directory = list(root = "Home", path = data_segments))
-    session$setInputs(
-      layout = "glob",
-      pathPattern = "**/*.tsv",
-      excludePattern_regex = "deriv",
-      modalityPattern_regex = "gaze",
-      displayDimensionX_mm = 611,
-      displayDimensionY_mm = 411,
-      eyeSelection_method = "Strict",
-      validityThreshold = 0.6,
-      outputDir = "",
-      batchName = "crossapp_study"
-    )
-    session$setInputs(save_config = list(
-      root = "Home", path = shared_segments, name = "shared.yaml", type = "yaml"
-    ))
-    expect_true(config_io_status()$ok)
-  })
-
-  expect_true(file.exists(shared_path))
-  after_setup_save <- read_batch_config(shared_path)
-  expect_null(after_setup_save$qcThresholds)
-
-  # --- Step 2: Analyze app loads it, tweaks thresholds, resaves in place --
-  shiny::testServer(analyze_app_dir, {
-    session$setInputs(load_config_file = data.frame(
-      name = "shared.yaml",
-      datapath = shared_path,
-      stringsAsFactors = FALSE
-    ))
-    expect_true(config_io_status()$ok)
-
-    # reflect the loaded study-info fields (see no-op workaround comment above)
-    session$setInputs(
-      cfg_batchName = "crossapp_study",
-      cfg_directoryBIDS = after_setup_save$directoryBIDS,
-      cfg_displayDimensionX_mm = 611,
-      cfg_displayDimensionY_mm = 411,
-      qc_threshold_valid_pct = 90,
-      qc_threshold_robust_pct = 85,
-      qc_threshold_interp_pct = 10
-    )
-
-    session$setInputs(save_config = list(
-      root = "Home", path = shared_segments, name = "shared.yaml", type = "yaml"
-    ))
-    expect_true(config_io_status()$ok)
-  })
-
-  after_analyze_save <- read_batch_config(shared_path)
-  expect_equal(after_analyze_save$qcThresholds$valid_pct, 90)
-  expect_equal(after_analyze_save$qcThresholds$robust_pct, 85)
-  expect_equal(after_analyze_save$qcThresholds$interp_pct, 10)
-  # Setup app's own fields must be exactly what step 1 wrote, unaffected by
-  # the Analyze app's resave.
-  expect_equal(after_analyze_save$layout, "glob")
-  expect_equal(after_analyze_save$pathPattern, "**/*.tsv")
-  expect_equal(after_analyze_save$excludePattern_regex, "deriv")
-  expect_equal(after_analyze_save$modalityPattern_regex, "gaze")
-  expect_equal(after_analyze_save$eyeSelection_method, "Strict")
-  expect_equal(after_analyze_save$validityThreshold, 0.6)
-  expect_equal(after_analyze_save$batchName, "crossapp_study")
-
-  # --- Step 3: Setup app re-loads the same file; its own fields survive ---
-  shiny::testServer(setup_app_dir_p1007, {
-    session$setInputs(load_config_file = data.frame(
-      name = "shared.yaml",
-      datapath = shared_path,
-      stringsAsFactors = FALSE
-    ))
-
-    reload_status <- config_io_status()
-    expect_true(reload_status$ok)
-
-    extra <- loaded_config_extra()
-    expect_equal(extra$layout, "glob")
-    expect_equal(extra$pathPattern, "**/*.tsv")
-    expect_equal(extra$excludePattern_regex, "deriv")
-    expect_equal(extra$modalityPattern_regex, "gaze")
-    expect_equal(extra$eyeSelection_method, "Strict")
-    expect_equal(extra$validityThreshold, 0.6)
-    expect_equal(extra$batchName, "crossapp_study")
-    expect_equal(extra$displayDimensionX_mm, 611)
-    expect_equal(extra$displayDimensionY_mm, 411)
-    # the Analyze app's qcThresholds edits are still present in the config
-    # this app doesn't itself expose a form for, unaffected by this reload
-    expect_equal(extra$qcThresholds$valid_pct, 90)
-  })
-})
 
 # ---------------------------------------------------------------------------
 # P10-04: build_qc_comparison_plot() / build_qc_comparison_table()
@@ -1720,7 +1378,7 @@ test_that("build_flagged_export_table excludes unflagged rows from the count/met
 test_that("output$download_flagged_csv's content() does not throw and produces a clean header-only CSV when triggered before any directory has been loaded", {
   skip_on_cran()
 
-  app_dir <- system.file("shiny-apps", "analyze", package = "eyeQuality")
+  app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
   expect_true(nzchar(app_dir))
 
   shiny::testServer(app_dir, {
@@ -1747,7 +1405,7 @@ test_that("output$download_flagged_csv's content() does not throw and produces a
 # Two pieces exercised here: R/runAnalyzeApp.R's new `initialDirectory`
 # argument (validation, and that a valid value is actually plumbed through to
 # shiny::shinyOptions() before shiny::runApp() would be reached), and the
-# Analyze app's own `directory_override` reactive (app.R), seeded from
+# Analyze tabs' own `analyze_directory_override` reactive (app.R), seeded from
 # getShinyOption("analyze_initialDirectory", NULL), via shiny::testServer().
 #
 # runAnalyzeApp() itself calls shiny::runApp(), which blocks until the app is
@@ -1764,11 +1422,47 @@ test_that("runAnalyzeApp() passes a valid single-string initialDirectory through
   skip_if_not_installed("DT")
 
   testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
-  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL), add = TRUE)
+  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL, app_initialTab = NULL), add = TRUE)
 
   eyeQuality::runAnalyzeApp(initialDirectory = "/some/study/outputs")
 
   expect_equal(shiny::getShinyOption("analyze_initialDirectory", NULL), "/some/study/outputs")
+})
+
+test_that("runAnalyzeApp() also sets shinyOptions(app_initialTab = 'Analyze / QC Explorer'), P10-12's merged-app entry point", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("shinyFiles")
+  skip_if_not_installed("DT")
+
+  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
+  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL, app_initialTab = NULL), add = TRUE)
+
+  eyeQuality::runAnalyzeApp()
+
+  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "Analyze / QC Explorer")
+})
+
+test_that("runAnalyzeApp() resolves the SAME merged app directory runSetupApp() does (system.file('shiny-apps', 'app', ...))", {
+  skip_on_cran()
+  skip_if_not_installed("shiny")
+  skip_if_not_installed("shinyFiles")
+  skip_if_not_installed("DT")
+
+  captured_app_dir <- NULL
+  testthat::local_mocked_bindings(
+    runApp = function(appDir, ...) {
+      captured_app_dir <<- appDir
+      invisible(NULL)
+    },
+    .package = "shiny"
+  )
+  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL, app_initialTab = NULL), add = TRUE)
+
+  eyeQuality::runAnalyzeApp()
+
+  expect_equal(captured_app_dir, analyze_app_dir)
+  expect_true(file.exists(file.path(captured_app_dir, "app.R")))
 })
 
 test_that("runAnalyzeApp() accepts NULL initialDirectory (the default) and leaves the shinyOption unset", {
@@ -1807,7 +1501,7 @@ test_that("runAnalyzeApp() errors clearly on a non-character initialDirectory", 
 })
 
 # ---------------------------------------------------------------------------
-# P9-07: Analyze app's directory_override seeded from analyze_initialDirectory
+# P9-07: Analyze tabs' analyze_directory_override seeded from analyze_initialDirectory
 # ---------------------------------------------------------------------------
 #
 # In real production use, runAnalyzeApp() calls shiny::shinyOptions() BEFORE
@@ -1850,8 +1544,8 @@ test_that("Analyze app pre-populates the directory field from a seeded analyze_i
 
   shiny::testServer(analyze_app_dir, {
     # pre-populated purely from the seeded option, before any picker interaction
-    expect_equal(selected_dir(), seed_dir)
-    expect_equal(session$getOutput("selected_directory"), seed_dir)
+    expect_equal(analyze_selected_dir(), seed_dir)
+    expect_equal(session$getOutput("analyze_selected_directory"), seed_dir)
 
     # no auto-load: load_result() is an eventReactive bound to input$load and
     # has never fired, so evaluating it now raises a silent shiny condition
@@ -1884,23 +1578,23 @@ test_that("Analyze app: a real directory-picker selection overrides the seeded a
   real_segments <- rel_home_segments_p1007(real_dir)
 
   shiny::testServer(analyze_app_dir, {
-    expect_equal(selected_dir(), seed_dir)
+    expect_equal(analyze_selected_dir(), seed_dir)
 
-    session$setInputs(directory = list(root = "Home", path = real_segments))
-    expect_equal(normalizePath(selected_dir(), winslash = "/"), real_dir)
-    expect_false(identical(normalizePath(selected_dir(), winslash = "/"), seed_dir))
+    session$setInputs(analyze_directory = list(root = "Home", path = real_segments))
+    expect_equal(normalizePath(analyze_selected_dir(), winslash = "/"), real_dir)
+    expect_false(identical(normalizePath(analyze_selected_dir(), winslash = "/"), seed_dir))
   }, session = seeded_session(seed_dir))
 })
 
-test_that("Analyze app with no analyze_initialDirectory shinyOption set: selected_dir() is empty, matching pre-P9-07 behavior", {
+test_that("Analyze app with no analyze_initialDirectory shinyOption set: analyze_selected_dir() is empty, matching pre-P9-07 behavior", {
   skip_on_cran()
 
   # A plain, unseeded MockShinySession (testServer()'s own default) -- no
   # analyze_initialDirectory anywhere in its options, the same as launching
   # runAnalyzeApp() with no initialDirectory argument at all.
   shiny::testServer(analyze_app_dir, {
-    expect_length(selected_dir(), 0)
-    expect_equal(session$getOutput("selected_directory"), "No directory selected yet.")
+    expect_length(analyze_selected_dir(), 0)
+    expect_equal(session$getOutput("analyze_selected_directory"), "No directory selected yet.")
   })
 })
 
@@ -1927,7 +1621,7 @@ test_that("Analyze app with no analyze_initialDirectory shinyOption set: selecte
 # renderUI() output as a list(html = <character>, deps = <list>) in this
 # harness, not a bare character string (confirmed directly -- every state of
 # output$auto_refresh_status returns this same shape, unlike renderText()'s
-# output$selected_directory elsewhere in this file, which really is plain
+# output$analyze_selected_directory elsewhere in this file, which really is plain
 # character). Unwrapped here once so the tests below can still assert against
 # a plain string.
 renderui_html <- function(x) {
@@ -1976,8 +1670,8 @@ test_that("checking Auto-refresh after a real manual load re-polls the loaded di
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
 
@@ -2025,8 +1719,8 @@ test_that("unchecking Auto-refresh mid-session stops further polling", {
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
     expect_equal(current_load_result()$n_files, 1L)
@@ -2097,8 +1791,8 @@ test_that("selected_source_file() survives an auto-refresh tick where a new file
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
 
@@ -2155,8 +1849,8 @@ test_that("selected_source_file() clears (rather than pointing at a nonexistent 
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
 
@@ -2192,8 +1886,8 @@ test_that("output$auto_refresh_status shows the actively-polling state with a la
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
     session$setInputs(autoRefresh = TRUE)
@@ -2291,9 +1985,9 @@ test_that("filter_by_batch_name returns the input unchanged for a NULL table or 
 })
 
 # capturing_update_session: a MockShinySession whose sendInputMessage() --
-# a documented no-op in a bare MockShinySession (see e.g. this file's earlier
-# comment on cfg_batchName/cfg_directoryBIDS not reflecting update*Input()
-# calls in this harness) -- instead records every update*Input() call's
+# a documented no-op in a bare MockShinySession (see test-runSetupApp.R's own
+# file-level comment on update*Input() calls never reflecting into input$...
+# in this harness) -- instead records every update*Input() call's
 # inputId/message into `calls`, keyed by inputId. This lets a test assert on
 # what app.R's own observeEvent(manual_load_trigger(), ...) block actually
 # told the (simulated) browser to set for "compare_batch_name_filter" --
@@ -2342,8 +2036,8 @@ test_that("Compare files batch_name filter defaults to every loaded batch_name s
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
 
@@ -2382,8 +2076,8 @@ test_that("narrowing the Compare files batch_name filter narrows output$compare_
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(
-      directory = list(root = "Home", path = path_segments),
-      recursiveSearch = FALSE
+      analyze_directory = list(root = "Home", path = path_segments),
+      analyze_recursiveSearch = FALSE
     )
     session$setInputs(load = 1)
     expect_equal(current_load_result()$n_files, 15L)
@@ -2870,7 +2564,7 @@ test_that("selecting a QC-table row for a file with real event markers populates
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
 
     session$setInputs(qc_table_rows_selected = 1) # file A, has events
@@ -2905,7 +2599,7 @@ test_that("switching the selected row from file A to file B resets the time-rang
   cs <- capturing_update_session()
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
 
     session$setInputs(qc_table_rows_selected = 1) # file A: recordingTimestamp_ms 0-90
@@ -2950,7 +2644,7 @@ test_that("defining an AOI via the modal's 4 corner inputs produces an n_inside/
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1) # file A
 
@@ -2993,7 +2687,7 @@ test_that("narrowing the time range to a window with 0 gaze samples shows the do
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1) # file A: samples at 0,10,20,...,90
 
@@ -3048,7 +2742,7 @@ test_that("the app-level wiring passes the untrimmed filtered_trajectory() to co
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1)
 
@@ -3525,7 +3219,7 @@ test_that("selecting a file via one file selector reflects into selected_source_
   cs <- capturing_update_session()
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
 
     tbl <- current_load_result()$table
@@ -3593,7 +3287,7 @@ test_that("output$qc_major_table renders without error on a real load, and the s
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
 
     expect_error(session$getOutput("qc_major_table"), NA)
@@ -3623,7 +3317,7 @@ test_that("typing and saving a note for the selected file persists it to eyeQual
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
 
     tbl <- current_load_result()$table
@@ -3666,7 +3360,7 @@ test_that("switching the selected file updates the notes textarea to THAT file's
   cs <- capturing_update_session()
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
 
     tbl <- current_load_result()$table
@@ -3706,7 +3400,7 @@ test_that("reloading the same directory in a fresh app session repopulates a pre
   # First app instance: save a note, then let it end -- standing in for an
   # app restart / a different reviewer opening this directory later.
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     tbl <- current_load_result()$table
     session$setInputs(qcflags_file_selector = unique(tbl$source_file)[1])
@@ -3716,7 +3410,7 @@ test_that("reloading the same directory in a fresh app session repopulates a pre
 
   cs <- capturing_update_session()
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
 
     reloaded_notes <- notes_store()
@@ -3746,7 +3440,7 @@ test_that("clearing the note text and saving removes that file's row from notes.
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     tbl <- current_load_result()$table
     session$setInputs(qcflags_file_selector = unique(tbl$source_file)[1])
@@ -3781,7 +3475,7 @@ test_that("the flagged-for-review CSV export's note column reflects the currentl
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     tbl <- current_load_result()$table
     session$setInputs(qcflags_file_selector = unique(tbl$source_file)[1])
@@ -3818,7 +3512,7 @@ test_that("selecting exactly 1 Compare-files metric still renders the original p
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(
       compare_batch_name_filter = "cmpbar",
@@ -3851,7 +3545,7 @@ test_that("selecting 2 Compare-files metrics switches to the fixed-height scatte
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(
       compare_batch_name_filter = "cmpscatter",
@@ -3884,7 +3578,7 @@ test_that("output$compare_plot renders nothing (not a crash) if input$compare_me
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(
       compare_batch_name_filter = "guard",
@@ -3931,7 +3625,7 @@ test_that("the Plots and Gaze Explorer tabs' major-metrics badges show the corre
   path_segments <- rel_home_segments_p1007(dir)
 
   shiny::testServer(analyze_app_dir, {
-    session$setInputs(directory = list(root = "Home", path = path_segments), recursiveSearch = FALSE)
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     tbl <- current_load_result()$table
     file_a <- unique(tbl$source_file[grepl("badgeA", tbl$source_file)])

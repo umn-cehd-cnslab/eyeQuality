@@ -1,7 +1,7 @@
-# Background batch-run helpers.
+# Background batch-run helpers (Setup & Run tab).
 #
-# Kept separate from helpers.R (P9-01's dry-run preview logic, which stays
-# Shiny-free and independently testable) and from app.R itself, so the
+# Kept separate from setup_helpers.R (P9-01's dry-run preview logic, which
+# stays Shiny-free and independently testable) and from app.R itself, so the
 # launch/poll mechanism can also be exercised directly outside of a running
 # Shiny session -- start_background_batch()/poll_batch_progress() take plain
 # arguments and return plain values, no reactives.

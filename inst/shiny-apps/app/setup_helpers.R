@@ -1,4 +1,7 @@
-# Setup app helper functions.
+# Setup & Run tab helper functions (P10-12: sourced by the merged app's
+# app.R alongside analyze_helpers.R -- see that file's own header comment for
+# why the two stay separate, independently sourced files rather than being
+# combined into one).
 #
 # Kept separate from app.R and free of Shiny-specific code (no reactives, no
 # input/output objects) so build_dry_run_preview() can be sourced and called
@@ -196,16 +199,30 @@ build_batch_config_from_form <- function(directoryBIDS,
   utils::modifyList(extra, form_fields, keep.null = TRUE)
 }
 
-# --- P9-07: post-run summary linking to the Analyze app --------------------
+# --- P9-07/P10-12: handing a finished run's output directory to the Analyze
+# tabs ---------------------------------------------------------------------
 #
-# The Setup and Analyze apps are two separately-launched local Shiny
-# processes (each its own shiny::runApp() call), not tabs of one app -- a
-# running Shiny session can't safely launch a second, separate Shiny process
-# for itself. So "linking" here means: once a batch run finishes, tell the
-# user exactly where its outputs landed and hand them a ready-to-run
-# runAnalyzeApp() call (see R/runAnalyzeApp.R's `initialDirectory` argument)
-# to paste into a separate R console/session to review them, rather than
-# attempting any in-process app-to-app handoff.
+# Before P10-12, the Setup and Analyze apps were two separately-launched
+# local Shiny processes (each its own shiny::runApp() call), not tabs of one
+# app -- a running Shiny session couldn't safely launch a second, separate
+# Shiny process for itself. "Linking" then meant: once a batch run finished,
+# tell the user exactly where its outputs landed and hand them a
+# ready-to-run runAnalyzeApp() call (build_analyze_launch_command() below) to
+# paste into a separate R console/session.
+#
+# P10-12 merged both apps into one process/page, so app.R now does a real
+# in-process handoff instead: resolve_analyze_directory() is still the right
+# helper for deciding WHICH directory to point at (unchanged), but app.R
+# wires that value directly into the Analyze tabs' own directory state and
+# switches the visible tab, rather than rendering a copy-pasteable command.
+# build_analyze_launch_command() is kept below, still independently tested,
+# as a plain string-building utility -- nothing in app.R calls it anymore,
+# but eyeQuality::runAnalyzeApp(initialDirectory = ...) (R/runAnalyzeApp.R)
+# remains a supported, separate way to open just the Analyze tabs pre-pointed
+# at an existing output directory (e.g. one produced by a script-driven
+# eyeQualityBatch() run rather than this app's own Setup tab), so the
+# command this builds is still a real, valid thing to hand someone in that
+# context.
 
 # resolve_analyze_directory: which directory the Analyze app should be
 # pointed at once a batch run finishes -- outputDir if the run used one, else

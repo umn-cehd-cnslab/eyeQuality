@@ -71,28 +71,30 @@ default_batch_config <- function() {
 }
 
 # .known_qc_threshold_ids: the qcThresholds keys validate_batch_config()
-# below recognizes, read directly from the Analyze app's qc_threshold_config
-# (inst/shiny-apps/analyze/helpers.R, P10-02) rather than duplicated here --
-# that object (and its own comment explaining what each threshold_id means
-# and why those particular metrics were chosen) is the single source of
-# truth for which QC metrics are thresholdable, and this function exists
-# purely so validate_batch_config() doesn't have to keep a second id list in
-# sync with it by hand. Sourced fresh into an isolated environment (parented
-# to baseenv(), not the caller's search path) on every call -- helpers.R is
-# a tiny, dependency-free file (its top-level statements only define
-# functions and one data.frame() literal; every package/other-file call
-# inside those function bodies is fully namespace-qualified, so it neither
-# needs nor picks up anything from the caller's environment) with no
-# meaningful cost to re-source, so this avoids a stale in-memory copy rather
-# than trading correctness for a cache.
+# below recognizes, read directly from the Analyze tabs' qc_threshold_config
+# (inst/shiny-apps/app/analyze_helpers.R, P10-02; P10-12 merged the
+# formerly-separate Setup/Analyze apps into one inst/shiny-apps/app/ app,
+# moving this file from inst/shiny-apps/analyze/helpers.R) rather than
+# duplicated here -- that object (and its own comment explaining what each
+# threshold_id means and why those particular metrics were chosen) is the
+# single source of truth for which QC metrics are thresholdable, and this
+# function exists purely so validate_batch_config() doesn't have to keep a
+# second id list in sync with it by hand. Sourced fresh into an isolated
+# environment (parented to baseenv(), not the caller's search path) on every
+# call -- analyze_helpers.R is a tiny, dependency-free file (its top-level
+# statements only define functions and one data.frame() literal; every
+# package/other-file call inside those function bodies is fully
+# namespace-qualified, so it neither needs nor picks up anything from the
+# caller's environment) with no meaningful cost to re-source, so this avoids
+# a stale in-memory copy rather than trading correctness for a cache.
 #
 # Returns a character vector of unique threshold_id values, or character(0)
-# if inst/shiny-apps/analyze/helpers.R can't be located (e.g. an unusual
-# install without the Shiny apps present) -- validate_batch_config() treats
-# that as "can't verify, don't block" rather than rejecting every
+# if inst/shiny-apps/app/analyze_helpers.R can't be located (e.g. an
+# unusual install without the Shiny apps present) -- validate_batch_config()
+# treats that as "can't verify, don't block" rather than rejecting every
 # qcThresholds entry as unrecognized.
 .known_qc_threshold_ids <- function() {
-  helpers_path <- system.file("shiny-apps", "analyze", "helpers.R", package = "eyeQuality")
+  helpers_path <- system.file("shiny-apps", "app", "analyze_helpers.R", package = "eyeQuality")
   if (!nzchar(helpers_path)) {
     return(character(0))
   }
@@ -375,14 +377,15 @@ write_batch_config <- function(config, path) {
 #'     \item{`numberCores`}{positive integer or `NULL`, passed to
 #'       `eyeQualityBatch(numberCores =)`.}
 #'     \item{`qcThresholds`}{named list or `NULL` (P10-07). Optional QC
-#'       threshold overrides from the Analyze app's threshold controls
-#'       (`inst/shiny-apps/analyze/helpers.R`'s `qc_threshold_config`), keyed
-#'       by `threshold_id` with each value a 0-100 percentage. Lets one
-#'       `batch_config.yaml` cover both a study's run parameters (Setup app)
-#'       and its QC flagging settings (Analyze app) instead of splitting
-#'       into two files. Absent entirely in any config written before this
-#'       field existed -- `NULL` is the correct, fully backward-compatible
-#'       reading for that case.}
+#'       threshold overrides from the Analyze tabs' threshold controls
+#'       (`inst/shiny-apps/app/analyze_helpers.R`'s `qc_threshold_config`),
+#'       keyed by `threshold_id` with each value a 0-100 percentage. Lets one
+#'       `batch_config.yaml` cover both a study's run parameters (Setup tab)
+#'       and its QC flagging settings (Analyze tabs) instead of splitting
+#'       into two files (both live in one app, `eyeQuality::runSetupApp()`/
+#'       `eyeQuality::runAnalyzeApp()`, since P10-12). Absent entirely in any
+#'       config written before this field existed -- `NULL` is the correct,
+#'       fully backward-compatible reading for that case.}
 #'   }
 #' @importFrom utils modifyList
 #' @export

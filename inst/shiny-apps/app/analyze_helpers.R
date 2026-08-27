@@ -1,10 +1,15 @@
-# Analyze/QC Explorer app helper functions.
+# Analyze/QC Explorer tab helper functions (P10-12: sourced by the merged
+# app's app.R alongside setup_helpers.R -- kept as two separate files, not
+# combined into one, since both predate the merge and each stays independently
+# useful/testable on its own; the only real overlap is blank_to_null()/
+# null_to_blank(), deliberately duplicated rather than shared -- see that
+# pair's own comment below).
 #
 # Kept separate from app.R and free of Shiny-specific code (no reactives, no
 # input/output objects) so load_qcsummary_table() can be sourced and called
 # directly against a real output directory outside of a running Shiny
-# session, for testing or scripting -- same pattern as the Setup app's
-# helpers.R/build_dry_run_preview().
+# session, for testing or scripting -- same pattern as the Setup tab's
+# setup_helpers.R/build_dry_run_preview().
 
 # ---------------------------------------------------------------------------
 # Windows MAX_PATH workaround for readr file reads

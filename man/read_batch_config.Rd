@@ -53,14 +53,15 @@ passed to \code{eyeQualityBatch()}/\code{eyeQuality()}.}
 \item{\code{numberCores}}{positive integer or \code{NULL}, passed to
 \code{eyeQualityBatch(numberCores =)}.}
 \item{\code{qcThresholds}}{named list or \code{NULL} (P10-07). Optional QC
-threshold overrides from the Analyze app's threshold controls
-(\code{inst/shiny-apps/analyze/helpers.R}'s \code{qc_threshold_config}), keyed
-by \code{threshold_id} with each value a 0-100 percentage. Lets one
-\code{batch_config.yaml} cover both a study's run parameters (Setup app)
-and its QC flagging settings (Analyze app) instead of splitting
-into two files. Absent entirely in any config written before this
-field existed -- \code{NULL} is the correct, fully backward-compatible
-reading for that case.}
+threshold overrides from the Analyze tabs' threshold controls
+(\code{inst/shiny-apps/app/analyze_helpers.R}'s \code{qc_threshold_config}),
+keyed by \code{threshold_id} with each value a 0-100 percentage. Lets one
+\code{batch_config.yaml} cover both a study's run parameters (Setup tab)
+and its QC flagging settings (Analyze tabs) instead of splitting
+into two files (both live in one app, \code{eyeQuality::runSetupApp()}/
+\code{eyeQuality::runAnalyzeApp()}, since P10-12). Absent entirely in any
+config written before this field existed -- \code{NULL} is the correct,
+fully backward-compatible reading for that case.}
 }
 }
 \description{

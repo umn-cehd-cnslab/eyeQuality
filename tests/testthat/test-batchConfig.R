@@ -276,8 +276,10 @@ test_that("default_batch_config includes qcThresholds = NULL", {
   expect_null(cfg$qcThresholds)
 })
 
-test_that(".known_qc_threshold_ids matches the Analyze app's qc_threshold_config exactly (single source of truth)", {
-  helpers_path <- system.file("shiny-apps", "analyze", "helpers.R", package = "eyeQuality")
+test_that(".known_qc_threshold_ids matches the Analyze tabs' qc_threshold_config exactly (single source of truth)", {
+  # inst/shiny-apps/app/analyze_helpers.R: moved there from
+  # inst/shiny-apps/analyze/helpers.R by P10-12's app merge.
+  helpers_path <- system.file("shiny-apps", "app", "analyze_helpers.R", package = "eyeQuality")
   expect_true(nzchar(helpers_path))
 
   helpers_env <- new.env()
@@ -338,7 +340,7 @@ test_that("qcThresholds validation fails open (does not block an unrecognized id
   # Reproduces the "helpers.R can't be located" branch of .known_qc_threshold_ids()
   # without touching the filesystem: stub the internal id-lookup to return
   # character(0), the exact value that function returns when system.file()
-  # can't find inst/shiny-apps/analyze/helpers.R (e.g. an unusual install).
+  # can't find inst/shiny-apps/app/analyze_helpers.R (e.g. an unusual install).
   # validate_batch_config() must treat that as "can't verify, don't block"
   # rather than rejecting every qcThresholds entry as unrecognized.
   testthat::local_mocked_bindings(
