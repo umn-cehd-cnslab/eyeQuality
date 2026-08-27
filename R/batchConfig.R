@@ -410,8 +410,8 @@ write_batch_config <- function(config, path) {
 #'       keyed by `threshold_id` with each value a 0-100 percentage. Lets one
 #'       `batch_config.yaml` cover both a study's run parameters (Setup tab)
 #'       and its QC flagging settings (Analyze tabs) instead of splitting
-#'       into two files (both live in one app, `eyeQuality::runSetupApp()`/
-#'       `eyeQuality::runAnalyzeApp()`, since P10-12). Absent entirely in any
+#'       into two files (both live in one app, `eyeQuality::eyeQualityApp()`,
+#'       since P10-12). Absent entirely in any
 #'       config written before this field existed -- `NULL` is the correct,
 #'       fully backward-compatible reading for that case.}
 #'   }

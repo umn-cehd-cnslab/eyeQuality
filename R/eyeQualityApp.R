@@ -1,30 +1,27 @@
-#' Launch the eyeQuality app, opening on its Analyze / QC Explorer tabs
+#' Launch the eyeQuality app
 #'
 #' Launches the combined eyeQuality Shiny app (P10-12: Setup & Run and
 #' Analyze / QC Explorer are tabs of one app/process, not two separately
-#' launched apps) for choosing an output directory and loading every
-#' `qcsummary.tsv` output found under it (see `saveFiles()`/
-#' `eyeQualityBatch()`'s output naming convention) into a single
-#' sortable/filterable table.
+#' launched apps). The app always opens on its Setup & Run tab, for choosing
+#' a data directory, previewing which files a batch run would find (matched
+#' file count, sample filenames, and skipped-item count) via
+#' `listBidsFiles()`, and launching an `eyeQualityBatch()` run against that
+#' directory in the background, with a basic running/done/failed status
+#' display. A run started here can be reviewed in the Analyze tabs without
+#' leaving this app -- see the "Review results in Analyze tabs" button shown
+#' once a run finishes. The Analyze / QC Explorer tabs load every
+#' `qcsummary.tsv` output found under a chosen output directory (see
+#' `saveFiles()`/`eyeQualityBatch()`'s output naming convention) into a
+#' single sortable/filterable table.
 #'
-#' This is one of two entry points into the same app (`runSetupApp()` is the
-#' other) -- both launch the identical `shiny::runApp()` process, differing
-#' only in which tab starts selected and, here, an optional pre-populated
-#' output directory. A batch run started from the Setup & Run tab hands its
-#' own output directory to these tabs automatically (via the "Review results
-#' in Analyze tabs" button shown once that run finishes) -- `initialDirectory`
-#' below exists for the separate case of opening this app already pointed at
-#' an existing output directory produced *outside* this app (e.g. by a
-#' script-driven `eyeQualityBatch()` run).
-#'
-#' Since both tab groups now live in one process, this function requires the
-#' union of both tab groups' own Suggests-only dependencies (`shiny`,
-#' `shinyFiles`, `future`, `promises` for the Setup & Run tab; `DT`, `plotly`
-#' for these tabs), none of which are installed automatically with this
-#' package (see `Suggests` in `DESCRIPTION`), since they're only needed for
-#' this optional interface, not the core preprocessing pipeline. Install them
-#' separately to use this function. `plotly` backs the "Gaze Explorer" tab's
-#' interactive trajectory/AOI view specifically.
+#' This function requires the union of both tab groups' own Suggests-only
+#' dependencies (`shiny`, `shinyFiles`, `future`, `promises` for Setup & Run;
+#' `DT`, `plotly` for Analyze / QC Explorer), none of which are installed
+#' automatically with this package (see `Suggests` in `DESCRIPTION`), since
+#' they're only needed for this optional interface, not the core
+#' preprocessing pipeline. Install them separately to use this function.
+#' `plotly` backs the "Gaze Explorer" tab's interactive trajectory/AOI view
+#' specifically.
 #'
 #' @param initialDirectory optional path to pre-populate the Analyze tabs'
 #'   output directory field with on startup (e.g. an existing output
@@ -42,12 +39,13 @@
 #'
 #' @examples
 #' \dontrun{
-#' runAnalyzeApp()
+#' eyeQualityApp()
 #'
-#' # pre-populated with an existing output directory
-#' runAnalyzeApp(initialDirectory = "/path/to/study/data")
+#' # pre-populated with an existing output directory, for use from the
+#' # Analyze / QC Explorer tabs
+#' eyeQualityApp(initialDirectory = "/path/to/study/data")
 #' }
-runAnalyzeApp <- function(initialDirectory = NULL, ...) {
+eyeQualityApp <- function(initialDirectory = NULL, ...) {
   if (!requireNamespace("shiny", quietly = TRUE) ||
     !requireNamespace("shinyFiles", quietly = TRUE) ||
     !requireNamespace("future", quietly = TRUE) ||
@@ -55,7 +53,7 @@ runAnalyzeApp <- function(initialDirectory = NULL, ...) {
     !requireNamespace("DT", quietly = TRUE) ||
     !requireNamespace("plotly", quietly = TRUE)) {
     stop(
-      "runAnalyzeApp() requires the 'shiny', 'shinyFiles', 'future', 'promises', ",
+      "eyeQualityApp() requires the 'shiny', 'shinyFiles', 'future', 'promises', ",
       "'DT', and 'plotly' packages, which are not installed. Install them with ",
       'install.packages(c("shiny", "shinyFiles", "future", "promises", "DT", "plotly")).',
       call. = FALSE
@@ -63,7 +61,7 @@ runAnalyzeApp <- function(initialDirectory = NULL, ...) {
   }
   if (!is.null(initialDirectory) &&
     (!is.character(initialDirectory) || length(initialDirectory) != 1 || is.na(initialDirectory))) {
-    stop("runAnalyzeApp(): 'initialDirectory' must be NULL or a single path string.", call. = FALSE)
+    stop("eyeQualityApp(): 'initialDirectory' must be NULL or a single path string.", call. = FALSE)
   }
 
   app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
@@ -74,9 +72,8 @@ runAnalyzeApp <- function(initialDirectory = NULL, ...) {
     )
   }
 
-  # app_initialTab: read by app.R's navbarPage(selected = ...) so this entry
-  # point opens on the Analyze / QC Explorer tab -- see R/runSetupApp.R for
-  # the sibling entry point that selects the other tab instead.
+  # app_initialTab: read by app.R's navbarPage(selected = ...) so this app
+  # always opens on the Setup & Run tab.
   #
   # analyze_initialDirectory: the only way to hand a value into an app
   # launched via runApp(appDir) (rather than a shinyApp(ui, server) object
@@ -91,7 +88,7 @@ runAnalyzeApp <- function(initialDirectory = NULL, ...) {
   # "open pointed at an existing directory from outside this app" case
   # described above.
   shiny::shinyOptions(
-    app_initialTab = "Analyze / QC Explorer",
+    app_initialTab = "Setup & Run",
     analyze_initialDirectory = initialDirectory
   )
 

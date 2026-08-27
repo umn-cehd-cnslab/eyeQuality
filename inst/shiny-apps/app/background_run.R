@@ -25,7 +25,7 @@
 #
 # Scoping: set once per R *process* (i.e. effectively once per running Shiny
 # app, not once per browser tab/session) rather than per Shiny session. For
-# the typical way this app is run (`runSetupApp()` -> a single `runApp()`
+# the typical way this app is run (`eyeQualityApp()` -> a single `runApp()`
 # call in one R process), that's the same thing in practice. Multisession
 # workers are OS processes owned by that R process, not by any one browser
 # connection, which matters for what happens if a user closes the tab

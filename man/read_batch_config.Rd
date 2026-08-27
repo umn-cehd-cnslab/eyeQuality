@@ -72,8 +72,8 @@ threshold overrides from the Analyze tabs' threshold controls
 keyed by \code{threshold_id} with each value a 0-100 percentage. Lets one
 \code{batch_config.yaml} cover both a study's run parameters (Setup tab)
 and its QC flagging settings (Analyze tabs) instead of splitting
-into two files (both live in one app, \code{eyeQuality::runSetupApp()}/
-\code{eyeQuality::runAnalyzeApp()}, since P10-12). Absent entirely in any
+into two files (both live in one app, \code{eyeQuality::eyeQualityApp()},
+since P10-12). Absent entirely in any
 config written before this field existed -- \code{NULL} is the correct,
 fully backward-compatible reading for that case.}
 }

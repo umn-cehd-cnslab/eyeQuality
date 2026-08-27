@@ -6,19 +6,19 @@
 # shiny::runApp() call -- a running Shiny session can't launch a second,
 # separate Shiny process for itself, so P9-07's "post-run summary" could only
 # ever hand the user a copy-pasteable eyeQuality::runAnalyzeApp() command to
-# run in a different R console/session. This file merges both into one
-# shinyApp()/process with two top-level tabs, so a finished Setup run can
-# hand its output directory to the Analyze tabs directly, in-process, and a
-# user never leaves this one running app to go from "processed my data" to
-# "reviewing it."
+# run in a different R console/session (that entry point has since been
+# folded into eyeQuality::eyeQualityApp(), see below). This file merges both
+# into one shinyApp()/process with two top-level tabs, so a finished Setup
+# run can hand its output directory to the Analyze tabs directly, in-process,
+# and a user never leaves this one running app to go from "processed my
+# data" to "reviewing it."
 #
-# Launch via eyeQuality::runSetupApp() or eyeQuality::runAnalyzeApp() rather
-# than sourcing this file directly -- both now launch this SAME merged app,
-# only differing in which tab starts selected (and, for runAnalyzeApp(),
-# optionally pre-pointing the Analyze tabs' own directory field at an
-# existing output directory produced outside this app, e.g. by a
-# script-driven eyeQualityBatch() run). See R/runSetupApp.R/R/runAnalyzeApp.R
-# for how that's wired via shiny::shinyOptions().
+# Launch via eyeQuality::eyeQualityApp() rather than sourcing this file
+# directly. That single entry point always opens on the Setup & Run tab, and
+# optionally accepts an `initialDirectory` argument to pre-point the Analyze
+# tabs' own directory field at an existing output directory produced outside
+# this app, e.g. by a script-driven eyeQualityBatch() run. See
+# R/eyeQualityApp.R for how that's wired via shiny::shinyOptions().
 #
 # UI/server content below is inherited from the two standalone apps
 # essentially unchanged (including P10-11's shared file selector/per-file
@@ -45,8 +45,8 @@
 # This app requires the union of both apps' own Suggests-only dependencies:
 # shiny, shinyFiles, future, promises (Setup tab), DT, plotly (Analyze
 # tabs) -- since both tab groups now live in one process, both sets are
-# needed regardless of which tab a user starts on. See
-# R/runSetupApp.R/R/runAnalyzeApp.R for the actual requireNamespace() checks.
+# needed regardless of which tab a user starts on. See R/eyeQualityApp.R for
+# the actual requireNamespace() checks.
 
 library(shiny)
 library(shinyFiles)
@@ -70,13 +70,13 @@ qc_threshold_ui_config <- qc_threshold_config[!duplicated(qc_threshold_config$th
 ui <- navbarPage(
   title = "eyeQuality",
   id = "top_nav",
-  # getShinyOption("app_initialTab", ...): set by runSetupApp()/runAnalyzeApp()
-  # (R/runSetupApp.R, R/runAnalyzeApp.R) before shiny::runApp() is called, the
-  # same shinyOptions()/getShinyOption() mechanism P9-07 already used for
-  # analyze_initialDirectory below -- lets both entry points open this same
-  # merged app pre-focused on their own tab. Defaults to "Setup & Run" so
-  # sourcing/launching this app.R directly (with no shinyOption set at all)
-  # still opens somewhere sensible.
+  # getShinyOption("app_initialTab", ...): set by eyeQualityApp()
+  # (R/eyeQualityApp.R) before shiny::runApp() is called, the same
+  # shinyOptions()/getShinyOption() mechanism P9-07 already used for
+  # analyze_initialDirectory below. eyeQualityApp() always sets this to
+  # "Setup & Run"; the getShinyOption() default below only matters when
+  # sourcing/launching this app.R directly with no shinyOption set at all,
+  # which still opens somewhere sensible.
   selected = getShinyOption("app_initialTab", "Setup & Run"),
 
   tabPanel(
@@ -933,7 +933,8 @@ server <- function(input, output, session) {
   # since that's typically an upfront validation error with nothing written.
   #
   # Before P10-12 this rendered a copy-pasteable eyeQuality::runAnalyzeApp()
-  # call for a SEPARATE R console/session (see resolve_analyze_directory()/
+  # (since renamed to eyeQuality::eyeQualityApp()) call for a SEPARATE R
+  # console/session (see resolve_analyze_directory()/
   # build_analyze_launch_command() in setup_helpers.R for why that used to be
   # the only option). Now that both tab groups share one process, clicking
   # the button below does the real thing directly: loads this run's output
@@ -1192,8 +1193,8 @@ server <- function(input, output, session) {
   # trigger the exact same load, not just prefill a directory field.
 
   # analyze_directory_override: seeds from analyze_initialDirectory
-  # (getShinyOption(), set by runAnalyzeApp()'s `initialDirectory` argument
-  # before shiny::runApp() -- R/runAnalyzeApp.R) for the case where this app
+  # (getShinyOption(), set by eyeQualityApp()'s `initialDirectory` argument
+  # before shiny::runApp() -- R/eyeQualityApp.R) for the case where this app
   # is launched already pointed at an existing output directory (e.g. one
   # produced by a script-driven eyeQualityBatch() run, not this app's own
   # Setup tab). do_analyze_load() (below) also writes into this reactiveVal

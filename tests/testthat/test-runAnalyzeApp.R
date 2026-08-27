@@ -5,7 +5,7 @@
 # rather than a relative path, same convention as test-runSetupApp.R, both
 # because that's the only way to reach inst/ files portably from tests and
 # because it doubles as a check that the app is packaged where
-# runAnalyzeApp() (R/runAnalyzeApp.R) expects to find it.
+# eyeQualityApp() (R/eyeQualityApp.R) expects to find it.
 #
 # Exercised against real eyeQualityBatch() output (both the default nested
 # derivatives/eyeQuality-v1/ layout and a centralized outputDir) for the
@@ -1399,112 +1399,18 @@ test_that("output$download_flagged_csv's content() does not throw and produces a
 })
 
 # ---------------------------------------------------------------------------
-# P9-07: post-run summary linking to the Analyze app
-# ---------------------------------------------------------------------------
-#
-# Two pieces exercised here: R/runAnalyzeApp.R's new `initialDirectory`
-# argument (validation, and that a valid value is actually plumbed through to
-# shiny::shinyOptions() before shiny::runApp() would be reached), and the
-# Analyze tabs' own `analyze_directory_override` reactive (app.R), seeded from
-# getShinyOption("analyze_initialDirectory", NULL), via shiny::testServer().
-#
-# runAnalyzeApp() itself calls shiny::runApp(), which blocks until the app is
-# closed -- not something a unit test can call for real. testthat::
-# local_mocked_bindings(..., .package = "shiny") stands in for it, the same
-# technique test-eyeQualityBatch.R already uses to mock parallel::parLapply()
-# (see its P7-04 placeholder-summary test) -- confirmed to work for a
-# `pkg::fun()`-style call site, not just an imported/internal one.
-
-test_that("runAnalyzeApp() passes a valid single-string initialDirectory through to shiny::shinyOptions() before shiny::runApp() would be reached", {
-  skip_on_cran()
-  skip_if_not_installed("shiny")
-  skip_if_not_installed("shinyFiles")
-  skip_if_not_installed("DT")
-
-  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
-  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL, app_initialTab = NULL), add = TRUE)
-
-  eyeQuality::runAnalyzeApp(initialDirectory = "/some/study/outputs")
-
-  expect_equal(shiny::getShinyOption("analyze_initialDirectory", NULL), "/some/study/outputs")
-})
-
-test_that("runAnalyzeApp() also sets shinyOptions(app_initialTab = 'Analyze / QC Explorer'), P10-12's merged-app entry point", {
-  skip_on_cran()
-  skip_if_not_installed("shiny")
-  skip_if_not_installed("shinyFiles")
-  skip_if_not_installed("DT")
-
-  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
-  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL, app_initialTab = NULL), add = TRUE)
-
-  eyeQuality::runAnalyzeApp()
-
-  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "Analyze / QC Explorer")
-})
-
-test_that("runAnalyzeApp() resolves the SAME merged app directory runSetupApp() does (system.file('shiny-apps', 'app', ...))", {
-  skip_on_cran()
-  skip_if_not_installed("shiny")
-  skip_if_not_installed("shinyFiles")
-  skip_if_not_installed("DT")
-
-  captured_app_dir <- NULL
-  testthat::local_mocked_bindings(
-    runApp = function(appDir, ...) {
-      captured_app_dir <<- appDir
-      invisible(NULL)
-    },
-    .package = "shiny"
-  )
-  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL, app_initialTab = NULL), add = TRUE)
-
-  eyeQuality::runAnalyzeApp()
-
-  expect_equal(captured_app_dir, analyze_app_dir)
-  expect_true(file.exists(file.path(captured_app_dir, "app.R")))
-})
-
-test_that("runAnalyzeApp() accepts NULL initialDirectory (the default) and leaves the shinyOption unset", {
-  skip_on_cran()
-  skip_if_not_installed("shiny")
-  skip_if_not_installed("shinyFiles")
-  skip_if_not_installed("DT")
-
-  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
-  on.exit(shiny::shinyOptions(analyze_initialDirectory = NULL), add = TRUE)
-
-  eyeQuality::runAnalyzeApp()
-
-  expect_null(shiny::getShinyOption("analyze_initialDirectory", NULL))
-})
-
-test_that("runAnalyzeApp() errors clearly on a non-scalar initialDirectory", {
-  expect_error(
-    eyeQuality::runAnalyzeApp(initialDirectory = c("/a", "/b")),
-    "single path string"
-  )
-})
-
-test_that("runAnalyzeApp() errors clearly on an NA initialDirectory", {
-  expect_error(
-    eyeQuality::runAnalyzeApp(initialDirectory = NA_character_),
-    "single path string"
-  )
-})
-
-test_that("runAnalyzeApp() errors clearly on a non-character initialDirectory", {
-  expect_error(
-    eyeQuality::runAnalyzeApp(initialDirectory = 123),
-    "single path string"
-  )
-})
-
-# ---------------------------------------------------------------------------
 # P9-07: Analyze tabs' analyze_directory_override seeded from analyze_initialDirectory
 # ---------------------------------------------------------------------------
 #
-# In real production use, runAnalyzeApp() calls shiny::shinyOptions() BEFORE
+# eyeQualityApp()'s initialDirectory argument (validation, and that a valid
+# value is actually plumbed through to shiny::shinyOptions() before
+# shiny::runApp() would be reached) is covered by test-eyeQualityApp.R, not
+# here -- P10-12 merged the once-separate runSetupApp()/runAnalyzeApp()
+# wrappers into that single function. What's exercised in this section is the
+# Analyze tabs' own `analyze_directory_override` reactive (app.R), seeded from
+# getShinyOption("analyze_initialDirectory", NULL), via shiny::testServer().
+#
+# In real production use, eyeQualityApp() calls shiny::shinyOptions() BEFORE
 # shiny::runApp(app_dir), and the resulting global option is inherited by
 # every real browser session's own session$options at session-creation time
 # (confirmed directly against shiny's own source: ShinySession$initialize()
@@ -1591,7 +1497,7 @@ test_that("Analyze app with no analyze_initialDirectory shinyOption set: analyze
 
   # A plain, unseeded MockShinySession (testServer()'s own default) -- no
   # analyze_initialDirectory anywhere in its options, the same as launching
-  # runAnalyzeApp() with no initialDirectory argument at all.
+  # eyeQualityApp() with no initialDirectory argument at all.
   shiny::testServer(analyze_app_dir, {
     expect_length(analyze_selected_dir(), 0)
     expect_equal(session$getOutput("analyze_selected_directory"), "No directory selected yet.")

@@ -218,7 +218,7 @@ build_batch_config_from_form <- function(directoryBIDS,
 # app -- a running Shiny session couldn't safely launch a second, separate
 # Shiny process for itself. "Linking" then meant: once a batch run finished,
 # tell the user exactly where its outputs landed and hand them a
-# ready-to-run runAnalyzeApp() call (build_analyze_launch_command() below) to
+# ready-to-run app-launch call (build_analyze_launch_command() below) to
 # paste into a separate R console/session.
 #
 # P10-12 merged both apps into one process/page, so app.R now does a real
@@ -228,12 +228,11 @@ build_batch_config_from_form <- function(directoryBIDS,
 # switches the visible tab, rather than rendering a copy-pasteable command.
 # build_analyze_launch_command() is kept below, still independently tested,
 # as a plain string-building utility -- nothing in app.R calls it anymore,
-# but eyeQuality::runAnalyzeApp(initialDirectory = ...) (R/runAnalyzeApp.R)
-# remains a supported, separate way to open just the Analyze tabs pre-pointed
-# at an existing output directory (e.g. one produced by a script-driven
-# eyeQualityBatch() run rather than this app's own Setup tab), so the
-# command this builds is still a real, valid thing to hand someone in that
-# context.
+# but eyeQuality::eyeQualityApp(initialDirectory = ...) (R/eyeQualityApp.R)
+# remains a supported way to open this app pre-pointed at an existing output
+# directory (e.g. one produced by a script-driven eyeQualityBatch() run
+# rather than this app's own Setup tab), so the command this builds is still
+# a real, valid thing to hand someone in that context.
 
 # resolve_analyze_directory: which directory the Analyze app should be
 # pointed at once a batch run finishes -- outputDir if the run used one, else
@@ -259,7 +258,7 @@ resolve_analyze_directory <- function(outputDir, directoryBIDS) {
   directoryBIDS
 }
 
-# build_analyze_launch_command: a copy-pasteable eyeQuality::runAnalyzeApp()
+# build_analyze_launch_command: a copy-pasteable eyeQuality::eyeQualityApp()
 # call pre-pointed at `directory`, for the Setup app's post-run panel
 # (P9-07). Backslashes and double quotes are escaped so the printed call is a
 # valid R string literal to paste into a console verbatim, not just an
@@ -270,5 +269,5 @@ resolve_analyze_directory <- function(outputDir, directoryBIDS) {
 build_analyze_launch_command <- function(directory) {
   escaped <- gsub("\\", "\\\\", directory, fixed = TRUE)
   escaped <- gsub('"', '\\"', escaped, fixed = TRUE)
-  sprintf('eyeQuality::runAnalyzeApp(initialDirectory = "%s")', escaped)
+  sprintf('eyeQuality::eyeQualityApp(initialDirectory = "%s")', escaped)
 }

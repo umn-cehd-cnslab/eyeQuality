@@ -5,8 +5,8 @@
 # tab's own helper file, sourced by inst/shiny-apps/app/app.R). Sourced via
 # system.file() rather than a relative path, both because that's the only way
 # to reach inst/ files portably from tests and because it doubles as a check
-# that the app is packaged where runSetupApp() (R/runSetupApp.R) expects to
-# find it.
+# that the app is packaged where eyeQualityApp() (R/eyeQualityApp.R) expects
+# to find it.
 #
 # build_dry_run_preview() itself has no Shiny dependency, so these tests
 # don't need a running Shiny session or shinyFiles at all.
@@ -868,13 +868,13 @@ test_that("resolve_analyze_directory falls back to directoryBIDS when outputDir 
   expect_equal(resolve_analyze_directory("   ", "/data/bids"), "/data/bids")
 })
 
-test_that("build_analyze_launch_command produces a syntactically valid, parseable eyeQuality::runAnalyzeApp() call pointed at the given directory", {
+test_that("build_analyze_launch_command produces a syntactically valid, parseable eyeQuality::eyeQualityApp() call pointed at the given directory", {
   cmd <- build_analyze_launch_command("/data/study/outputs")
 
   parsed <- str2lang(cmd)
-  expect_equal(parsed[[1]], quote(eyeQuality::runAnalyzeApp))
+  expect_equal(parsed[[1]], quote(eyeQuality::eyeQualityApp))
   # eval()-ing just the unevaluated initialDirectory argument (a plain string
-  # constant) is safe here -- it never calls runAnalyzeApp() itself.
+  # constant) is safe here -- it never calls eyeQualityApp() itself.
   expect_equal(eval(parsed$initialDirectory), "/data/study/outputs")
 })
 
@@ -1114,53 +1114,6 @@ test_that("input$review_in_analyze does nothing (no crash, no load) if clicked b
     expect_false(has_loaded_once())
     expect_null(current_load_result())
   })
-})
-
-# ---------------------------------------------------------------------------
-# P10-12: runSetupApp() resolves the merged app directory and sets
-# app_initialTab before shiny::runApp()
-# ---------------------------------------------------------------------------
-#
-# runSetupApp() itself calls shiny::runApp(), which blocks until the app is
-# closed -- not something a unit test can call for real.
-# testthat::local_mocked_bindings(..., .package = "shiny") stands in for it,
-# same technique test-runAnalyzeApp.R already uses for runAnalyzeApp()'s own
-# equivalent tests.
-
-test_that("runSetupApp() sets shinyOptions(app_initialTab = 'Setup & Run') before shiny::runApp() would be reached", {
-  skip_on_cran()
-  skip_if_not_installed("shiny")
-  skip_if_not_installed("shinyFiles")
-  skip_if_not_installed("DT")
-
-  testthat::local_mocked_bindings(runApp = function(...) invisible(NULL), .package = "shiny")
-  on.exit(shiny::shinyOptions(app_initialTab = NULL), add = TRUE)
-
-  eyeQuality::runSetupApp()
-
-  expect_equal(shiny::getShinyOption("app_initialTab", NULL), "Setup & Run")
-})
-
-test_that("runSetupApp() resolves the SAME merged app directory runAnalyzeApp() does (system.file('shiny-apps', 'app', ...)), not a separate 'setup' directory", {
-  skip_on_cran()
-  skip_if_not_installed("shiny")
-  skip_if_not_installed("shinyFiles")
-  skip_if_not_installed("DT")
-
-  captured_app_dir <- NULL
-  testthat::local_mocked_bindings(
-    runApp = function(appDir, ...) {
-      captured_app_dir <<- appDir
-      invisible(NULL)
-    },
-    .package = "shiny"
-  )
-  on.exit(shiny::shinyOptions(app_initialTab = NULL), add = TRUE)
-
-  eyeQuality::runSetupApp()
-
-  expect_equal(captured_app_dir, setup_app_dir)
-  expect_true(file.exists(file.path(captured_app_dir, "app.R")))
 })
 
 # ---------------------------------------------------------------------------
