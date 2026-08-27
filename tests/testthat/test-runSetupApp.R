@@ -595,6 +595,42 @@ test_that("Setup app's post_run_link panel is hidden before any run, while a run
   })
 })
 
+test_that("the live-polling observe() counts completed files under run_info$outputDir, not just directoryBIDS, when a custom output directory was used for the run", {
+  # Regression test: app.R's poll_batch_progress() call sites (both the
+  # 2-second live-polling observe() and the final count read once the
+  # promise resolves) previously omitted outputDir entirely, so
+  # count_completed_qcsummary_files() always searched under directoryBIDS --
+  # silently reporting n_done = 0 for the whole run (and "0 of N processed"
+  # at completion) whenever a custom outputDir was set, even though every
+  # file completed and wrote its qcsummary.tsv correctly to the real
+  # outputDir location. run_info$outputDir is what carries input$outputDir's
+  # value into that observe(), set once at launch time (observeEvent(input$launch)).
+  skip_on_cran()
+
+  directory_bids <- tempfile("p907_bids_")
+  dir.create(directory_bids, recursive = TRUE)
+  on.exit(unlink(directory_bids, recursive = TRUE), add = TRUE)
+  output_dir <- tempfile("p907_out_")
+  dir.create(output_dir, recursive = TRUE)
+  on.exit(unlink(output_dir, recursive = TRUE), add = TRUE)
+  # Sits only under output_dir, never under directory_bids -- pins down that
+  # the observe() is searching the right root, not just falling back to one
+  # that happens to also work.
+  writeLines("", file.path(output_dir, "sub-01_desc-p907_preproc_qcsummary.tsv"))
+
+  shiny::testServer(setup_app_dir, {
+    run_info$directory <- directory_bids
+    run_info$batchName <- "p907"
+    run_info$outputDir <- output_dir
+    run_info$n_expected <- 1L
+
+    progress_state$status <- "running"
+    session$flushReact()
+
+    expect_equal(progress_state$n_done, 1L)
+  })
+})
+
 test_that("Setup app's post_run_link panel shows the outputDir-resolved directory and a matching launch command once a run reaches status == 'done'", {
   skip_on_cran()
 

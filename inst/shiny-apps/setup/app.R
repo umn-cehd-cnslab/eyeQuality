@@ -261,7 +261,7 @@ server <- function(input, output, session) {
   # without depending on holding a live future/promise reference -- see
   # background_run.R's ensure_future_plan() note on session/tab-close
   # lifecycle for why that independence is intentional.
-  run_info <- reactiveValues(directory = NULL, batchName = NULL, n_expected = NULL)
+  run_info <- reactiveValues(directory = NULL, batchName = NULL, n_expected = NULL, outputDir = NULL)
   # start_time: set when the run launches, used only for
   # estimate_remaining_seconds()'s ETA -- not part of the underlying state
   # machine poll_batch_progress() drives (status/n_done/n_failed), so it's
@@ -302,6 +302,7 @@ server <- function(input, output, session) {
     run_info$directory <- dir
     run_info$batchName <- batch_name
     run_info$n_expected <- result$matched_count
+    run_info$outputDir <- blank_to_null(input$outputDir)
 
     progress_state$status <- "running"
     progress_state$n_done <- 0L
@@ -359,7 +360,10 @@ server <- function(input, output, session) {
     prom <- do.call(start_background_batch, launch_args)
 
     prom <- prom %...>% (function(result) {
-      final <- poll_batch_progress(run_info$directory, run_info$batchName, run_info$n_expected)
+      final <- poll_batch_progress(
+        run_info$directory, run_info$batchName, run_info$n_expected,
+        outputDir = run_info$outputDir
+      )
       progress_state$n_done <- final$n_done
       progress_state$n_failed <- final$n_failed
       progress_state$status <- if (identical(result$status, "ok")) "done" else "failed"
@@ -388,7 +392,10 @@ server <- function(input, output, session) {
       return()
     }
 
-    progress <- poll_batch_progress(run_info$directory, run_info$batchName, run_info$n_expected)
+    progress <- poll_batch_progress(
+      run_info$directory, run_info$batchName, run_info$n_expected,
+      outputDir = run_info$outputDir
+    )
     progress_state$n_done <- progress$n_done
     progress_state$n_failed <- progress$n_failed
 
