@@ -4,6 +4,13 @@
 safe_min <- function(x) if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)
 safe_max <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
 
+# magrittr's `.` pronoun (used below in replace(is.na(.), 0) inside %>%
+# chains) isn't a real exportable symbol the way rlang's `.data` is, so
+# @importFrom can't resolve it -- R CMD check's static analysis flags it as
+# an undefined global variable unless explicitly whitelisted this way, the
+# standard idiom for this exact false positive.
+utils::globalVariables(".")
+
 #' Calculate Output Metrics
 #'
 #' @param data dataframe

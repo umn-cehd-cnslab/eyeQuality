@@ -40,7 +40,8 @@ Suggests:
     promises (>= 1.3.3),
     later,
     DT,
-    plotly
+    plotly,
+    jsonlite
 Config/testthat/edition: 3
 Imports:
     rlang,

@@ -16,3 +16,6 @@
 ^\.github$
 ^cran-comments\.md$
 \.log$
+^app_lana\.R$
+^eyeQualityUpdates\.adoc$
+^eyeQualityUpdates\.html$
