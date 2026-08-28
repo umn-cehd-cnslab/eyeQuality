@@ -1926,6 +1926,112 @@ derive_event_marker_windows <- function(events) {
     as.data.frame(stringsAsFactors = FALSE)
 }
 
+# derive_stimulus_windows: pair up VideoStimulusStart/VideoStimulusEnd event
+# rows into one row per actual video-stimulus PRESENTATION -- distinct from,
+# and NOT a replacement for, derive_event_marker_windows() above. That
+# function collapses every occurrence of a distinct event LABEL across the
+# whole recording into one first-to-last window (deliberately right for a
+# generic "jump to any logged marker" control); this one instead reconstructs
+# individual presentation intervals from a Start/End PAIR sharing the same
+# eventValue (the stimulus name/filename), which is what "Jump to stimulus"
+# (app.R) needs -- a study that shows the same clip twice, at two unrelated
+# points in the recording, has two separate rows here (two separate
+# `stimulus == "01"` rows with different start_ms/end_ms), not one row
+# spanning from the first showing to the second the way
+# derive_event_marker_windows()'s "first occurrence to last occurrence"
+# collapse would produce for the same input.
+#
+# Pairing rule: events are walked in ascending recordingTimestamp_ms order;
+# each VideoStimulusStart pushes its timestamp onto a per-eventValue queue,
+# and each VideoStimulusEnd pops the OLDEST still-open Start for that same
+# eventValue (a plain FIFO, not "nearest" or "any") to close a presentation.
+# A queue per eventValue (not a single global "last open Start") is what
+# makes this correct even when the SAME stimulus name is showing at two
+# different points with a different, unrelated stimulus in between (Start A,
+# Start B, End B, End A would still pair correctly) -- though a real
+# events.tsv is not expected to interleave like that in practice, this
+# pairing rule does not depend on it not happening.
+#
+# Two degenerate cases are dropped silently, not errors, per this function's
+# NULL-safe contract:
+#   - A VideoStimulusEnd with no open Start for its eventValue (an orphan
+#     End) is simply skipped -- nothing to close.
+#   - Any Start left in a queue once every row has been walked (a truncated
+#     recording that stops mid-presentation) never produces a row -- an
+#     unmatched trailing Start describes a presentation with no known
+#     end_ms/duration_ms, which this function's return contract has no slot
+#     for, so it is left out rather than fabricating an end_ms.
+#
+# events: a data.frame with at least "event", "eventValue", and
+#   "recordingTimestamp_ms" columns (as load_gaze_trajectory_data() already
+#   filters for on "event"/"recordingTimestamp_ms" before ever returning a
+#   non-NULL `events`, but "eventValue" is not guaranteed present -- checked
+#   explicitly here since pairing is meaningless without it), or
+#   NULL/anything not shaped that way.
+#
+# Returns NULL if `events` isn't usable (missing/wrong shape, or 0 complete
+# Start/End pairs after filtering to VideoStimulusStart/VideoStimulusEnd
+# rows), or a data.frame with columns stimulus, start_ms, end_ms,
+# duration_ms -- one row per actual presentation occurrence, sorted by
+# start_ms. Deliberately NOT collapsed/grouped by `stimulus` name, unlike
+# derive_event_marker_windows()'s per-label collapse -- see this function's
+# own header comment above for why.
+derive_stimulus_windows <- function(events) {
+  required_cols <- c("event", "eventValue", "recordingTimestamp_ms")
+  if (is.null(events) || !is.data.frame(events) || !all(required_cols %in% names(events))) {
+    return(NULL)
+  }
+
+  ev <- events[
+    !is.na(events$event) & events$event %in% c("VideoStimulusStart", "VideoStimulusEnd") &
+      !is.na(events$eventValue) & !is.na(events$recordingTimestamp_ms),
+    required_cols,
+    drop = FALSE
+  ]
+  if (nrow(ev) == 0) {
+    return(NULL)
+  }
+  ev <- ev[order(ev$recordingTimestamp_ms), , drop = FALSE]
+
+  # One FIFO queue of open Start timestamps per eventValue -- see this
+  # function's header comment on why a queue-per-value (not a single
+  # most-recent Start) is the correct data structure here.
+  open_starts <- list()
+  rows <- list()
+
+  for (i in seq_len(nrow(ev))) {
+    label <- ev$event[i]
+    value <- as.character(ev$eventValue[i])
+    ts <- ev$recordingTimestamp_ms[i]
+
+    if (identical(label, "VideoStimulusStart")) {
+      open_starts[[value]] <- c(open_starts[[value]], ts)
+    } else if (identical(label, "VideoStimulusEnd")) {
+      pending <- open_starts[[value]]
+      if (length(pending) > 0) {
+        start_ts <- pending[1]
+        open_starts[[value]] <- pending[-1]
+        rows[[length(rows) + 1]] <- data.frame(
+          stimulus = value,
+          start_ms = start_ts,
+          end_ms = ts,
+          duration_ms = ts - start_ts,
+          stringsAsFactors = FALSE
+        )
+      }
+      # else: an End with no open Start for this eventValue -- dropped, see
+      # header comment.
+    }
+  }
+
+  if (length(rows) == 0) {
+    return(NULL)
+  }
+
+  result <- do.call(rbind, rows)
+  result[order(result$start_ms), , drop = FALSE]
+}
+
 # points_in_polygon: point-in-polygon test via the standard even-odd
 # ("ray casting") rule -- for every (x[i], y[i]), count how many edges of the
 # polygon (poly_x/poly_y, in vertex order, implicitly closed from the last
@@ -2359,6 +2465,206 @@ build_gaze_trajectory_animation_plot <- function(
     yaxis = list(title = paste(y_col)),
     showlegend = TRUE
   )
+}
+
+# ---------------------------------------------------------------------------
+# Real-time-matched playback (repeat-visit follow-up to the onion-skin
+# feature above): the original tick loop advanced a FIXED 5 samples per
+# FIXED 150ms wall-clock tick, which has no relationship to how much
+# recording time that represents -- a densely-sampled file crawls, a
+# sparsely-sampled one races by, and neither ever reads as "real time". This
+# section replaces that fixed-step design with one where 1 second of
+# `recordingTimestamp_ms` takes ~1 second of real playback time (at 1x), via
+# a single "virtual playback timestamp" app.R's server holds as the one
+# source of truth (`gaze_anim_ms`, a reactiveVal in the SAME
+# recordingTimestamp_ms units the data itself uses) -- the tick loop,
+# the draggable scrubber, and the "now playing" stimulus label all read from
+# and write to that one value, rather than tracking three independent
+# notions of "current position" that could drift out of sync with each
+# other. `gaze_anim_index` (app.R) becomes a plain reactive DERIVED from
+# `gaze_anim_ms()` via gaze_ms_to_index() below, not a second, independently
+# advanced reactiveVal.
+# ---------------------------------------------------------------------------
+
+# gaze_playback_speed_choices: the fixed 0.5x/1x/2x set this feature exposes
+# as a selectInput (app.R) -- named character vector so the widget shows the
+# familiar "0.5x"/"1x"/"2x" labels while the underlying value sent back as
+# `input$gaze_playback_speed` is the plain numeric-as-string multiplier
+# resolve_playback_speed() below expects.
+gaze_playback_speed_choices <- c("0.5x" = "0.5", "1x" = "1", "2x" = "2")
+
+# resolve_playback_speed: parse the gaze_playback_speed selectInput's current
+# value into a numeric multiplier, defaulting to 1 (normal speed) for NULL,
+# non-numeric, NA, or non-positive input -- covers both "control not yet
+# rendered/echoed" (a real, expected transient state under Shiny's
+# client-round-trip UI update model, same caveat documented elsewhere in this
+# file for sliderInput) and any otherwise-malformed value, so a speed lookup
+# never errors the tick loop.
+resolve_playback_speed <- function(x) {
+  if (is.null(x) || length(x) != 1) {
+    return(1)
+  }
+  val <- suppressWarnings(as.numeric(x))
+  if (is.na(val) || val <= 0) {
+    return(1)
+  }
+  val
+}
+
+# advance_gaze_playback_ms: the tick loop's own per-tick arithmetic, factored
+# out as a pure function so it's directly testable without a live Shiny
+# session. Advances `current_ms` forward by `elapsed_ms * speed` -- at
+# `speed = 1` and `elapsed_ms` equal to the tick loop's own scheduled
+# invalidateLater() interval (app.R's `gaze_anim_tick_interval_ms`), this is
+# exactly "1 second of recording time per 1 second of wall-clock time", the
+# real-time-matched behavior this section exists for; `speed = 2`/`0.5`
+# scale that ratio directly. Loops back to `window_start_ms` (rather than
+# stopping) when the advance would run past `window_end_ms`, the same
+# "repeat rather than stop at the end" behavior this feature already had
+# under the old fixed-step design (app.R's tick-loop observer), now
+# expressed in time rather than in sample counts.
+#
+# current_ms: the virtual playback timestamp before this tick, or
+#   NULL/NA -- treated as `window_start_ms` (defensive: the reset observer
+#   in app.R is expected to always set a real starting value before playback
+#   can begin, but this function does not assume that holds).
+# elapsed_ms: how much real time this tick represents, >= 0.
+# speed: the playback-speed multiplier, see resolve_playback_speed() above.
+# window_start_ms / window_end_ms: the CURRENT time-range window's bounds
+#   (recordingTimestamp_ms units) -- see gaze_ms_to_index()'s own df-derived
+#   equivalent below; app.R derives these from gaze_prepared_df()'s min/max.
+#
+# Returns a single numeric, always within [window_start_ms, window_end_ms].
+advance_gaze_playback_ms <- function(current_ms, elapsed_ms, speed, window_start_ms, window_end_ms) {
+  if (is.null(current_ms) || length(current_ms) != 1 || is.na(current_ms)) {
+    current_ms <- window_start_ms
+  }
+  next_ms <- current_ms + (elapsed_ms * speed)
+  if (next_ms > window_end_ms) {
+    next_ms <- window_start_ms
+  }
+  next_ms
+}
+
+# gaze_ms_to_index: resolve a virtual playback timestamp into a 1-based row
+# position in `prepared` (a prepare_gaze_trajectory_data() result, or
+# anything sharing its "usable rows only, sorted by time_col ascending"
+# contract) -- the row at or immediately before `ms`, via findInterval()'s
+# binary search rather than a linear per-tick scan over what can be a
+# several-thousand-row window (the same rendering-performance concern this
+# feature's own background/trail trace split already exists for -- see this
+# file's "Gaze Explorer onion-skin playback" section header comment above).
+# A binary search is also what makes this correct for the draggable
+# scrubber's BACKWARD seeks, not just the tick loop's forward advance -- an
+# explicitly forward-only walk (remembering only the last index reached)
+# would need a separate code path for a user dragging the scrubber earlier
+# in the window, which this single implementation does not.
+#
+# prepared: prepare_gaze_trajectory_data()'s cleaned/sorted output, or
+#   NULL/0-row (returns 1L for either -- there is no real position to report,
+#   but callers, e.g. the trail trace, already treat index 1 as a safe
+#   default against an empty/degenerate window).
+# ms: the virtual playback timestamp to resolve, or NULL/NA (also returns
+#   1L).
+#
+# Returns a single integer in [1, nrow(prepared)] (or 1L when prepared has 0
+# usable rows).
+gaze_ms_to_index <- function(prepared, ms, time_col = "recordingTimestamp_ms") {
+  if (is.null(prepared) || nrow(prepared) == 0 || is.null(ms) || length(ms) != 1 || is.na(ms)) {
+    return(1L)
+  }
+  idx <- findInterval(ms, prepared[[time_col]])
+  as.integer(max(1L, min(idx, nrow(prepared))))
+}
+
+# find_stimulus_name_column: locate whichever raw, per-row column (if any)
+# in a loaded preproc data.frame carries the presented video-stimulus
+# name/filename for the "now playing" label (app.R) -- confirmed directly
+# against this package's adapter `standardize()` implementations
+# (R/tobii-studio-adapter.R, R/tobii-pro-adapter.R) that this is a
+# PASSTHROUGH column, not part of the standardized `?eyeQuality-schema`:
+# both adapters `dplyr::rename()` only the specific device-native columns
+# the generic pipeline needs, and neither `dplyr::select()`s the data down
+# to just those columns afterward, so any extra raw export column --
+# including a device's own "presented media/stimulus name" column, when its
+# source export includes one -- survives untouched, under its ORIGINAL raw
+# name, all the way through to the final `*_preproc.tsv` output
+# (`removeIntermediateCols()`'s positional slice keeps everything preceding
+# the first pipeline-computed column, which every raw passthrough column
+# is). That also means there is no single canonical name for it: it is
+# whatever the source device export's own header happened to be, which is
+# study/export-configuration-dependent, not something this package
+# standardizes today (see this task's report for the follow-up recommended
+# on that point). This function therefore matches by NORMALIZED name
+# (lowercased, non-alphanumeric characters stripped, so "Presented Media
+# name", "Presented.Media.name", and "PresentedMediaName" are all treated
+# identically) against a short list of the variants actually seen in
+# practice, rather than a single hardcoded literal column name.
+#
+# df: a data.frame (ordinarily gaze_prepared_df()'s output), or NULL.
+#
+# Returns the FIRST matching column's real (un-normalized) name as a single
+# character string, or NULL if df is NULL/not a data.frame or no column
+# matches -- callers (current_stimulus_label() below) treat NULL as "this
+# recording has no stimulus-name metadata", a real and expected case (a
+# non-video task, or an export that never included this column), not an
+# error.
+.stimulus_name_column_patterns <- c(
+  "presentedmedianame", "presentedstimulusname", "medianame", "stimulusname"
+)
+
+find_stimulus_name_column <- function(df) {
+  if (is.null(df) || !is.data.frame(df) || length(names(df)) == 0) {
+    return(NULL)
+  }
+  normalized <- tolower(gsub("[^A-Za-z0-9]", "", names(df)))
+  match_idx <- which(normalized %in% .stimulus_name_column_patterns)
+  if (length(match_idx) == 0) {
+    return(NULL)
+  }
+  names(df)[match_idx[1]]
+}
+
+# current_stimulus_label: the "now playing" text (app.R) for whatever row
+# `current_index` points at in `df` -- degrades to NULL (never an error)
+# when `df` has no usable stimulus-name column at all
+# (find_stimulus_name_column() found nothing) or the value at that specific
+# row is NA/blank (e.g. a video-stimulus column that exists but is empty
+# during a calibration segment of the same recording).
+#
+# df: ordinarily gaze_prepared_df()'s output -- current_index indexes into
+#   this SAME data.frame, matching gaze_ms_to_index()'s own row-position
+#   contract.
+# current_index: a 1-based row position into df, clamped into [1, nrow(df)]
+#   the same way build_gaze_trajectory_trail_trace() clamps its own
+#   current_index, so a stale/out-of-range value degrades rather than
+#   erroring.
+# col: the column name to read, or NULL to auto-detect via
+#   find_stimulus_name_column() (the default; app.R never needs to pass this
+#   explicitly, it exists mainly so tests can target a specific column
+#   without relying on the auto-detection patterns above).
+#
+# Returns a single non-empty character string, or NULL.
+current_stimulus_label <- function(df, current_index, col = NULL) {
+  if (is.null(df) || !is.data.frame(df) || nrow(df) == 0) {
+    return(NULL)
+  }
+  if (is.null(col)) {
+    col <- find_stimulus_name_column(df)
+  }
+  if (is.null(col) || !(col %in% names(df))) {
+    return(NULL)
+  }
+  idx <- max(1L, min(as.integer(current_index), nrow(df)))
+  val <- df[[col]][idx]
+  if (is.na(val)) {
+    return(NULL)
+  }
+  val <- trimws(as.character(val))
+  if (!nzchar(val)) {
+    return(NULL)
+  }
+  val
 }
 
 # ---------------------------------------------------------------------------

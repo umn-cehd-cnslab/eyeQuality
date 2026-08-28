@@ -2428,6 +2428,103 @@ test_that("derive_event_marker_windows returns NULL (not an empty data.frame) fo
 })
 
 # ---------------------------------------------------------------------------
+# derive_stimulus_windows() -- "Jump to stimulus", distinct from (and NOT
+# collapsed the way) derive_event_marker_windows() above is.
+# ---------------------------------------------------------------------------
+
+test_that("derive_stimulus_windows pairs each VideoStimulusStart with the next VideoStimulusEnd sharing the same eventValue, reproducing a real events.tsv's bunny/01/elephant sequence", {
+  events <- data.frame(
+    event = c(
+      "VideoStimulusStart", "VideoStimulusEnd",
+      "VideoStimulusStart", "VideoStimulusEnd",
+      "VideoStimulusStart", "VideoStimulusEnd"
+    ),
+    eventValue = c("bunny", "bunny", "01", "01", "elephant", "elephant"),
+    recordingTimestamp_ms = c(5324, 7541, 7541, 28590, 28590, 31124)
+  )
+
+  result <- derive_stimulus_windows(events)
+
+  expect_equal(nrow(result), 3)
+  expect_equal(result$stimulus, c("bunny", "01", "elephant"))
+  expect_equal(result$start_ms, c(5324, 7541, 28590))
+  expect_equal(result$end_ms, c(7541, 28590, 31124))
+  expect_equal(result$duration_ms, c(7541 - 5324, 28590 - 7541, 31124 - 28590))
+})
+
+test_that("derive_stimulus_windows produces two SEPARATE rows for a stimulus name shown twice at different, non-contiguous points, not one collapsed row", {
+  events <- data.frame(
+    event = c(
+      "VideoStimulusStart", "VideoStimulusEnd",
+      "VideoStimulusStart", "VideoStimulusEnd",
+      "VideoStimulusStart", "VideoStimulusEnd"
+    ),
+    eventValue = c("01", "01", "bunny", "bunny", "01", "01"),
+    recordingTimestamp_ms = c(0, 1000, 1000, 2000, 5000, 6000)
+  )
+
+  result <- derive_stimulus_windows(events)
+
+  expect_equal(nrow(result), 3)
+  expect_equal(result$stimulus, c("01", "bunny", "01"))
+  expect_equal(result$start_ms, c(0, 1000, 5000))
+  expect_equal(result$end_ms, c(1000, 2000, 6000))
+  # confirm this is NOT the derive_event_marker_windows()-style collapse --
+  # a naive first-occurrence-to-last-occurrence-per-label window for "01"
+  # here would be a single [0, 6000] row, which is not what this function
+  # returns for the same input.
+  expect_false(any(result$start_ms == 0 & result$end_ms == 6000))
+})
+
+test_that("derive_stimulus_windows drops an unmatched trailing Start (truncated recording) rather than erroring, keeping the pairs that DID complete", {
+  events <- data.frame(
+    event = c("VideoStimulusStart", "VideoStimulusEnd", "VideoStimulusStart"),
+    eventValue = c("bunny", "bunny", "elephant"),
+    recordingTimestamp_ms = c(100, 200, 300)
+  )
+
+  result <- derive_stimulus_windows(events)
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$stimulus, "bunny")
+  expect_equal(result$start_ms, 100)
+  expect_equal(result$end_ms, 200)
+})
+
+test_that("derive_stimulus_windows drops an orphan End (no preceding open Start for its eventValue) rather than erroring", {
+  events <- data.frame(
+    event = c("VideoStimulusEnd", "VideoStimulusStart", "VideoStimulusEnd"),
+    eventValue = c("bunny", "elephant", "elephant"),
+    recordingTimestamp_ms = c(50, 100, 200)
+  )
+
+  result <- derive_stimulus_windows(events)
+
+  expect_equal(nrow(result), 1)
+  expect_equal(result$stimulus, "elephant")
+  expect_equal(result$start_ms, 100)
+  expect_equal(result$end_ms, 200)
+})
+
+test_that("derive_stimulus_windows returns NULL for NULL events, wrong-shaped events, events missing eventValue, or events with 0 usable VideoStimulusStart/End pairs", {
+  expect_null(derive_stimulus_windows(NULL))
+  expect_null(derive_stimulus_windows(data.frame(a = 1)))
+  expect_null(derive_stimulus_windows(data.frame(
+    event = "VideoStimulusStart", recordingTimestamp_ms = 1
+  ))) # missing eventValue entirely
+  expect_null(derive_stimulus_windows(data.frame(
+    event = character(0), eventValue = character(0), recordingTimestamp_ms = numeric(0)
+  )))
+  # a file with only OTHER event labels (no VideoStimulusStart/End at all) --
+  # the real, common "calibration-only / non-video task" degradation case.
+  expect_null(derive_stimulus_windows(data.frame(
+    event = c("TrialStart", "TrialEnd"),
+    eventValue = c(NA, NA),
+    recordingTimestamp_ms = c(10, 20)
+  )))
+})
+
+# ---------------------------------------------------------------------------
 # points_in_polygon()
 # ---------------------------------------------------------------------------
 
@@ -2821,6 +2918,123 @@ test_that("build_gaze_trajectory_animation_plot returns NULL when there's nothin
 })
 
 # ---------------------------------------------------------------------------
+# Real-time-matched playback: resolve_playback_speed(), advance_gaze_playback_ms(),
+# gaze_ms_to_index() -- the Shiny-free helpers app.R's tick loop composes
+# each tick, see analyze_helpers.R's "Real-time-matched playback" section
+# header comment for the full design.
+# ---------------------------------------------------------------------------
+
+test_that("resolve_playback_speed parses the gaze_playback_speed selectInput's string value into a numeric multiplier", {
+  expect_equal(resolve_playback_speed("0.5"), 0.5)
+  expect_equal(resolve_playback_speed("1"), 1)
+  expect_equal(resolve_playback_speed("2"), 2)
+})
+
+test_that("resolve_playback_speed defaults to 1 (normal speed) for NULL, non-numeric, NA, zero, or negative input", {
+  expect_equal(resolve_playback_speed(NULL), 1)
+  expect_equal(resolve_playback_speed("not-a-number"), 1)
+  expect_equal(resolve_playback_speed(NA_character_), 1)
+  expect_equal(resolve_playback_speed("0"), 1)
+  expect_equal(resolve_playback_speed("-1"), 1)
+  expect_equal(resolve_playback_speed(character(0)), 1)
+})
+
+test_that("advance_gaze_playback_ms advances current_ms by elapsed_ms * speed within the window", {
+  expect_equal(advance_gaze_playback_ms(0, 150, 1, 0, 990), 150)
+  expect_equal(advance_gaze_playback_ms(0, 150, 2, 0, 990), 300)
+  expect_equal(advance_gaze_playback_ms(0, 150, 0.5, 0, 990), 75)
+  expect_equal(advance_gaze_playback_ms(300, 150, 1, 0, 990), 450)
+})
+
+test_that("advance_gaze_playback_ms loops back to window_start_ms when the advance would run past window_end_ms", {
+  expect_equal(advance_gaze_playback_ms(900, 150, 1, 0, 990), 0)
+  # lands exactly on window_end_ms -- NOT past it -- so it does not wrap.
+  expect_equal(advance_gaze_playback_ms(840, 150, 1, 0, 990), 990)
+})
+
+test_that("advance_gaze_playback_ms treats a NULL/NA current_ms as window_start_ms rather than erroring", {
+  expect_equal(advance_gaze_playback_ms(NULL, 150, 1, 100, 990), 250)
+  expect_equal(advance_gaze_playback_ms(NA_real_, 150, 1, 100, 990), 250)
+})
+
+test_that("gaze_ms_to_index resolves a virtual timestamp to the row at or immediately before it, via binary search", {
+  prepared <- data.frame(recordingTimestamp_ms = seq(0, 90, by = 10))
+  expect_equal(gaze_ms_to_index(prepared, 0), 1L)
+  expect_equal(gaze_ms_to_index(prepared, 45), 5L) # between rows 5 (40ms) and 6 (50ms) -- resolves to the earlier one
+  expect_equal(gaze_ms_to_index(prepared, 90), 10L)
+})
+
+test_that("gaze_ms_to_index clamps ms before the window start or after the window end into [1, nrow]", {
+  prepared <- data.frame(recordingTimestamp_ms = seq(0, 90, by = 10))
+  expect_equal(gaze_ms_to_index(prepared, -50), 1L)
+  expect_equal(gaze_ms_to_index(prepared, 500), 10L)
+})
+
+test_that("gaze_ms_to_index returns 1L for a NULL/0-row prepared data.frame or a NULL/NA ms, rather than erroring", {
+  expect_equal(gaze_ms_to_index(NULL, 50), 1L)
+  expect_equal(gaze_ms_to_index(data.frame(recordingTimestamp_ms = numeric(0)), 50), 1L)
+  prepared <- data.frame(recordingTimestamp_ms = seq(0, 90, by = 10))
+  expect_equal(gaze_ms_to_index(prepared, NULL), 1L)
+  expect_equal(gaze_ms_to_index(prepared, NA_real_), 1L)
+})
+
+# ---------------------------------------------------------------------------
+# find_stimulus_name_column() / current_stimulus_label() -- the "now playing"
+# label's own Shiny-free helpers.
+# ---------------------------------------------------------------------------
+
+test_that("find_stimulus_name_column matches common raw passthrough column-name variants regardless of spacing/punctuation", {
+  expect_equal(find_stimulus_name_column(data.frame(`Presented Media name` = "x", check.names = FALSE)), "Presented Media name")
+  expect_equal(find_stimulus_name_column(data.frame(Presented.Media.name = "x")), "Presented.Media.name")
+  expect_equal(find_stimulus_name_column(data.frame(PresentedMediaName = "x")), "PresentedMediaName")
+  expect_equal(find_stimulus_name_column(data.frame(`Presented Stimulus name` = "x", check.names = FALSE)), "Presented Stimulus name")
+  expect_equal(find_stimulus_name_column(data.frame(MediaName = "x")), "MediaName")
+})
+
+test_that("find_stimulus_name_column returns NULL for NULL/non-data.frame input or a data.frame with no matching column", {
+  expect_null(find_stimulus_name_column(NULL))
+  expect_null(find_stimulus_name_column("not a data.frame"))
+  expect_null(find_stimulus_name_column(data.frame(gazeX.preprocessed_px = 1, gazeY.preprocessed_px = 1)))
+})
+
+test_that("current_stimulus_label reads the current row's value from the auto-detected stimulus-name column", {
+  df <- data.frame(
+    recordingTimestamp_ms = c(0, 10, 20),
+    `Presented Media name` = c("bunny.avi", "bunny.avi", "elephant.avi"),
+    check.names = FALSE
+  )
+  expect_equal(current_stimulus_label(df, 1), "bunny.avi")
+  expect_equal(current_stimulus_label(df, 3), "elephant.avi")
+})
+
+test_that("current_stimulus_label degrades to NULL when df has no stimulus-name column at all", {
+  df <- data.frame(recordingTimestamp_ms = c(0, 10), gazeX.preprocessed_px = c(1, 2))
+  expect_null(current_stimulus_label(df, 1))
+})
+
+test_that("current_stimulus_label degrades to NULL when the column exists but is NA or blank at that specific row", {
+  df <- data.frame(
+    recordingTimestamp_ms = c(0, 10, 20),
+    `Presented Media name` = c("bunny.avi", NA, ""),
+    check.names = FALSE
+  )
+  expect_null(current_stimulus_label(df, 2))
+  expect_null(current_stimulus_label(df, 3))
+})
+
+test_that("current_stimulus_label clamps an out-of-range current_index into [1, nrow] rather than erroring, and returns NULL for a NULL/0-row df", {
+  df <- data.frame(
+    recordingTimestamp_ms = c(0, 10),
+    `Presented Media name` = c("bunny.avi", "elephant.avi"),
+    check.names = FALSE
+  )
+  expect_equal(current_stimulus_label(df, 999), "elephant.avi")
+  expect_equal(current_stimulus_label(df, -5), "bunny.avi")
+  expect_null(current_stimulus_label(NULL, 1))
+  expect_null(current_stimulus_label(df[0, , drop = FALSE], 1))
+})
+
+# ---------------------------------------------------------------------------
 # "Gaze Explorer" tab: live app.R reactive wiring (shiny::testServer())
 # ---------------------------------------------------------------------------
 
@@ -3103,34 +3317,47 @@ test_that("the app-level wiring passes the untrimmed filtered_trajectory() to co
 
 # ---------------------------------------------------------------------------
 # "Gaze Explorer" onion-skin playback: live app.R reactive wiring
-# (shiny::testServer()) -- gaze_anim_playing()/gaze_anim_index() are the
-# server's own reactiveVals, directly readable inside testServer()'s
-# evaluation environment exactly like selected_source_file()/aoi_polygon()
-# above; session$elapse(millis) (same technique the auto-refresh tests above
-# use, see that section's own header comment on how MockShinySession$elapse()
-# advances invalidateLater() ticks deterministically) drives the tick loop.
+# (shiny::testServer()) -- gaze_anim_playing() is the server's own
+# reactiveVal, and gaze_anim_ms()/gaze_anim_index() are directly readable
+# inside testServer()'s evaluation environment exactly like
+# selected_source_file()/aoi_polygon() above; session$elapse(millis) (same
+# technique the auto-refresh tests above use, see that section's own header
+# comment on how MockShinySession$elapse() advances invalidateLater() ticks
+# deterministically) drives the tick loop.
 #
-# One quirk confirmed directly against this app's actual reactive graph
-# before writing any assertion below (never assumed): the tick-loop
-# observe() block re-runs SYNCHRONOUSLY, within the same flush, the instant
-# gaze_anim_playing() flips TRUE -- i.e. clicking Play (or resuming from
-# Pause) already advances gaze_anim_index() by gaze_anim_step_samples (5)
-# BEFORE any session$elapse() call, not only after the first 150ms tick
-# elapses. Every index expectation below accounts for this "immediate first
-# step" the same way the pre-existing auto-refresh tests account for their
-# own analogous quirk (see this file's "P10: Analyze app -- auto-refresh"
-# section header comment).
+# Reworked for real-time-matched playback (repo-owner follow-up request):
+# the OLD fixed "5 samples per 150ms tick" design (and gaze_anim_index() as
+# its own independently-advanced reactiveVal) is gone entirely -- see
+# analyze_helpers.R's "Real-time-matched playback" section header comment
+# for the replacement design. The same quirk this section already documented
+# still holds under the new design, just expressed in time rather than
+# sample counts: the tick-loop observe() block re-runs SYNCHRONOUSLY, within
+# the same flush, the instant gaze_anim_playing() flips TRUE -- i.e.
+# clicking Play (or resuming from Pause) already advances gaze_anim_ms() by
+# one gaze_anim_tick_interval_ms * speed BEFORE any session$elapse() call,
+# not only after the first tick elapses. Every ms/index expectation below
+# accounts for this "immediate first step".
 # ---------------------------------------------------------------------------
 
-# build_gaze_anim_fixture: two files, each 20 clean (NA-free), evenly-spaced
-# gaze samples 10ms apart -- unlike build_gaze_explorer_fixture's file A
+# build_gaze_anim_fixture: two files, each 100 clean (NA-free), evenly-spaced
+# (10ms apart) gaze samples -- unlike build_gaze_explorer_fixture's file A
 # (which has 2 deliberate NA rows for its own AOI-percentage arithmetic),
 # this fixture is NA-free so prepare_gaze_trajectory_data()'s row count is
 # always exactly the row count written here, making the tick loop's
-# advance-by-5-samples-per-tick and end-of-window wrap-around math exactly
-# hand-computable rather than fought against an unrelated NA-drop. File B has
-# a wholly different (non-overlapping) recordingTimestamp_ms range, for the
-# file-switch-stops-playback test below.
+# real-time-matched advance and end-of-window wrap-around math exactly
+# hand-computable (at the default 150ms tick interval and 1x speed, each
+# tick advances the virtual playback timestamp by 150ms == 15 rows at this
+# fixture's 10ms sample spacing) rather than fought against an unrelated
+# NA-drop. File B has a wholly different (non-overlapping)
+# recordingTimestamp_ms range, for the file-switch-stops-playback test
+# below, and deliberately has NO "Presented Media name" column and NO
+# events.tsv sibling -- the "now playing" label / "Jump to stimulus"
+# degrade-gracefully case. File A's `Presented Media name` column and
+# events.tsv sibling both encode the SAME two-presentation split (rows
+# 1-50 == "bunny.avi"/timestamps 0-490ms, rows 51-100 == "elephant.avi"/
+# timestamps 500-990ms) so both the row-level "now playing" label and the
+# events-derived "Jump to stimulus" control can be exercised against one
+# self-consistent fixture.
 build_gaze_anim_fixture <- function() {
   dir <- tempfile("p10_gaze_anim_")
   dir.create(dir)
@@ -3141,11 +3368,21 @@ build_gaze_anim_fixture <- function() {
   )
   readr::write_tsv(
     data.frame(
-      recordingTimestamp_ms = seq(0, 190, by = 10),
-      gazeX.preprocessed_px = seq_len(20),
-      gazeY.preprocessed_px = seq_len(20)
+      recordingTimestamp_ms = seq(0, 990, by = 10),
+      gazeX.preprocessed_px = seq_len(100),
+      gazeY.preprocessed_px = seq_len(100),
+      `Presented Media name` = c(rep("bunny.avi", 50), rep("elephant.avi", 50)),
+      check.names = FALSE
     ),
     file.path(dir, "sub-a_ses-1_desc-animA_preproc.tsv")
+  )
+  readr::write_tsv(
+    data.frame(
+      event = c("VideoStimulusStart", "VideoStimulusEnd", "VideoStimulusStart", "VideoStimulusEnd"),
+      eventValue = c("bunny.avi", "bunny.avi", "elephant.avi", "elephant.avi"),
+      recordingTimestamp_ms = c(0, 490, 500, 990)
+    ),
+    file.path(dir, "sub-a_ses-1_desc-animA_events.tsv")
   )
 
   readr::write_tsv(
@@ -3154,9 +3391,9 @@ build_gaze_anim_fixture <- function() {
   )
   readr::write_tsv(
     data.frame(
-      recordingTimestamp_ms = seq(1000, 1190, by = 10),
-      gazeX.preprocessed_px = seq_len(20),
-      gazeY.preprocessed_px = seq_len(20)
+      recordingTimestamp_ms = seq(2000, 2990, by = 10),
+      gazeX.preprocessed_px = seq_len(100),
+      gazeY.preprocessed_px = seq_len(100)
     ),
     file.path(dir, "sub-b_ses-1_desc-animB_preproc.tsv")
   )
@@ -3177,7 +3414,7 @@ gaze_trace_names <- function(plot_output) {
   vapply(parsed$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
 }
 
-test_that("clicking Play starts the trail advancing over several simulated invalidateLater() ticks, wrapping back to the start at the end of the window", {
+test_that("clicking Play advances gaze_anim_ms()/gaze_anim_index() in real-time-matched steps, wrapping back to the window start at the end", {
   skip_on_cran()
   skip_if_not_installed("plotly")
 
@@ -3188,33 +3425,36 @@ test_that("clicking Play starts the trail advancing over several simulated inval
   shiny::testServer(analyze_app_dir, {
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
-    session$setInputs(qc_table_rows_selected = 1) # file A: 20 usable rows
-    # Reflect the browser echo of file A's own full [0, 190] slider bounds by
-    # hand -- see the pre-existing Gaze Explorer tests above on why this is
-    # necessary under a bare MockShinySession.
-    session$setInputs(gaze_time_range = c(0, 190))
+    session$setInputs(qc_table_rows_selected = 1) # file A
+    # Narrow to a 16-row window (0..150ms, step 10ms = 16 samples) so the
+    # single immediate first step (0 + 150ms tick interval == 150ms) lands
+    # EXACTLY on the window end -- reflect the browser echo of that slider
+    # value by hand, see the pre-existing Gaze Explorer tests above on why
+    # this is necessary under a bare MockShinySession.
+    session$setInputs(gaze_time_range = c(0, 150))
 
+    expect_equal(gaze_anim_ms(), 0)
     expect_equal(gaze_anim_index(), 1L)
     expect_false(gaze_anim_playing())
 
     session$setInputs(gaze_play_toggle = 1)
     expect_true(gaze_anim_playing())
-    expect_equal(gaze_anim_index(), 6L) # immediate first step, see header comment
-
-    session$elapse(150)
-    expect_equal(gaze_anim_index(), 11L)
-
-    session$elapse(150)
+    # immediate first step: 0 + (150ms tick interval * 1x speed) == 150,
+    # exactly the window end -- not yet past it, so no wrap.
+    expect_equal(gaze_anim_ms(), 150)
     expect_equal(gaze_anim_index(), 16L)
 
-    # next step (16 + 5 = 21) would run past the 20-row window -- loops back
-    # to 1 and keeps playing, rather than stopping or erroring.
+    # next step (150 + 150 == 300) would run past the window's 150ms end --
+    # loops back to the window start (0) and keeps playing, rather than
+    # stopping or erroring.
     session$elapse(150)
     expect_true(gaze_anim_playing())
+    expect_equal(gaze_anim_ms(), 0)
     expect_equal(gaze_anim_index(), 1L)
 
     session$elapse(150)
-    expect_equal(gaze_anim_index(), 6L)
+    expect_equal(gaze_anim_ms(), 150)
+    expect_equal(gaze_anim_index(), 16L)
   })
 })
 
@@ -3230,7 +3470,7 @@ test_that("clicking Pause reverts output$gaze_trajectory_plot to the plain stati
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1)
-    session$setInputs(gaze_time_range = c(0, 190))
+    session$setInputs(gaze_time_range = c(0, 990))
 
     session$setInputs(gaze_play_toggle = 1) # Play
     playing_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
@@ -3257,12 +3497,12 @@ test_that("moving the time-range slider while playing stops playback rather than
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1)
-    session$setInputs(gaze_time_range = c(0, 190))
+    session$setInputs(gaze_time_range = c(0, 990))
 
     session$setInputs(gaze_play_toggle = 1)
     expect_true(gaze_anim_playing())
 
-    session$setInputs(gaze_time_range = c(0, 150)) # drag either handle
+    session$setInputs(gaze_time_range = c(0, 500)) # drag either handle
     expect_false(gaze_anim_playing())
     expect_equal(gaze_anim_index(), 1L)
 
@@ -3286,12 +3526,12 @@ test_that("switching to a different selected_source_file() while playing stops/r
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1) # file A
-    session$setInputs(gaze_time_range = c(0, 190))
+    session$setInputs(gaze_time_range = c(0, 990))
 
     session$setInputs(gaze_play_toggle = 1)
     expect_true(gaze_anim_playing())
     session$elapse(150)
-    expect_equal(gaze_anim_index(), 11L)
+    expect_equal(gaze_anim_ms(), 300)
 
     session$setInputs(qc_table_rows_selected = 2) # file B: different file entirely
     expect_false(gaze_anim_playing())
@@ -3314,7 +3554,7 @@ test_that("defining or clearing an AOI while playing stops playback", {
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1)
-    session$setInputs(gaze_time_range = c(0, 190))
+    session$setInputs(gaze_time_range = c(0, 990))
 
     session$setInputs(gaze_play_toggle = 1) # Play
     expect_true(gaze_anim_playing())
@@ -3351,33 +3591,33 @@ test_that("changing the trail length while playing does NOT stop playback, and t
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1)
-    session$setInputs(gaze_time_range = c(0, 190))
+    session$setInputs(gaze_time_range = c(0, 990))
 
-    session$setInputs(gaze_play_toggle = 1)
-    session$elapse(150) # gaze_anim_index() == 11
-    expect_equal(gaze_anim_index(), 11L)
+    session$setInputs(gaze_play_toggle = 1) # immediate step: ms == 150, index == 16
+    expect_equal(gaze_anim_index(), 16L)
 
     parsed_before <- jsonlite::fromJSON(session$getOutput("gaze_trajectory_plot"), simplifyVector = FALSE)
     names_before <- vapply(parsed_before$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
     trail_before <- parsed_before$x$data[[which(names_before == "Current position (trail)")]]
-    expect_equal(length(trail_before$x), 11) # min(current_index, trail_length=90) == 11
+    expect_equal(length(trail_before$x), 16) # min(current_index, trail_length=90) == 16
 
     session$setInputs(gaze_trail_length = 5)
     expect_true(gaze_anim_playing()) # NOT a reset trigger, unlike the 3 tests above
-    expect_equal(gaze_anim_index(), 11L) # index itself untouched by this change
+    expect_equal(gaze_anim_index(), 16L) # index itself untouched by this change
 
     parsed_after <- jsonlite::fromJSON(session$getOutput("gaze_trajectory_plot"), simplifyVector = FALSE)
     names_after <- vapply(parsed_after$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
     trail_after <- parsed_after$x$data[[which(names_after == "Current position (trail)")]]
-    expect_equal(length(trail_after$x), 5) # min(current_index=11, trail_length=5) == 5
+    expect_equal(length(trail_after$x), 5) # min(current_index=16, trail_length=5) == 5
 
     # ...and it keeps ticking normally afterward.
     session$elapse(150)
-    expect_equal(gaze_anim_index(), 16L)
+    expect_equal(gaze_anim_ms(), 300)
+    expect_equal(gaze_anim_index(), 31L)
   })
 })
 
-test_that("pausing mid-playback then pressing Play again resumes from the paused index rather than restarting at 1", {
+test_that("pausing mid-playback then pressing Play again resumes from the paused position rather than restarting at the window start", {
   skip_on_cran()
   skip_if_not_installed("plotly")
 
@@ -3389,26 +3629,29 @@ test_that("pausing mid-playback then pressing Play again resumes from the paused
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1)
-    session$setInputs(gaze_time_range = c(0, 190))
+    session$setInputs(gaze_time_range = c(0, 990))
 
-    session$setInputs(gaze_play_toggle = 1) # Play: index -> 6 (immediate first step)
-    session$elapse(150) # -> 11
-    expect_equal(gaze_anim_index(), 11L)
+    session$setInputs(gaze_play_toggle = 1) # Play: ms -> 150 (immediate first step)
+    session$elapse(150) # -> 300
+    expect_equal(gaze_anim_ms(), 300)
+    expect_equal(gaze_anim_index(), 31L)
 
     session$setInputs(gaze_play_toggle = 1) # Pause
     expect_false(gaze_anim_playing())
-    expect_equal(gaze_anim_index(), 11L) # frozen at the paused index, not reset
+    expect_equal(gaze_anim_ms(), 300) # frozen at the paused position, not reset
 
     session$setInputs(gaze_play_toggle = 1) # Play again: resume, not restart
     expect_true(gaze_anim_playing())
-    # Resuming from a genuine mid-window pause (11 < 20 rows) continues from
-    # 11 with the same immediate-first-step advance documented above, NOT a
-    # restart to 1 (which would instead read as index == 6 here).
-    expect_equal(gaze_anim_index(), 16L)
+    # Resuming from a genuine mid-window pause (index 31 < 100 rows)
+    # continues from ms 300 with the same immediate-first-step advance
+    # documented above (300 + 150 == 450), NOT a restart to the window start
+    # (which would instead read as ms == 150 here).
+    expect_equal(gaze_anim_ms(), 450)
+    expect_equal(gaze_anim_index(), 46L)
   })
 })
 
-test_that("pressing Play again after playback has already reached/passed the end of the window restarts at sample 1 (not a mid-window resume)", {
+test_that("pressing Play again after playback has already reached/passed the end of the window restarts at the window start (not a stale mid-window resume)", {
   skip_on_cran()
   skip_if_not_installed("plotly")
 
@@ -3420,29 +3663,302 @@ test_that("pressing Play again after playback has already reached/passed the end
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
     session$setInputs(load = 1)
     session$setInputs(qc_table_rows_selected = 1)
-    # Narrow to a 16-row window (0..150ms, step 10ms = 16 samples) so a whole
-    # number of 5-sample ticks (6, 11, 16) lands EXACTLY on the last row --
-    # the "at/past the end" boundary this test needs, rather than the 20-row
-    # full window above (whose tick sequence 6/11/16 never lands exactly on
-    # row 20, only overshoots past it on the NEXT tick).
-    session$setInputs(gaze_time_range = c(0, 150))
-    expect_equal(nrow(gaze_prepared_df()), 16L)
+    # Narrow to a 31-row window (0..300ms, step 10ms) so 2 ticks (150, then
+    # 150 + 150 == 300) lands EXACTLY on the last row -- the "at/past the
+    # end" boundary this test needs.
+    session$setInputs(gaze_time_range = c(0, 300))
+    expect_equal(nrow(gaze_prepared_df()), 31L)
 
-    session$setInputs(gaze_play_toggle = 1) # Play: index -> 6 (immediate first step)
-    session$elapse(150) # -> 11
-    session$elapse(150) # -> 16 == nrow(prepared): exactly at the end
-    expect_equal(gaze_anim_index(), 16L)
+    session$setInputs(gaze_play_toggle = 1) # Play: ms -> 150 (immediate first step)
+    session$elapse(150) # -> 300 == window end: exactly at the end
+    expect_equal(gaze_anim_ms(), 300)
+    expect_equal(gaze_anim_index(), 31L)
 
     session$setInputs(gaze_play_toggle = 1) # Pause at the boundary
     expect_false(gaze_anim_playing())
-    expect_equal(gaze_anim_index(), 16L)
+    expect_equal(gaze_anim_ms(), 300)
 
-    session$setInputs(gaze_play_toggle = 1) # Play again: restart at 1, not resume from 16
+    session$setInputs(gaze_play_toggle = 1) # Play again: restart at the window start, not resume from 300
     expect_true(gaze_anim_playing())
-    # Restart-to-1 followed by the same immediate-first-step advance (1 + 5)
-    # documented above -- NOT a continuation past 16 (which would error/wrap
-    # against a stale index the reset observer already zeroed conceptually).
-    expect_equal(gaze_anim_index(), 6L)
+    # Restart-to-window-start (0) followed by the same immediate-first-step
+    # advance documented above (0 + 150 == 150) -- NOT a continuation past
+    # 300 (which would instead wrap straight to ms == 0/index == 1, a
+    # distinguishable value from this test's own restart-then-step result).
+    expect_equal(gaze_anim_ms(), 150)
+    expect_equal(gaze_anim_index(), 16L)
+  })
+})
+
+# ---------------------------------------------------------------------------
+# Playback speed (0.5x/1x/2x): confirms the speed multiplier actually
+# changes the real-time-to-recording-time ratio, not just that it's read
+# without erroring -- the same 3-tick sequence (one immediate first step
+# plus session$elapse(300), i.e. 2 more scheduled ticks) run at each of the
+# 3 speeds produces gaze_anim_ms() values in the exact 1:2:4 ratio
+# (0.5x:1x:2x) this feature's own speed multiplier is supposed to produce.
+# ---------------------------------------------------------------------------
+
+test_that("playback speed 1x (the default) advances gaze_anim_ms() by exactly tick_interval_ms per tick", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    session$setInputs(gaze_playback_speed = "1")
+    session$setInputs(gaze_play_toggle = 1) # immediate step: ms == 150
+    session$elapse(300) # 2 more ticks: 150 -> 300 -> 450
+
+    expect_equal(gaze_anim_ms(), 450) # 3 ticks * 150ms * 1x
+  })
+})
+
+test_that("playback speed 2x advances gaze_anim_ms() twice as far as 1x over the same tick sequence", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    session$setInputs(gaze_playback_speed = "2")
+    session$setInputs(gaze_play_toggle = 1) # immediate step: ms == 300 (150 * 2)
+    session$elapse(300) # 2 more ticks: 300 -> 600 -> 900
+
+    expect_equal(gaze_anim_ms(), 900) # 3 ticks * 150ms * 2x -- exactly double the 1x test's 450
+  })
+})
+
+test_that("playback speed 0.5x advances gaze_anim_ms() half as far as 1x over the same tick sequence", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    session$setInputs(gaze_playback_speed = "0.5")
+    session$setInputs(gaze_play_toggle = 1) # immediate step: ms == 75 (150 * 0.5)
+    session$elapse(300) # 2 more ticks: 75 -> 150 -> 225
+
+    expect_equal(gaze_anim_ms(), 225) # 3 ticks * 150ms * 0.5x -- exactly half the 1x test's 450
+  })
+})
+
+# ---------------------------------------------------------------------------
+# Draggable playback scrubber (input$gaze_scrub): bidirectional binding with
+# gaze_anim_ms() -- both while playing (seek-and-continue) and while paused
+# (a deliberate scrub shows the animated frame at that position).
+# ---------------------------------------------------------------------------
+
+test_that("dragging the scrubber while playing seeks gaze_anim_ms() and playback continues from the new position on the next tick", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    session$setInputs(gaze_play_toggle = 1) # immediate step: ms == 150
+    expect_equal(gaze_anim_ms(), 150)
+
+    # A genuine user drag to 500 -- distinct from the 150 the server itself
+    # most recently pushed to this widget, so it is NOT mistaken for an echo
+    # of the server's own update (see gaze_scrub_server_value()'s comment,
+    # app.R).
+    session$setInputs(gaze_scrub = 500)
+    expect_equal(gaze_anim_ms(), 500)
+    expect_equal(gaze_anim_index(), 51L)
+    expect_true(gaze_anim_playing()) # seeking does not stop playback
+    expect_false(gaze_scrub_active()) # still playing -- this is not the "paused + scrubbed" case
+
+    # ...and playback continues from the NEW position on the next tick, not
+    # from wherever it would have been without the seek.
+    session$elapse(150)
+    expect_equal(gaze_anim_ms(), 650)
+    expect_equal(gaze_anim_index(), 66L)
+  })
+})
+
+test_that("dragging the scrubber while paused shows the animated onion-skin frame at that exact position, without starting playback", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    # Never played: paused-and-never-scrubbed still shows the plain static
+    # view, unaffected by this feature.
+    expect_false(gaze_anim_playing())
+    static_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
+    expect_true("Gaze path" %in% static_names)
+
+    # A genuine user drag to 400 -- distinct from the 0 the reset observer
+    # most recently pushed (this window's own start_ms).
+    session$setInputs(gaze_scrub = 400)
+    expect_false(gaze_anim_playing())
+    expect_true(gaze_scrub_active())
+    expect_equal(gaze_anim_ms(), 400)
+    expect_equal(gaze_anim_index(), 41L)
+
+    animated_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
+    expect_true("Current position (trail)" %in% animated_names)
+    expect_false("Gaze path" %in% animated_names)
+
+    # Pressing Play/Pause (the toggle itself) reverts to the plain static
+    # rule -- Pause always shows static first, per gaze_scrub_active()'s own
+    # comment (app.R) -- confirmed here via Play-then-Pause.
+    session$setInputs(gaze_play_toggle = 1) # Play
+    session$setInputs(gaze_play_toggle = 1) # Pause
+    expect_false(gaze_scrub_active())
+    reverted_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
+    expect_true("Gaze path" %in% reverted_names)
+  })
+})
+
+# ---------------------------------------------------------------------------
+# "Now playing" stimulus label (output$gaze_now_playing_ui): reads
+# current_stimulus_label() live against gaze_anim_index()'s current row --
+# see that pure-function's own unit tests above for the column-matching and
+# NA/blank degradation logic this integration test does not re-derive.
+# ---------------------------------------------------------------------------
+
+test_that("the now-playing label shows the correct stimulus name for the current playback position and updates as playback advances", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1) # file A: rows 1-50 == bunny.avi, 51-100 == elephant.avi
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    session$setInputs(gaze_play_toggle = 1) # immediate step: index == 16 (<= 50 -> bunny.avi)
+    expect_match(renderui_html(session$getOutput("gaze_now_playing_ui")), "bunny.avi", fixed = TRUE)
+
+    session$elapse(150) # index -> 31 (still <= 50)
+    session$elapse(150) # index -> 46 (still <= 50)
+    session$elapse(150) # index -> 61 (> 50 -> elephant.avi)
+    expect_equal(gaze_anim_index(), 61L)
+    expect_match(renderui_html(session$getOutput("gaze_now_playing_ui")), "elephant.avi", fixed = TRUE)
+  })
+})
+
+test_that("the now-playing label degrades to a neutral placeholder, not an error, for a file with no stimulus-name column", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 2) # file B: no "Presented Media name" column
+    session$setInputs(gaze_time_range = c(2000, 2990))
+
+    session$setInputs(gaze_play_toggle = 1)
+    expect_true(gaze_anim_playing())
+    expect_match(
+      renderui_html(session$getOutput("gaze_now_playing_ui")),
+      "no stimulus metadata",
+      fixed = TRUE
+    )
+  })
+})
+
+# ---------------------------------------------------------------------------
+# "Jump to stimulus" (gaze_stimulus_marker_ui / derive_stimulus_windows()
+# integration): a SEPARATE control from "Jump to event marker" -- see
+# derive_stimulus_windows()'s own unit tests above for the underlying
+# pairing logic this integration test does not re-derive.
+# ---------------------------------------------------------------------------
+
+test_that("gaze_stimulus_windows()/gaze_stimulus_marker_ui reflect a real events.tsv's VideoStimulusStart/End pairs, and snapping sets the time-range slider", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  # updateSliderInput()'s sendInputMessage() call is a documented no-op on a
+  # bare MockShinySession -- see capturing_update_session()'s own comment
+  # above (and the pre-existing "Snap slider to this marker" tests, which
+  # use the same technique for the exact same reason).
+  cs <- capturing_update_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1) # file A: has an events.tsv sibling
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    windows <- gaze_stimulus_windows()
+    expect_equal(nrow(windows), 2)
+    expect_equal(windows$stimulus, c("bunny.avi", "elephant.avi"))
+
+    session$setInputs(gaze_stimulus_marker = "2") # choices are keyed by row index -- see gaze_stimulus_marker_ui's own comment (app.R)
+    session$setInputs(gaze_snap_to_stimulus = 1)
+
+    calls <- get("gaze_time_range", envir = cs$calls)
+    last_call <- calls[[length(calls)]]
+    expect_equal(as.numeric(last_call$value), c(500, 990)) # row 2 == elephant.avi's own [500, 990]
+  }, session = cs$session)
+})
+
+test_that("gaze_stimulus_windows()/gaze_stimulus_marker_ui degrade to NULL for a file with no events.tsv sibling at all", {
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 2) # file B: no events.tsv sibling
+    session$setInputs(gaze_time_range = c(2000, 2990))
+
+    expect_null(gaze_stimulus_windows())
   })
 })
 

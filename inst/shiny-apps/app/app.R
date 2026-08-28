@@ -486,6 +486,19 @@ ui <- navbarPage(
                 "locked to exact event boundaries."
               ),
               uiOutput("gaze_event_marker_ui"),
+              # "Jump to stimulus" (repo-owner follow-up request): a SEPARATE
+              # control from "Jump to event marker" above, not a replacement
+              # for it -- see derive_stimulus_windows()'s own header comment
+              # (analyze_helpers.R) for exactly how its semantics differ (one
+              # row per actual VideoStimulusStart/VideoStimulusEnd
+              # presentation, not one row per distinct event label collapsed
+              # across the whole file). Rendered only when this file actually
+              # has usable video-stimulus events -- the same adapter-aware
+              # degradation pattern gaze_event_marker_ui already uses, since
+              # plenty of real recordings (calibration-only, or a
+              # head-mounted adapter with no stimulus-marker integration)
+              # legitimately have none.
+              uiOutput("gaze_stimulus_marker_ui"),
               sliderInput(
                 "gaze_time_range", "Time range (ms)",
                 min = 0, max = 1, value = c(0, 1), step = 1, width = "100%"
@@ -513,10 +526,33 @@ ui <- navbarPage(
                   h4("Playback"),
                   actionButton("gaze_play_toggle", "Play"),
                   br(), br(),
+                  # Real-time-matched playback speed (repo-owner follow-up
+                  # request): scales the tick loop's per-tick advance in
+                  # analyze_helpers.R's "Real-time-matched playback" section
+                  # -- see resolve_playback_speed()/advance_gaze_playback_ms()
+                  # there for the actual arithmetic this control feeds.
+                  selectInput(
+                    "gaze_playback_speed", "Playback speed",
+                    choices = gaze_playback_speed_choices, selected = "1"
+                  ),
                   sliderInput(
                     "gaze_trail_length", "Trail length (samples)",
                     min = 10, max = 300, value = 90, step = 5, width = "100%"
-                  )
+                  ),
+                  # Draggable timeline/playback scrubber (repo-owner
+                  # follow-up request): bidirectionally bound to the server's
+                  # gaze_anim_ms() -- pushed to this widget every tick via
+                  # updateSliderInput() while playing, and read back via
+                  # input$gaze_scrub's own observer (app.R server) when the
+                  # user drags it, whether playback is currently running
+                  # (seeking continues playback from the new position) or
+                  # paused (dragging shows the animated onion-skin frame at
+                  # that exact position -- see gaze_scrub_active() below).
+                  sliderInput(
+                    "gaze_scrub", "Playback position (ms)",
+                    min = 0, max = 1, value = 0, step = 1, width = "100%"
+                  ),
+                  uiOutput("gaze_now_playing_ui")
                 ),
                 column(9, plotlyOutput("gaze_trajectory_plot", height = "600px"))
               )
@@ -2187,45 +2223,106 @@ server <- function(input, output, session) {
   # corners and clicked "Set AOI".
   aoi_polygon <- reactiveVal(NULL)
 
-  # --- Onion-skin playback state (repo-owner feature request) ---
+  # --- Onion-skin playback state (repo-owner feature request; reworked for
+  # real-time-matched playback speed, a draggable scrubber, and stimulus
+  # navigation -- a direct repeat-visit follow-up) ---
   #
   # gaze_anim_playing: TRUE while the animated view is actively advancing,
-  # FALSE in every other state (initial load, paused, or reset). This is the
-  # single source of truth output$gaze_trajectory_plot below branches on --
-  # FALSE always means "show the plain, unchanged static
-  # build_gaze_trajectory_plot() view, exactly what this tab showed before
-  # this feature existed" (the chosen, documented behavior for Pause: it
-  # reverts to the static view rather than freezing the last animated
-  # frame, so "not playing" only ever has one visual meaning in this tab).
+  # FALSE in every other state (initial load, paused, or reset). This is
+  # ONE of the two conditions output$gaze_trajectory_plot below branches
+  # on -- see gaze_scrub_active() below for the other (a paused-but-scrubbed
+  # position also renders the animated view; see that reactiveVal's own
+  # comment for why "Pause reverts to static" alone is no longer the whole
+  # rule).
   #
-  # gaze_anim_index: a 1-based row position into
-  # prepare_gaze_trajectory_data()'s cleaned/sorted view of the CURRENT
-  # filtered_trajectory() window (analyze_helpers.R) -- the "current
-  # playback position" every animated frame is drawn relative to. Reset to 1
-  # (start of window) whenever the window/file/AOI changes, per the
-  # observeEvent() immediately below.
+  # gaze_anim_ms: the SINGLE source of truth for "current playback
+  # position" -- a virtual playback timestamp, in the same
+  # recordingTimestamp_ms units the loaded data itself uses, NOT a row
+  # index. The tick loop below, the draggable scrubber
+  # (input$gaze_scrub/output "gaze_scrub"), and the "now playing" stimulus
+  # label (output$gaze_now_playing_ui) all read from and write to this one
+  # reactiveVal, rather than tracking three independent notions of "current
+  # position" that could drift out of sync with each other (this feature's
+  # own explicit design requirement). gaze_anim_index below is a plain
+  # reactive DERIVED from this value, not a second, independently-advanced
+  # reactiveVal the way it was before this rework.
   gaze_anim_playing <- reactiveVal(FALSE)
-  gaze_anim_index <- reactiveVal(1L)
+  gaze_anim_ms <- reactiveVal(NULL)
 
-  # gaze_anim_tick_interval_ms / gaze_anim_step_samples: fixed playback
-  # tuning constants, not exposed as controls (only "Trail length" is, per
-  # this feature's spec) -- 150ms is comfortably inside the 100-250ms range
-  # that reads as smooth, watchable playback without visibly stuttering; 5
-  # samples/tick was chosen so a several-thousand-sample window animates
-  # through in a reviewable amount of time rather than crawling one sample
-  # at a time.
+  # gaze_scrub_active: TRUE only once the user has manually dragged the
+  # scrubber WHILE PAUSED (set in the input$gaze_scrub observer below), and
+  # reset to FALSE every time the Play/Pause toggle itself changes
+  # gaze_anim_playing() (so pressing Pause always reverts to the plain
+  # static view first, matching this feature's original, already-shipped
+  # behavior) as well as by the window/file/AOI reset observer below. This
+  # is what extends "Pause reverts to static" into "Pause reverts to static
+  # UNLESS the user then deliberately scrubs to a specific position" --
+  # a paused-and-never-scrubbed view is unaffected by this feature at all.
+  gaze_scrub_active <- reactiveVal(FALSE)
+
+  # gaze_scrub_server_value: the last gaze_anim_ms() value THIS SERVER
+  # pushed to the "gaze_scrub" widget via updateSliderInput() (see the
+  # observeEvent(gaze_anim_ms(), ...) below) -- read back by the
+  # input$gaze_scrub observer further down to distinguish a genuine
+  # user-initiated drag from the client-side echo of our own server-driven
+  # update (updateSliderInput() changes the widget's value, which can in
+  # turn re-fire the widget's own input$ change event -- without this
+  # guard, every tick's server -> client position push would loop straight
+  # back into "the user scrubbed", spuriously flipping gaze_scrub_active()
+  # on during ordinary playback).
+  gaze_scrub_server_value <- reactiveVal(NULL)
+
+  # gaze_anim_tick_interval_ms: the tick loop's invalidateLater() scheduling
+  # cadence in milliseconds -- comfortably inside the 100-250ms range that
+  # reads as smooth, watchable polling without visibly stuttering the
+  # scrubber/label updates. Also doubles as the assumed real-elapsed-ms
+  # value the tick loop's speed-multiplier arithmetic is applied to (see the
+  # tick loop below): since invalidateLater(gaze_anim_tick_interval_ms, ...)
+  # is what schedules each next tick, treating that same interval as "how
+  # much real time this tick represents" keeps the design simple and fully
+  # deterministic for tests driven by shiny::testServer()'s session$elapse()
+  # (which advances Shiny's simulated reactive clock by an exact requested
+  # amount, not actual measured wall-clock Sys.time() -- using a real
+  # Sys.time()-diff here instead would be marginally more precise against
+  # actual rendering jitter in a live browser, but not exercisable
+  # deterministically under that test harness).
   gaze_anim_tick_interval_ms <- 150
-  gaze_anim_step_samples <- 5L
 
   # gaze_prepared_df: prepare_gaze_trajectory_data()'s (analyze_helpers.R)
   # cleaned/sorted view of the current filtered_trajectory() window -- the
-  # same row ordering gaze_anim_index() indexes into, and the bound used
-  # below to know when playback has reached the end of the window (for the
-  # loop-back-to-start behavior chosen for "end of range", see the tick loop
-  # below). Recomputed only when filtered_trajectory() itself changes
-  # (slider drag or file switch), not on every animation tick.
+  # same row ordering gaze_anim_index() indexes into, and the source of the
+  # window's own [start_ms, end_ms] bounds (gaze_window_bounds() below).
+  # Recomputed only when filtered_trajectory() itself changes (slider drag
+  # or file switch), not on every animation tick.
   gaze_prepared_df <- reactive({
     prepare_gaze_trajectory_data(filtered_trajectory())
+  })
+
+  # gaze_window_bounds: the current window's [start_ms, end_ms], derived
+  # from gaze_prepared_df() -- the tick loop's loop-back-at-the-end bound
+  # and the scrubber's min/max, in one place so both always agree with each
+  # other and with what the trajectory plot itself is showing. NULL when
+  # there's nothing usable in the current window (mirrors
+  # gaze_prepared_df()'s own NULL/0-row case).
+  gaze_window_bounds <- reactive({
+    prepared <- gaze_prepared_df()
+    if (is.null(prepared) || nrow(prepared) == 0) {
+      return(NULL)
+    }
+    list(
+      start_ms = min(prepared$recordingTimestamp_ms),
+      end_ms = max(prepared$recordingTimestamp_ms)
+    )
+  })
+
+  # gaze_anim_index: a 1-based row position into gaze_prepared_df(), derived
+  # from gaze_anim_ms() via gaze_ms_to_index()'s binary search
+  # (analyze_helpers.R) -- the "current playback position" every animated
+  # frame (and the "now playing" label) is drawn relative to. A plain
+  # reactive, not a reactiveVal: gaze_anim_ms() is the only value this
+  # feature ever writes directly, per this section's header comment.
+  gaze_anim_index <- reactive({
+    gaze_ms_to_index(gaze_prepared_df(), gaze_anim_ms())
   })
 
   # gaze_bg_plot: the always-visible, very-low-opacity background trace for
@@ -2237,8 +2334,8 @@ server <- function(input, output, session) {
   # (analyze_helpers.R) for why this split exists: rebuilding this trace
   # from every usable row in the window on every ~150ms tick is exactly the
   # per-tick cost this split avoids -- only the small trail trace (at most
-  # gaze_trail_length rows) is rebuilt per tick, in output$gaze_trajectory_plot
-  # below.
+  # gaze_trail_length rows), the scrubber position, and the "now playing"
+  # label are cheap enough to recompute at real-time tick rates.
   gaze_bg_plot <- reactive({
     build_gaze_trajectory_background_trace(filtered_trajectory())
   })
@@ -2248,13 +2345,20 @@ server <- function(input, output, session) {
   # newly defined/cleared AOI all invalidate "the current playback position
   # means something", so continuing to play would either error against an
   # out-of-range index or silently animate a now-inconsistent window/AOI
-  # combination. Mirrors the observeEvent(selected_source_file(), ...) reset
-  # pattern immediately below (and is intentionally a SEPARATE observer from
-  # it, not merged in, since this one also needs to fire on slider moves and
-  # AOI changes that observer doesn't reset for).
+  # combination. Also resets gaze_scrub_active() (the scrubber's "show the
+  # animated frame while paused" flag) and gaze_anim_ms() itself back to the
+  # new window's start -- extending this same reset to the new
+  # real-time-playback state this rework introduces, per this feature's own
+  # "extend reset behavior consistently" requirement. Mirrors the
+  # observeEvent(selected_source_file(), ...) reset pattern immediately
+  # below (and is intentionally a SEPARATE observer from it, not merged in,
+  # since this one also needs to fire on slider moves and AOI changes that
+  # observer doesn't reset for).
   observeEvent(list(selected_source_file(), input$gaze_time_range, aoi_polygon()), {
     gaze_anim_playing(FALSE)
-    gaze_anim_index(1L)
+    gaze_scrub_active(FALSE)
+    bounds <- isolate(gaze_window_bounds())
+    gaze_anim_ms(if (is.null(bounds)) NULL else bounds$start_ms)
   }, ignoreInit = TRUE)
 
   # Play/Pause toggle: flips gaze_anim_playing() and, when transitioning INTO
@@ -2262,20 +2366,28 @@ server <- function(input, output, session) {
   # a genuine mid-window pause (gaze_anim_index() not yet at/past the end) --
   # so pressing Play again right after Pause continues from where playback
   # left off, while pressing Play after a completed/looped run (or on first
-  # use) starts over from sample 1. isolate()d reads throughout: this
-  # handler is meant to fire only on the button click, not re-run whenever
+  # use) starts over from the window's start_ms. Also resets
+  # gaze_scrub_active() to FALSE on every toggle, in EITHER direction --
+  # see that reactiveVal's own comment for why Pause always reverts to
+  # static first, with animated-while-paused requiring a fresh, deliberate
+  # scrub each time. isolate()d reads throughout: this handler is meant to
+  # fire only on the button click, not re-run whenever
   # gaze_anim_index()/gaze_prepared_df() themselves change.
   observeEvent(input$gaze_play_toggle, {
     now_playing <- !isTRUE(isolate(gaze_anim_playing()))
     if (now_playing) {
       prepared <- isolate(gaze_prepared_df())
-      if (is.null(prepared) || nrow(prepared) == 0) {
+      bounds <- isolate(gaze_window_bounds())
+      if (is.null(prepared) || nrow(prepared) == 0 || is.null(bounds)) {
         return(invisible(NULL))
       }
       if (isolate(gaze_anim_index()) >= nrow(prepared)) {
-        gaze_anim_index(1L)
+        gaze_anim_ms(bounds$start_ms)
       }
+      # else: resume from wherever gaze_anim_ms() currently sits (a genuine
+      # mid-window pause, or a paused-and-scrubbed position).
     }
+    gaze_scrub_active(FALSE)
     gaze_anim_playing(now_playing)
   })
 
@@ -2292,37 +2404,89 @@ server <- function(input, output, session) {
   # ever reached, and therefore only ever reschedules itself, while
   # gaze_anim_playing() is TRUE; the instant it flips FALSE (Pause, or the
   # reset observer above firing), the early return() is hit instead and this
-  # chain simply stops. gaze_prepared_df()/gaze_anim_index() are read via
-  # isolate() so this observer's only real reactive dependency is
+  # chain simply stops. gaze_window_bounds()/gaze_anim_ms()/speed are read
+  # via isolate() so this observer's only real reactive dependency is
   # gaze_anim_playing() itself, not a self-triggering loop off of the very
-  # index value it writes each tick.
+  # value it writes each tick.
   #
-  # End-of-range behavior (a deliberate choice, not left to error): when the
-  # next step would run past the end of the current window, playback loops
-  # back to sample 1 and keeps playing, rather than stopping -- chosen so a
-  # user reviewing a segment can watch it repeat without re-clicking Play
-  # each time it finishes.
+  # Real-time-matched advance (this rework's own core change): each tick
+  # advances gaze_anim_ms() by gaze_anim_tick_interval_ms * speed via
+  # advance_gaze_playback_ms() (analyze_helpers.R) -- at the default 1x
+  # speed and this tick loop's own 150ms scheduling interval, that is
+  # "150ms of recording time advances per ~150ms of real tick time", i.e.
+  # real-time-matched playback; 2x/0.5x scale that ratio directly via
+  # resolve_playback_speed(input$gaze_playback_speed). End-of-range behavior
+  # (a deliberate choice, not left to error) is unchanged from before this
+  # rework: when the advance would run past the end of the current window,
+  # playback loops back to the window's start_ms and keeps playing, rather
+  # than stopping.
   observe({
     if (!isTRUE(gaze_anim_playing())) {
       return(invisible(NULL))
     }
-    n <- isolate({
-      prepared <- gaze_prepared_df()
-      if (is.null(prepared)) 0L else nrow(prepared)
-    })
-    if (n == 0) {
+    bounds <- isolate(gaze_window_bounds())
+    if (is.null(bounds)) {
       gaze_anim_playing(FALSE)
       return(invisible(NULL))
     }
 
-    next_idx <- isolate(gaze_anim_index()) + gaze_anim_step_samples
-    if (next_idx > n) {
-      next_idx <- 1L
-    }
-    gaze_anim_index(next_idx)
+    speed <- resolve_playback_speed(isolate(input$gaze_playback_speed))
+    next_ms <- advance_gaze_playback_ms(
+      isolate(gaze_anim_ms()), gaze_anim_tick_interval_ms, speed,
+      bounds$start_ms, bounds$end_ms
+    )
+    gaze_anim_ms(next_ms)
 
     invalidateLater(gaze_anim_tick_interval_ms, session)
   })
+
+  # Pushes the CURRENT gaze_anim_ms() to the draggable "gaze_scrub" widget
+  # every time it changes (every tick while playing, and every reset/snap/
+  # Play-resume elsewhere in this section) -- the server -> client half of
+  # this scrubber's bidirectional binding, see the UI's own comment
+  # (app.R's tabPanel("Gaze Explorer", ...)) and the input$gaze_scrub
+  # observer below for the client -> server half.
+  # gaze_scrub_server_value() records what was just pushed, purely so that
+  # observer can tell "the client echoing our own update" apart from "the
+  # user actually dragged the handle" -- see that reactiveVal's own comment
+  # above.
+  observeEvent(gaze_anim_ms(), {
+    ms <- gaze_anim_ms()
+    bounds <- isolate(gaze_window_bounds())
+    if (is.null(ms) || is.null(bounds)) {
+      return(invisible(NULL))
+    }
+    updateSliderInput(session, "gaze_scrub", min = bounds$start_ms, max = bounds$end_ms, value = ms)
+    gaze_scrub_server_value(ms)
+  }, ignoreNULL = FALSE, ignoreInit = TRUE)
+
+  # input$gaze_scrub observer: the client -> server half of the scrubber's
+  # binding -- a genuine user drag sets gaze_anim_ms() directly (so the tick
+  # loop, if currently running, continues advancing from the new position on
+  # its very next scheduled tick: "seeking immediately continues playback
+  # from the new position", this feature's own requirement) and, only when
+  # NOT currently playing, flips gaze_scrub_active() TRUE so
+  # output$gaze_trajectory_plot below renders the animated frame at this
+  # exact scrubbed position rather than the plain static view ("dragging it
+  # should show the animated onion-skin frame at that exact position", this
+  # feature's own requirement for the paused case). The all.equal() guard
+  # against gaze_scrub_server_value() discards updates that are just the
+  # client echoing a value THIS server just pushed via updateSliderInput()
+  # above (see that reactiveVal's own comment) -- without it, ordinary tick
+  # -driven playback would spuriously look like a continuous user scrub.
+  observeEvent(input$gaze_scrub, {
+    incoming <- input$gaze_scrub
+    last_server_value <- isolate(gaze_scrub_server_value())
+    if (!is.null(incoming) && !is.null(last_server_value) &&
+      isTRUE(all.equal(incoming, last_server_value, tolerance = 1e-6))) {
+      return(invisible(NULL))
+    }
+    req(incoming)
+    gaze_anim_ms(incoming)
+    if (!isTRUE(isolate(gaze_anim_playing()))) {
+      gaze_scrub_active(TRUE)
+    }
+  }, ignoreInit = TRUE)
 
   # Resets every piece of this tab's per-file state -- the time-range
   # slider's bounds and any previously defined AOI -- the instant a
@@ -2334,7 +2498,11 @@ server <- function(input, output, session) {
   # previous recording's slider bounds (meaningless against a new file's own
   # timestamp range) and, worse, its AOI polygon -- drawn in one recording's
   # gaze-coordinate space, silently reapplied as if it still meant something
-  # against a different recording's data.
+  # against a different recording's data. The list(...) reset observer above
+  # already fires off this same selected_source_file() change (it's part of
+  # its own trigger list) and handles the playback-state reset; this
+  # observer's own job is strictly the slider-bounds/AOI reset it already
+  # had before this rework.
   observeEvent(selected_source_file(), {
     aoi_polygon(NULL)
 
@@ -2399,6 +2567,68 @@ server <- function(input, output, session) {
     updateSliderInput(session, "gaze_time_range", value = c(row$start_ms[1], row$end_ms[1]))
   })
 
+  # gaze_stimulus_windows: derive_stimulus_windows()'s (analyze_helpers.R)
+  # output for the currently loaded file's events, or NULL when this file
+  # has no usable VideoStimulusStart/VideoStimulusEnd pairs -- a real,
+  # expected case (a calibration-only recording, a non-video task, or a
+  # head-mounted adapter with no stimulus-marker integration at all; see
+  # gaze_event_windows() above for the same degradation applied to the
+  # generic event-marker control).
+  gaze_stimulus_windows <- reactive({
+    result <- gaze_traj_result()
+    if (is.null(result) || !isTRUE(result$ok)) {
+      return(NULL)
+    }
+    derive_stimulus_windows(result$events)
+  })
+
+  # gaze_stimulus_marker_ui: "Jump to stimulus", a SEPARATE control from
+  # gaze_event_marker_ui above -- see derive_stimulus_windows()'s own header
+  # comment (analyze_helpers.R) and this tab's own UI comment for exactly
+  # how the two differ. Choices are keyed by ROW INDEX into
+  # gaze_stimulus_windows(), not by stimulus name -- the same stimulus name
+  # can legitimately appear as two or more separate, non-contiguous
+  # presentation rows (per derive_stimulus_windows()'s own design), and
+  # keying by name would collide two genuinely different rows onto one
+  # dropdown value. Rendered as NULL (nothing at all, not an explanatory
+  # message) when this file has no usable stimulus windows -- unlike
+  # gaze_event_marker_ui's explicit "No event markers found..." message,
+  # since a generic recording having no VIDEO-stimulus events specifically
+  # is common enough (any non-video task) that a permanent explanatory line
+  # here would be more noise than signal; the file already has
+  # gaze_event_marker_ui's own message covering "no event markers at all"
+  # immediately above it.
+  output$gaze_stimulus_marker_ui <- renderUI({
+    windows <- gaze_stimulus_windows()
+    if (is.null(windows) || nrow(windows) == 0) {
+      return(NULL)
+    }
+    choices <- stats::setNames(
+      as.character(seq_len(nrow(windows))),
+      sprintf(
+        "%s (%.0f–%.0f ms, %.0f ms)",
+        windows$stimulus, windows$start_ms, windows$end_ms, windows$duration_ms
+      )
+    )
+    fluidRow(
+      column(8, selectInput("gaze_stimulus_marker", "Jump to stimulus", choices = choices)),
+      column(4, br(), actionButton("gaze_snap_to_stimulus", "Snap slider to this stimulus"))
+    )
+  })
+
+  # Snapping sets the slider's CURRENT value to the selected stimulus
+  # presentation's own [start_ms, end_ms] -- same "snap as a starting point,
+  # never a hard constraint" behavior as input$gaze_snap_to_marker above
+  # (the user can still drag either handle wider/narrower afterward).
+  observeEvent(input$gaze_snap_to_stimulus, {
+    windows <- gaze_stimulus_windows()
+    req(windows, input$gaze_stimulus_marker)
+    idx <- suppressWarnings(as.integer(input$gaze_stimulus_marker))
+    req(!is.na(idx), idx >= 1, idx <= nrow(windows))
+    row <- windows[idx, , drop = FALSE]
+    updateSliderInput(session, "gaze_time_range", value = c(row$start_ms[1], row$end_ms[1]))
+  })
+
   # filtered_trajectory: the loaded preproc data.frame narrowed to the
   # slider's current [start, end] -- the single reactive both the trajectory
   # plot and the AOI percentage readout below are built from, so they can
@@ -2419,18 +2649,23 @@ server <- function(input, output, session) {
   })
 
   # output$gaze_trajectory_plot: branches between the plain, unchanged
-  # static view (gaze_anim_playing() FALSE -- the only value it ever has
-  # outside of an active Play session, per the reset observer and Pause
-  # behavior documented above) and the animated onion-skin view. The
-  # animated branch reuses gaze_bg_plot()'s CACHED background trace and only
-  # rebuilds the small trail trace here, per-tick -- see this section's
-  # earlier header comment on why that split matters for a several-thousand-
-  # sample recording.
+  # static view and the animated onion-skin view. The animated view now
+  # renders whenever EITHER gaze_anim_playing() is TRUE OR gaze_scrub_active()
+  # is TRUE -- the latter added by this rework so a deliberate scrub while
+  # paused shows the animated frame at that exact position, per that
+  # reactiveVal's own comment above; a paused-and-never-scrubbed view is
+  # still exactly the plain static build_gaze_trajectory_plot() view this
+  # tab showed before either the original onion-skin feature or this
+  # rework. The animated branch reuses gaze_bg_plot()'s CACHED background
+  # trace and only rebuilds the small trail trace here, per-tick -- see this
+  # section's earlier header comment on why that split matters for a
+  # several-thousand-sample recording.
   output$gaze_trajectory_plot <- renderPlotly({
     df <- filtered_trajectory()
     validate(need(nrow(df) > 0, "No gaze samples in the current time range."))
 
-    if (!isTRUE(gaze_anim_playing())) {
+    show_animated <- isTRUE(gaze_anim_playing()) || isTRUE(gaze_scrub_active())
+    if (!show_animated) {
       plot <- build_gaze_trajectory_plot(df, aoi_polygon())
       validate(need(!is.null(plot), "No usable (non-missing) gaze coordinates in the current time range."))
       return(plot)
@@ -2452,6 +2687,31 @@ server <- function(input, output, session) {
       yaxis = list(title = "gazeY.preprocessed_px"),
       showlegend = TRUE
     )
+  })
+
+  # output$gaze_now_playing_ui: the "now playing" stimulus label (repo-owner
+  # follow-up request) -- reads current_stimulus_label() (analyze_helpers.R)
+  # for whatever row gaze_anim_index() currently points at, live, on every
+  # tick/scrub the same way the trail trace itself updates. Shown only while
+  # the animated view is actually in view (same show_animated condition as
+  # output$gaze_trajectory_plot above) -- there is no "current position" to
+  # report against the plain static view. Degrades to a neutral placeholder,
+  # never blank/erroring, both when this file has no stimulus-name column at
+  # all (find_stimulus_name_column() found nothing -- a non-video task, or
+  # an export that never captured this passthrough column, see that
+  # function's own comment on why no single column name can be assumed) and
+  # when the column exists but is NA/blank at this specific row (e.g. a
+  # calibration segment of an otherwise video-based recording).
+  output$gaze_now_playing_ui <- renderUI({
+    show_animated <- isTRUE(gaze_anim_playing()) || isTRUE(gaze_scrub_active())
+    if (!show_animated) {
+      return(NULL)
+    }
+    label <- current_stimulus_label(gaze_prepared_df(), gaze_anim_index())
+    if (is.null(label)) {
+      return(div(class = "text-muted", "Now playing: (no stimulus metadata for this recording)"))
+    }
+    div(strong("Now playing: "), label)
   })
 
   # gaze_aoi_result: compute_aoi_percent()'s (analyze_helpers.R) output for
