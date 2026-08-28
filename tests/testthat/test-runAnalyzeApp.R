@@ -2918,6 +2918,79 @@ test_that("build_gaze_trajectory_animation_plot returns NULL when there's nothin
 })
 
 # ---------------------------------------------------------------------------
+# build_gaze_trajectory_plot() (the static "Gaze path" view) and its
+# underlying gaze_static_trace_spec()/gaze_aoi_trace_spec() trace specs
+# (analyze_helpers.R "Streaming rework" section) -- had no direct unit test
+# before the plotlyProxy streaming rework (only ever exercised indirectly via
+# session$getOutput("gaze_trajectory_plot") in the live app.R tests further
+# down, which after that rework only cover the WINDOW-keyed rendering, not
+# per-tick content). build_gaze_trajectory_plot() is unchanged, thin-wrapper
+# behavior on top of those specs, so these tests cover both directly.
+# ---------------------------------------------------------------------------
+
+test_that("build_gaze_trajectory_plot returns a single 'Gaze path' trace covering every usable row when no AOI is given", {
+  skip_if_not_installed("plotly")
+
+  plot <- build_gaze_trajectory_plot(animation_test_df())
+  built <- plotly::plotly_build(plot)
+
+  expect_length(built$x$data, 1)
+  trace <- built$x$data[[1]]
+  expect_equal(trace$name, "Gaze path")
+  expect_equal(as.numeric(trace$x), c(1, 2, 3, 4, 5))
+  expect_equal(as.numeric(trace$y), c(1, 2, 3, 4, 5))
+})
+
+test_that("build_gaze_trajectory_plot adds a second, closed 'AOI' trace when a usable AOI polygon is given", {
+  skip_if_not_installed("plotly")
+
+  aoi <- list(x = c(0, 10, 10, 0), y = c(0, 0, 10, 10))
+  plot <- build_gaze_trajectory_plot(animation_test_df(), aoi = aoi)
+  built <- plotly::plotly_build(plot)
+
+  expect_length(built$x$data, 2)
+  expect_equal(built$x$data[[1]]$name, "Gaze path")
+  aoi_trace <- built$x$data[[2]]
+  expect_equal(aoi_trace$name, "AOI")
+  expect_equal(as.numeric(aoi_trace$x), c(0, 10, 10, 0, 0)) # closed back to the first vertex
+})
+
+test_that("build_gaze_trajectory_plot returns NULL when there's nothing usable in df, and ignores an unusable (< 3 vertex) AOI", {
+  skip_if_not_installed("plotly")
+
+  expect_null(build_gaze_trajectory_plot(data.frame(a = 1)))
+
+  no_aoi_trace <- plotly::plotly_build(
+    build_gaze_trajectory_plot(animation_test_df(), aoi = list(x = c(0, 10), y = c(0, 10)))
+  )
+  expect_length(no_aoi_trace$x$data, 1)
+})
+
+test_that("gaze_trail_trace_spec's trail immediately reflects a changed trail_length at a fixed current_index", {
+  # The direct pure-function replacement for what used to be asserted via
+  # session$getOutput("gaze_trajectory_plot") before the plotlyProxy
+  # streaming rework (see the live "changing the trail length while playing"
+  # test further down, which now only asserts on the reactiveVal-level
+  # not-stopped/not-reset behavior and the restyle proxy payload, not on
+  # trace content computed here) -- current_index = 16 with a 20-row window,
+  # mirroring that live test's own index/trail_length numbers.
+  skip_if_not_installed("plotly")
+
+  df <- data.frame(
+    recordingTimestamp_ms = seq(0, 190, by = 10),
+    gazeX.preprocessed_px = seq_len(20),
+    gazeY.preprocessed_px = seq_len(20)
+  )
+
+  wide <- gaze_trail_trace_spec(df, current_index = 16, trail_length = 90)
+  expect_equal(length(wide$x), 16) # min(current_index=16, trail_length=90) == 16
+
+  narrow <- gaze_trail_trace_spec(df, current_index = 16, trail_length = 5)
+  expect_equal(length(narrow$x), 5) # min(current_index=16, trail_length=5) == 5
+  expect_equal(as.numeric(narrow$x), 12:16) # the 5 rows immediately up to current_index
+})
+
+# ---------------------------------------------------------------------------
 # Real-time-matched playback: resolve_playback_speed(), advance_gaze_playback_ms(),
 # gaze_ms_to_index() -- the Shiny-free helpers app.R's tick loop composes
 # each tick, see analyze_helpers.R's "Real-time-matched playback" section
@@ -3401,17 +3474,47 @@ build_gaze_anim_fixture <- function() {
   normalizePath(dir, winslash = "/", mustWork = TRUE)
 }
 
-# gaze_trace_names: the "name" of each trace in a session$getOutput()'d
-# renderPlotly output, for asserting on which BRANCH of
-# output$gaze_trajectory_plot rendered without depending on plotly's exact
-# internal JSON layout beyond that one field -- build_gaze_trajectory_plot()
-# (static) names its single trace "Gaze path" (analyze_helpers.R), while the
-# animated branch's two traces are named "All samples (context)" and
-# "Current position (trail)" (also analyze_helpers.R) -- confirmed directly
-# against this app's real output before relying on it here.
-gaze_trace_names <- function(plot_output) {
-  parsed <- jsonlite::fromJSON(plot_output, simplifyVector = FALSE)
-  vapply(parsed$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
+# capturing_proxy_session: a MockShinySession whose sendCustomMessage() -- a
+# documented no-op in a bare MockShinySession, same as sendInputMessage()
+# (see capturing_update_session()'s own comment above, applied here to a
+# different method) -- instead records every "plotly-calls" custom message
+# (the exact message type plotly::plotlyProxyInvoke() sends -- confirmed
+# directly against that function's own source: `p$session$sendCustomMessage(
+# "plotly-calls", list(id = p$id, method = method, args = list(...)))`) into
+# `calls$log`, in send order. This is the streaming rework's actual
+# server -> client channel for the mode-transition (deleteTraces/addTraces)
+# and per-tick trail (restyle) proxy calls (app.R, "Streaming rework"
+# section) -- output$gaze_trajectory_plot's own renderPlotly() no longer
+# reflects any of this per-tick/per-mode-switch content (see that output's
+# own comment, app.R), so this is the only way to assert on it from a test
+# without a real browser.
+capturing_proxy_session <- function() {
+  sess <- shiny::MockShinySession$new()
+  calls <- new.env(parent = emptyenv())
+  calls$log <- list()
+  sess$sendCustomMessage <- function(type, message) {
+    if (identical(type, "plotly-calls")) {
+      calls$log[[length(calls$log) + 1]] <- message
+    }
+    invisible()
+  }
+  list(session = sess, calls = calls)
+}
+
+# proxy_calls_by_method: every captured "plotly-calls" message (see
+# capturing_proxy_session() above) whose $method matches (e.g.
+# "addTraces"/"deleteTraces"/"restyle"), in send order.
+proxy_calls_by_method <- function(cs, method) {
+  Filter(function(m) identical(m$method, method), cs$calls$log)
+}
+
+# proxy_trace_names: the "name" field of every trace-spec list inside an
+# addTraces call's payload (`msg$args[[1]]`, per plotlyProxyInvoke(proxy,
+# "addTraces", new_traces)'s own `args = list(...)` wrapping) -- the proxy-
+# call analog of the old (pre-rework) gaze_trace_names() helper, which read
+# trace names out of a full renderPlotly() JSON payload instead.
+proxy_trace_names <- function(add_traces_call) {
+  vapply(add_traces_call$args[[1]], function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
 }
 
 test_that("clicking Play advances gaze_anim_ms()/gaze_anim_index() in real-time-matched steps, wrapping back to the window start at the end", {
@@ -3458,13 +3561,23 @@ test_that("clicking Play advances gaze_anim_ms()/gaze_anim_index() in real-time-
   })
 })
 
-test_that("clicking Pause reverts output$gaze_trajectory_plot to the plain static (non-animated) view", {
+test_that("clicking Play switches gaze_view_mode() to animated via an addTraces proxy call, and Pause reverts to static via deleteTraces+addTraces", {
+  # The plotlyProxy-streaming-rework replacement for the pre-rework version
+  # of this test, which read trace names straight out of
+  # session$getOutput("gaze_trajectory_plot") -- no longer possible since
+  # that output is now keyed only on the window, not on
+  # gaze_anim_playing()/gaze_scrub_active() (see that output's own comment,
+  # app.R). Asserts on the SAME "which view is showing" question via the two
+  # mechanisms that actually carry it now: gaze_view_mode() (server-side
+  # bookkeeping) and the deleteTraces/addTraces payloads the mode-transition
+  # observer sends over the plotly proxy (client-side content).
   skip_on_cran()
   skip_if_not_installed("plotly")
 
   dir <- build_gaze_anim_fixture()
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_proxy_session()
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
@@ -3472,17 +3585,34 @@ test_that("clicking Pause reverts output$gaze_trajectory_plot to the plain stati
     session$setInputs(qc_table_rows_selected = 1)
     session$setInputs(gaze_time_range = c(0, 990))
 
+    expect_equal(gaze_view_mode(), "static")
+
     session$setInputs(gaze_play_toggle = 1) # Play
-    playing_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
-    expect_true("Current position (trail)" %in% playing_names)
-    expect_false("Gaze path" %in% playing_names)
+    expect_true(gaze_anim_playing())
+    expect_equal(gaze_view_mode(), "animated")
+
+    add_calls <- proxy_calls_by_method(cs, "addTraces")
+    expect_length(add_calls, 1)
+    expect_equal(proxy_trace_names(add_calls[[1]]), c("All samples (context)", "Current position (trail)"))
+    # entering animated mode from static (1 existing trace, no AOI) deletes
+    # just that one trace first -- see the mode-transition observer's own
+    # trace-order/index invariant comment (app.R).
+    delete_calls <- proxy_calls_by_method(cs, "deleteTraces")
+    expect_length(delete_calls, 1)
+    expect_equal(delete_calls[[1]]$args[[1]], list(0))
 
     session$setInputs(gaze_play_toggle = 1) # Pause
     expect_false(gaze_anim_playing())
-    paused_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
-    expect_true("Gaze path" %in% paused_names)
-    expect_false("Current position (trail)" %in% paused_names)
-  })
+    expect_equal(gaze_view_mode(), "static")
+
+    add_calls <- proxy_calls_by_method(cs, "addTraces")
+    expect_length(add_calls, 2)
+    expect_equal(proxy_trace_names(add_calls[[2]]), "Gaze path")
+    delete_calls <- proxy_calls_by_method(cs, "deleteTraces")
+    expect_length(delete_calls, 2)
+    # leaving animated mode (2 traces: background + trail, no AOI) deletes both.
+    expect_equal(delete_calls[[2]]$args[[1]], list(0, 1))
+  }, session = cs$session)
 })
 
 test_that("moving the time-range slider while playing stops playback rather than silently animating against a now-stale window", {
@@ -3579,13 +3709,26 @@ test_that("defining or clearing an AOI while playing stops playback", {
   })
 })
 
-test_that("changing the trail length while playing does NOT stop playback, and the rendered trail trace reflects the new length", {
+test_that("changing the trail length while playing does NOT stop playback, and pushes a restyle proxy call reflecting the new length", {
+  # The plotlyProxy-streaming-rework replacement for the pre-rework version
+  # of this test, which parsed trail-trace content straight out of
+  # session$getOutput("gaze_trajectory_plot") -- no longer possible for the
+  # SAME reason as the Play/Pause test above (that output no longer carries
+  # per-tick trail content at all). The exact "does the trail reflect a
+  # given trail_length at a given current_index" math is now covered as a
+  # pure function above (gaze_trail_trace_spec()); this test instead
+  # confirms the LIVE APP WIRING -- gaze_push_trail_restyle()'s
+  # observeEvent(input$gaze_trail_length, ...) -- actually fires a restyle
+  # proxy call with that same trail content immediately on a mid-play
+  # trail-length edit, at trace index 1 (see the mode-transition observer's
+  # own trace-order invariant comment, app.R).
   skip_on_cran()
   skip_if_not_installed("plotly")
 
   dir <- build_gaze_anim_fixture()
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_proxy_session()
 
   shiny::testServer(analyze_app_dir, {
     session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
@@ -3595,26 +3738,23 @@ test_that("changing the trail length while playing does NOT stop playback, and t
 
     session$setInputs(gaze_play_toggle = 1) # immediate step: ms == 150, index == 16
     expect_equal(gaze_anim_index(), 16L)
-
-    parsed_before <- jsonlite::fromJSON(session$getOutput("gaze_trajectory_plot"), simplifyVector = FALSE)
-    names_before <- vapply(parsed_before$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
-    trail_before <- parsed_before$x$data[[which(names_before == "Current position (trail)")]]
-    expect_equal(length(trail_before$x), 16) # min(current_index, trail_length=90) == 16
+    expect_equal(gaze_view_mode(), "animated")
 
     session$setInputs(gaze_trail_length = 5)
-    expect_true(gaze_anim_playing()) # NOT a reset trigger, unlike the 3 tests above
+    expect_true(gaze_anim_playing()) # NOT a reset trigger, unlike the reset-observer tests above
     expect_equal(gaze_anim_index(), 16L) # index itself untouched by this change
 
-    parsed_after <- jsonlite::fromJSON(session$getOutput("gaze_trajectory_plot"), simplifyVector = FALSE)
-    names_after <- vapply(parsed_after$x$data, function(tr) if (is.null(tr$name)) "" else tr$name, character(1))
-    trail_after <- parsed_after$x$data[[which(names_after == "Current position (trail)")]]
-    expect_equal(length(trail_after$x), 5) # min(current_index=16, trail_length=5) == 5
+    restyle_calls <- proxy_calls_by_method(cs, "restyle")
+    expect_true(length(restyle_calls) >= 1)
+    last_restyle <- restyle_calls[[length(restyle_calls)]]
+    expect_equal(last_restyle$args[[2]], 1L) # always targets trace index 1 (the trail trace)
+    expect_equal(length(last_restyle$args[[1]]$x[[1]]), 5) # min(current_index=16, trail_length=5) == 5
 
     # ...and it keeps ticking normally afterward.
     session$elapse(150)
     expect_equal(gaze_anim_ms(), 300)
     expect_equal(gaze_anim_index(), 31L)
-  })
+  }, session = cs$session)
 })
 
 test_that("pausing mid-playback then pressing Play again resumes from the paused position rather than restarting at the window start", {
@@ -3787,10 +3927,10 @@ test_that("dragging the scrubber while playing seeks gaze_anim_ms() and playback
     session$setInputs(gaze_play_toggle = 1) # immediate step: ms == 150
     expect_equal(gaze_anim_ms(), 150)
 
-    # A genuine user drag to 500 -- distinct from the 150 the server itself
-    # most recently pushed to this widget, so it is NOT mistaken for an echo
-    # of the server's own update (see gaze_scrub_server_value()'s comment,
-    # app.R).
+    # A genuine user drag to 500 -- distinct from every value the server
+    # itself has recently pushed to this widget (just 150 so far), so it is
+    # NOT mistaken for an echo of the server's own update (see
+    # gaze_scrub_recent_pushed()'s own comment, app.R).
     session$setInputs(gaze_scrub = 500)
     expect_equal(gaze_anim_ms(), 500)
     expect_equal(gaze_anim_index(), 51L)
@@ -3805,7 +3945,20 @@ test_that("dragging the scrubber while playing seeks gaze_anim_ms() and playback
   })
 })
 
-test_that("dragging the scrubber while paused shows the animated onion-skin frame at that exact position, without starting playback", {
+test_that("an echoed value matching an OLDER (not just the most recently pushed) scrub push is still discarded as an echo, not misread as a backward user scrub", {
+  # The actual regression test for the repo-owner-reported "scrubber
+  # periodically jumps backward to earlier frames" bug: the root cause was
+  # comparing an incoming input$gaze_scrub value against only the SINGLE
+  # most-recently-pushed value (gaze_scrub_server_value(), now gone) -- a
+  # late-arriving echo of an OLDER push would then fail that comparison and
+  # get misread as a genuine user drag, snapping gaze_anim_ms() backward.
+  # gaze_scrub_recent_pushed() (app.R) fixes this by remembering the last
+  # gaze_scrub_echo_buffer_size (10) pushes, not just the latest one. This
+  # test plays for 6 ticks -- at the default gaze_scrub_push_every_n_ticks
+  # (3), that pushes exactly twice (at tick 3 and tick 6, see the push-
+  # throttling test below for the mechanics) -- then echoes the OLDER (tick
+  # 3) pushed value back in while gaze_anim_ms() has already moved on to the
+  # tick-6 position, and confirms playback does NOT snap backward to it.
   skip_on_cran()
   skip_if_not_installed("plotly")
 
@@ -3819,11 +3972,161 @@ test_that("dragging the scrubber while paused shows the animated onion-skin fram
     session$setInputs(qc_table_rows_selected = 1)
     session$setInputs(gaze_time_range = c(0, 990))
 
+    # Setting gaze_time_range itself already triggers one immediate,
+    # unthrottled push (gaze_anim_playing() is still FALSE at that point) of
+    # this window's own start_ms (0) -- see the push observer's own "every
+    # push outside ordinary mid-play ticks... happens immediately" comment
+    # (app.R). recent_pushed starts as [0], not empty, going into Play.
+    expect_equal(gaze_scrub_recent_pushed(), 0)
+
+    session$setInputs(gaze_play_toggle = 1) # tick 1: ms == 150 (immediate first step)
+    session$elapse(150) # tick 2: ms == 300
+    session$elapse(150) # tick 3: ms == 450 -- a push (3rd tick): recent_pushed == [0, 450]
+    session$elapse(150) # tick 4: ms == 600
+    session$elapse(150) # tick 5: ms == 750
+    session$elapse(150) # tick 6: ms == 900 -- a push (6th tick): recent_pushed == [0, 450, 900]
+    expect_equal(gaze_anim_ms(), 900)
+    expect_equal(gaze_scrub_recent_pushed(), c(0, 450, 900))
+
+    # A late echo of the OLDER (tick 3) pushed value, arriving after the
+    # server has already moved on to (and pushed) 900 -- exactly the
+    # "delayed round trip" scenario that caused the backward-jump bug.
+    session$setInputs(gaze_scrub = 450)
+
+    expect_equal(gaze_anim_ms(), 900) # NOT snapped back to 450
+    expect_true(gaze_anim_playing()) # still playing, uninterrupted
+    expect_false(gaze_scrub_active()) # not misread as a deliberate pause-and-scrub either
+
+    # ...and playback keeps advancing normally afterward, from 900 (not
+    # 450): 900 + 150 == 1050 runs past the window's 990ms end, so it loops
+    # back to the window start (0) rather than continuing past the end --
+    # see the wrap-around test above for the same rule.
+    session$elapse(150)
+    expect_equal(gaze_anim_ms(), 0)
+    expect_equal(gaze_anim_index(), 1L)
+  })
+})
+
+test_that("mid-play pushes to the scrubber widget are throttled to every 3rd tick, not every tick", {
+  # gaze_scrub_recent_pushed()'s length only grows on ticks THIS server
+  # actually pushed to the "gaze_scrub" widget -- see
+  # gaze_scrub_push_every_n_ticks's own comment (app.R) for why the tick
+  # loop's gaze_anim_ms() advance itself still happens every tick regardless
+  # (the trajectory plot's proxy-driven restyle is NOT throttled, only this
+  # scrubber-handle position push is).
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+    # Setting gaze_time_range itself already triggers one immediate,
+    # unthrottled push of this window's own start_ms (0) -- gaze_anim_playing()
+    # is still FALSE at that point, so the throttle doesn't apply yet (see
+    # the push observer's own "every push outside ordinary mid-play ticks...
+    # happens immediately" comment, app.R). recent_pushed starts as [0].
+    expect_equal(gaze_scrub_recent_pushed(), 0)
+
+    session$setInputs(gaze_play_toggle = 1) # tick 1: ms == 150 -- not a multiple of 3
+    expect_equal(gaze_scrub_recent_pushed(), 0) # unchanged -- throttled away
+
+    session$elapse(150) # tick 2: ms == 300 -- still not a multiple of 3
+    expect_equal(gaze_scrub_recent_pushed(), 0)
+
+    session$elapse(150) # tick 3: ms == 450 -- a push
+    expect_equal(gaze_scrub_recent_pushed(), c(0, 450))
+
+    session$elapse(150) # tick 4: ms == 600 -- not a push
+    expect_equal(gaze_scrub_recent_pushed(), c(0, 450))
+
+    session$elapse(150) # tick 5: ms == 750 -- not a push
+    expect_equal(gaze_scrub_recent_pushed(), c(0, 450))
+
+    session$elapse(150) # tick 6: ms == 900 -- a push
+    expect_equal(gaze_scrub_recent_pushed(), c(0, 450, 900))
+  })
+})
+
+test_that("gaze_view_mode() reverts to static (with no proxy call of its own) when the time-range window changes while animated", {
+  # The reset observer (observeEvent(list(selected_source_file(),
+  # input$gaze_time_range, aoi_polygon()), ...), app.R) sets
+  # gaze_view_mode('static') directly, itself -- by the time the mode-
+  # transition observer (keyed on gaze_anim_playing()/gaze_scrub_active())
+  # re-runs as a downstream effect of that SAME observer's
+  # gaze_anim_playing(FALSE) write, gaze_view_mode() already reads 'static',
+  # matching its own newly-computed target_mode ('static', since playback
+  # just stopped) -- so it issues no proxy call of its own. See that
+  # observer's own comment for why this matters: without it, the ordinary
+  # renderPlotly() rebuild (which independently, fully replaces the client's
+  # widget off the same window-change trigger) would race against a
+  # redundant deleteTraces/addTraces call against a widget that ISN'T what
+  # the proxy call's own trace-count bookkeeping assumed.
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_proxy_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+
+    session$setInputs(gaze_play_toggle = 1) # Play -> animated
+    expect_equal(gaze_view_mode(), "animated")
+    calls_after_play <- length(cs$calls$log)
+    expect_true(calls_after_play >= 1) # the addTraces call entering animated mode
+
+    session$setInputs(gaze_time_range = c(0, 500)) # move either handle while playing
+    expect_false(gaze_anim_playing())
+    expect_equal(gaze_view_mode(), "static")
+
+    # No NEW proxy calls attributable to the mode-transition observer for
+    # this reset -- the reset observer already synced gaze_view_mode()
+    # directly, and the ordinary renderPlotly() rebuild (not the proxy)
+    # handles the client's actual widget content here.
+    expect_equal(length(cs$calls$log), calls_after_play)
+  }, session = cs$session)
+})
+
+test_that("dragging the scrubber while paused switches gaze_view_mode() to animated without starting playback; Play issues no redundant proxy call, and Pause reverts to static", {
+  # The plotlyProxy-streaming-rework replacement for the pre-rework version
+  # of this test, which read trace names straight out of
+  # session$getOutput("gaze_trajectory_plot") -- see the "clicking Play"
+  # test above for why that no longer works. Also covers the mode-
+  # transition observer's own "does NOT redundantly fire when nothing
+  # actually needs to change" invariant (see that observer's own comment,
+  # app.R): pressing Play right after a paused scrub is a realistic case
+  # where BOTH gaze_anim_playing() and gaze_scrub_active() independently
+  # resolve to the SAME target_mode ("animated") the client is already
+  # showing, so no new deleteTraces/addTraces call should be issued.
+  skip_on_cran()
+  skip_if_not_installed("plotly")
+
+  dir <- build_gaze_anim_fixture()
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  path_segments <- rel_home_segments_p1007(dir)
+  cs <- capturing_proxy_session()
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(qc_table_rows_selected = 1)
+    session$setInputs(gaze_time_range = c(0, 990))
+
     # Never played: paused-and-never-scrubbed still shows the plain static
     # view, unaffected by this feature.
     expect_false(gaze_anim_playing())
-    static_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
-    expect_true("Gaze path" %in% static_names)
+    expect_equal(gaze_view_mode(), "static")
 
     # A genuine user drag to 400 -- distinct from the 0 the reset observer
     # most recently pushed (this window's own start_ms).
@@ -3832,20 +4135,28 @@ test_that("dragging the scrubber while paused shows the animated onion-skin fram
     expect_true(gaze_scrub_active())
     expect_equal(gaze_anim_ms(), 400)
     expect_equal(gaze_anim_index(), 41L)
+    expect_equal(gaze_view_mode(), "animated")
 
-    animated_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
-    expect_true("Current position (trail)" %in% animated_names)
-    expect_false("Gaze path" %in% animated_names)
+    add_calls <- proxy_calls_by_method(cs, "addTraces")
+    expect_length(add_calls, 1)
+    expect_equal(proxy_trace_names(add_calls[[1]]), c("All samples (context)", "Current position (trail)"))
 
-    # Pressing Play/Pause (the toggle itself) reverts to the plain static
-    # rule -- Pause always shows static first, per gaze_scrub_active()'s own
-    # comment (app.R) -- confirmed here via Play-then-Pause.
+    # Play: gaze_scrub_active() resets FALSE but gaze_anim_playing() flips
+    # TRUE, so target_mode is "animated" both before and after -- no new
+    # proxy call.
     session$setInputs(gaze_play_toggle = 1) # Play
+    expect_equal(gaze_view_mode(), "animated")
+    expect_length(proxy_calls_by_method(cs, "addTraces"), 1) # unchanged
+
+    # Pause always shows static first, per gaze_scrub_active()'s own comment
+    # (app.R) -- confirmed here via Play-then-Pause.
     session$setInputs(gaze_play_toggle = 1) # Pause
     expect_false(gaze_scrub_active())
-    reverted_names <- gaze_trace_names(session$getOutput("gaze_trajectory_plot"))
-    expect_true("Gaze path" %in% reverted_names)
-  })
+    expect_equal(gaze_view_mode(), "static")
+    add_calls <- proxy_calls_by_method(cs, "addTraces")
+    expect_length(add_calls, 2)
+    expect_equal(proxy_trace_names(add_calls[[2]]), "Gaze path")
+  }, session = cs$session)
 })
 
 # ---------------------------------------------------------------------------
