@@ -2227,6 +2227,29 @@ server <- function(input, output, session) {
   # real-time-matched playback speed, a draggable scrubber, and stimulus
   # navigation -- a direct repeat-visit follow-up) ---
   #
+  # Streaming rework (repo-owner live-testing follow-up: playback fell
+  # behind real time and stuttered/flickered, especially on a large file,
+  # and the scrubber periodically jumped backward): the root cause of the
+  # first two was output$gaze_trajectory_plot's renderPlotly() rebuilding
+  # the ENTIRE plot (re-fetching the cached background trace, rebuilding the
+  # trail trace, re-serializing the whole htmlwidget payload) on every
+  # ~150ms tick, since it depended on gaze_anim_index()/gaze_anim_ms() --
+  # when a rebuild takes longer than one tick interval (routine on a large
+  # file), invalidateLater()'s next tick is delayed, but the tick loop below
+  # still only advances the virtual playback clock by the nominal interval,
+  # so playback falls behind wall-clock time exactly when redraws are
+  # expensive. This rework keys output$gaze_trajectory_plot ONLY on the
+  # WINDOW (filtered_trajectory()/aoi_polygon()) -- see that output's own
+  # comment further down -- and instead pushes each tick's small trail-trace
+  # update via plotly::plotlyProxyInvoke(..., "restyle", ...) (see
+  # gaze_plotly_proxy/gaze_view_mode above and the mode-transition/restyle
+  # observers below), the same "render once, push cheap incremental updates
+  # via a proxy" shape this app's QC table tab already uses
+  # (DT::dataTableProxy()/DT::replaceData(), above). The third bug (backward
+  # jumps) was a separate echo-detection race in the scrubber's
+  # server<->client binding -- see gaze_scrub_recent_pushed's own comment
+  # above.
+  #
   # gaze_anim_playing: TRUE while the animated view is actively advancing,
   # FALSE in every other state (initial load, paused, or reset). This is
   # ONE of the two conditions output$gaze_trajectory_plot below branches
@@ -2260,17 +2283,52 @@ server <- function(input, output, session) {
   # a paused-and-never-scrubbed view is unaffected by this feature at all.
   gaze_scrub_active <- reactiveVal(FALSE)
 
-  # gaze_scrub_server_value: the last gaze_anim_ms() value THIS SERVER
-  # pushed to the "gaze_scrub" widget via updateSliderInput() (see the
-  # observeEvent(gaze_anim_ms(), ...) below) -- read back by the
-  # input$gaze_scrub observer further down to distinguish a genuine
-  # user-initiated drag from the client-side echo of our own server-driven
-  # update (updateSliderInput() changes the widget's value, which can in
-  # turn re-fire the widget's own input$ change event -- without this
-  # guard, every tick's server -> client position push would loop straight
-  # back into "the user scrubbed", spuriously flipping gaze_scrub_active()
-  # on during ordinary playback).
-  gaze_scrub_server_value <- reactiveVal(NULL)
+  # gaze_scrub_recent_pushed / gaze_scrub_echo_buffer_size: a ROLLING
+  # BUFFER (not just the single most-recently-pushed value) of gaze_anim_ms()
+  # values THIS SERVER has pushed to the "gaze_scrub" widget via
+  # updateSliderInput() (see the observeEvent(gaze_anim_ms(), ...) below) --
+  # read back by the input$gaze_scrub observer further down to distinguish a
+  # genuine user-initiated drag from the client-side echo of one of OUR OWN
+  # recent server-driven updates (updateSliderInput() changes the widget's
+  # value, which can in turn re-fire the widget's own input$ change event).
+  # A SINGLE remembered value is not enough to make this determination
+  # correctly: updateSliderInput() -> client echo is a round trip, and if
+  # the echo of one push doesn't arrive before this server has already
+  # pushed AGAIN (very plausible at the tick loop's ~150ms cadence,
+  # especially under any rendering/network latency), comparing only against
+  # "the latest" push misidentifies that now-stale echo as a genuine scrub
+  # and snaps playback backward to it -- this was the actual cause of the
+  # periodic backward jumps this buffer fixes. gaze_scrub_echo_buffer_size
+  # (10, ~1.5s of ticks at the default 150ms cadence, well past any
+  # realistic client round-trip delay) is how far back this buffer looks.
+  gaze_scrub_recent_pushed <- reactiveVal(numeric(0))
+  gaze_scrub_echo_buffer_size <- 10L
+
+  # gaze_scrub_push_every_n_ticks / gaze_scrub_tick_counter: throttles how
+  # often the tick loop's gaze_anim_ms() advance is actually pushed to the
+  # "gaze_scrub" widget WHILE PLAYING. Pushing on literally every ~150ms
+  # tick is both unnecessary (a draggable range slider's visible handle
+  # doesn't need to redraw faster than a couple of times a second to read as
+  # smooth -- the trajectory plot itself, updated via the proxy-based
+  # restyle below, still advances at the full tick rate) and independently
+  # shrinks the echo-detection race window above, since fewer pushes means
+  # fewer in-flight echoes for the buffer above to have to remember. Every
+  # push OUTSIDE ordinary mid-play ticks -- Pause, a deliberate
+  # scrub-while-paused, the window/file/AOI reset, a Play-resume -- still
+  # happens immediately/unthrottled (see the observer below).
+  gaze_scrub_push_every_n_ticks <- 3L
+  gaze_scrub_tick_counter <- reactiveVal(0L)
+
+  # gaze_plotly_proxy / gaze_view_mode: the plotly.js proxy for
+  # output$gaze_trajectory_plot, and which content the CLIENT's widget
+  # currently holds ("static", the plain build_gaze_trajectory_plot()
+  # trace(s), or "animated", the background context trace + trail trace) --
+  # see the mode-transition observer and the per-tick restyle observer below
+  # for how these two are used together to avoid a full renderPlotly()
+  # rebuild on every tick (this rework's actual fix for the flicker/falls-
+  # behind-real-time bug -- see this section's header comment).
+  gaze_plotly_proxy <- plotly::plotlyProxy("gaze_trajectory_plot", session)
+  gaze_view_mode <- reactiveVal("static")
 
   # gaze_anim_tick_interval_ms: the tick loop's invalidateLater() scheduling
   # cadence in milliseconds -- comfortably inside the 100-250ms range that
@@ -2325,21 +2383,6 @@ server <- function(input, output, session) {
     gaze_ms_to_index(gaze_prepared_df(), gaze_anim_ms())
   })
 
-  # gaze_bg_plot: the always-visible, very-low-opacity background trace for
-  # the CURRENT window -- built once per slider/file change via this
-  # reactive's own normal memoization (it depends only on
-  # filtered_trajectory(), never on gaze_anim_index()), then reused
-  # unmodified by every animation tick's frame below. See
-  # build_gaze_trajectory_background_trace()'s own comment
-  # (analyze_helpers.R) for why this split exists: rebuilding this trace
-  # from every usable row in the window on every ~150ms tick is exactly the
-  # per-tick cost this split avoids -- only the small trail trace (at most
-  # gaze_trail_length rows), the scrubber position, and the "now playing"
-  # label are cheap enough to recompute at real-time tick rates.
-  gaze_bg_plot <- reactive({
-    build_gaze_trajectory_background_trace(filtered_trajectory())
-  })
-
   # Stops/resets playback the instant the window this animation is playing
   # over becomes stale -- a different file, a moved time-range slider, or a
   # newly defined/cleared AOI all invalidate "the current playback position
@@ -2354,9 +2397,25 @@ server <- function(input, output, session) {
   # below (and is intentionally a SEPARATE observer from it, not merged in,
   # since this one also needs to fire on slider moves and AOI changes that
   # observer doesn't reset for).
+  #
+  # Also directly syncs gaze_view_mode("static") here, WITHOUT going through
+  # the proxy -- output$gaze_trajectory_plot below reruns a full
+  # renderPlotly() rebuild off these exact same three triggers (it's keyed
+  # on filtered_trajectory()/aoi_polygon(), which only change together with
+  # this observer's own trigger list), and that rebuild always produces the
+  # plain static content, so the client's widget is guaranteed to already
+  # match "static" by the time this flush completes. Setting it directly
+  # here (rather than leaving it to the mode-transition observer below, keyed
+  # on gaze_anim_playing()/gaze_scrub_active()) means that observer's own
+  # invalidation -- a downstream, same-flush effect of the gaze_anim_playing(
+  # FALSE) write on this line -- sees current_mode already "static" and
+  # therefore correctly issues NO redundant/conflicting proxy calls against a
+  # widget that just got fully replaced by the ordinary Shiny output-binding
+  # path instead.
   observeEvent(list(selected_source_file(), input$gaze_time_range, aoi_polygon()), {
     gaze_anim_playing(FALSE)
     gaze_scrub_active(FALSE)
+    gaze_view_mode("static")
     bounds <- isolate(gaze_window_bounds())
     gaze_anim_ms(if (is.null(bounds)) NULL else bounds$start_ms)
   }, ignoreInit = TRUE)
@@ -2440,24 +2499,45 @@ server <- function(input, output, session) {
     invalidateLater(gaze_anim_tick_interval_ms, session)
   })
 
-  # Pushes the CURRENT gaze_anim_ms() to the draggable "gaze_scrub" widget
-  # every time it changes (every tick while playing, and every reset/snap/
-  # Play-resume elsewhere in this section) -- the server -> client half of
-  # this scrubber's bidirectional binding, see the UI's own comment
-  # (app.R's tabPanel("Gaze Explorer", ...)) and the input$gaze_scrub
-  # observer below for the client -> server half.
-  # gaze_scrub_server_value() records what was just pushed, purely so that
-  # observer can tell "the client echoing our own update" apart from "the
-  # user actually dragged the handle" -- see that reactiveVal's own comment
-  # above.
+  # Pushes the CURRENT gaze_anim_ms() to the draggable "gaze_scrub" widget --
+  # the server -> client half of this scrubber's bidirectional binding, see
+  # the UI's own comment (app.R's tabPanel("Gaze Explorer", ...)) and the
+  # input$gaze_scrub observer below for the client -> server half. Every
+  # push outside ordinary mid-play ticks (not currently playing: a reset,
+  # snap, Play-resume, or a scrub-while-paused echo) happens immediately;
+  # while playing, only every gaze_scrub_push_every_n_ticks-th tick is
+  # actually pushed -- see that constant's own comment above for why.
+  # gaze_scrub_recent_pushed() records every value THIS observer actually
+  # pushes (not values it throttled away), so the input$gaze_scrub observer
+  # below can tell "the client echoing one of our own recent updates" apart
+  # from "the user actually dragged the handle" -- see that reactiveVal's
+  # own comment above.
   observeEvent(gaze_anim_ms(), {
     ms <- gaze_anim_ms()
     bounds <- isolate(gaze_window_bounds())
     if (is.null(ms) || is.null(bounds)) {
       return(invisible(NULL))
     }
+
+    playing <- isTRUE(isolate(gaze_anim_playing()))
+    should_push <- TRUE
+    if (playing) {
+      n <- isolate(gaze_scrub_tick_counter()) + 1L
+      gaze_scrub_tick_counter(n)
+      should_push <- (n %% gaze_scrub_push_every_n_ticks == 0L)
+    } else {
+      gaze_scrub_tick_counter(0L)
+    }
+    if (!should_push) {
+      return(invisible(NULL))
+    }
+
     updateSliderInput(session, "gaze_scrub", min = bounds$start_ms, max = bounds$end_ms, value = ms)
-    gaze_scrub_server_value(ms)
+    recent <- c(isolate(gaze_scrub_recent_pushed()), ms)
+    if (length(recent) > gaze_scrub_echo_buffer_size) {
+      recent <- utils::tail(recent, gaze_scrub_echo_buffer_size)
+    }
+    gaze_scrub_recent_pushed(recent)
   }, ignoreNULL = FALSE, ignoreInit = TRUE)
 
   # input$gaze_scrub observer: the client -> server half of the scrubber's
@@ -2469,16 +2549,20 @@ server <- function(input, output, session) {
   # output$gaze_trajectory_plot below renders the animated frame at this
   # exact scrubbed position rather than the plain static view ("dragging it
   # should show the animated onion-skin frame at that exact position", this
-  # feature's own requirement for the paused case). The all.equal() guard
-  # against gaze_scrub_server_value() discards updates that are just the
-  # client echoing a value THIS server just pushed via updateSliderInput()
-  # above (see that reactiveVal's own comment) -- without it, ordinary tick
-  # -driven playback would spuriously look like a continuous user scrub.
+  # feature's own requirement for the paused case). Discards updates that
+  # match ANY value still in gaze_scrub_recent_pushed()'s buffer -- not just
+  # the single most-recently-pushed one -- since those are just the client
+  # echoing one of OUR OWN recent server-driven updates above, not a genuine
+  # drag; see that reactiveVal's own comment for why comparing against only
+  # the latest push previously let a late-arriving echo be misidentified as
+  # a genuine scrub and snap playback backward (the periodic backward-jump
+  # bug this buffer fixes).
   observeEvent(input$gaze_scrub, {
     incoming <- input$gaze_scrub
-    last_server_value <- isolate(gaze_scrub_server_value())
-    if (!is.null(incoming) && !is.null(last_server_value) &&
-      isTRUE(all.equal(incoming, last_server_value, tolerance = 1e-6))) {
+    recent <- isolate(gaze_scrub_recent_pushed())
+    is_echo <- !is.null(incoming) && length(recent) > 0 &&
+      any(vapply(recent, function(v) isTRUE(all.equal(incoming, v, tolerance = 1e-6)), logical(1)))
+    if (is_echo) {
       return(invisible(NULL))
     }
     req(incoming)
@@ -2486,6 +2570,128 @@ server <- function(input, output, session) {
     if (!isTRUE(isolate(gaze_anim_playing()))) {
       gaze_scrub_active(TRUE)
     }
+  }, ignoreInit = TRUE)
+
+  # gaze_push_trail_restyle: pushes ONLY the trail trace's new x/y/marker/
+  # text data into the already-rendered widget via
+  # plotly::plotlyProxyInvoke(..., "restyle", ...) -- the actual per-tick fix
+  # for the "full renderPlotly() rebuild on every tick" root cause (see this
+  # section's header comment). A no-op unless the client is currently in
+  # "animated" mode. Relies on the trace-order invariant documented on the
+  # mode-transition observer below: the trail trace is always at (0-based)
+  # index 1 of the CURRENT widget whenever gaze_view_mode() == "animated" (0
+  # = the background context trace, 2 = the optional AOI overlay), so no
+  # separate index bookkeeping is needed here. Values inside restyle's update
+  # list are each wrapped in one extra list() layer -- plotly.js's restyle
+  # convention for an array-type attribute (x, y, text, marker.size,
+  # marker.color) targeting a SPECIFIC trace index rather than broadcasting
+  # across every trace in the figure.
+  gaze_push_trail_restyle <- function() {
+    if (!identical(isolate(gaze_view_mode()), "animated")) {
+      return(invisible(NULL))
+    }
+    df <- isolate(filtered_trajectory())
+    trail_length <- isolate(input$gaze_trail_length)
+    if (is.null(trail_length) || is.na(trail_length) || trail_length < 1) {
+      trail_length <- 90
+    }
+    spec <- gaze_trail_trace_spec(df, isolate(gaze_anim_index()), trail_length)
+    if (is.null(spec)) {
+      return(invisible(NULL))
+    }
+    plotly::plotlyProxyInvoke(
+      gaze_plotly_proxy, "restyle",
+      list(
+        x = list(spec$x), y = list(spec$y), text = list(spec$text),
+        "marker.size" = list(spec$marker$size), "marker.color" = list(spec$marker$color)
+      ),
+      1L
+    )
+    invisible(NULL)
+  }
+
+  # Runs gaze_push_trail_restyle() on every tick (gaze_anim_ms() change,
+  # unthrottled -- unlike the scrubber-position push above, this is the cheap
+  # incremental update the whole streaming rework exists to make possible at
+  # full tick rate) and immediately when the trail length control itself
+  # changes, so a mid-playback trail-length edit is reflected right away
+  # rather than waiting for the next tick.
+  observeEvent(gaze_anim_ms(), {
+    gaze_push_trail_restyle()
+  }, ignoreNULL = FALSE, ignoreInit = TRUE)
+
+  observeEvent(input$gaze_trail_length, {
+    gaze_push_trail_restyle()
+  }, ignoreInit = TRUE)
+
+  # Mode-transition observer: switches the CLIENT's rendered plot content
+  # between the static and animated view via the proxy -- addTraces()/
+  # deleteTraces(), NOT a full renderPlotly() rebuild -- whenever
+  # gaze_anim_playing()/gaze_scrub_active() together flip which view SHOULD
+  # be showing. This is the ONLY place that transition happens for a
+  # Play/Pause click or a scrub-while-paused, since neither touches
+  # filtered_trajectory()/aoi_polygon() (the only two things
+  # output$gaze_trajectory_plot's renderPlotly() below reruns for). For a
+  # window/file/AOI change instead, see the reset observer above: it directly
+  # syncs gaze_view_mode("static") itself, so by the time THIS observer runs
+  # (invalidated only as a downstream effect of that reset observer's own
+  # gaze_anim_playing(FALSE)/gaze_scrub_active(FALSE) writes, in the SAME
+  # flush) current_mode already reads "static", target_mode is also
+  # "static", and no proxy call is issued here at all -- avoiding any
+  # conflicting delete/add against a widget the ordinary renderPlotly() path
+  # is independently, fully replacing in that same flush.
+  #
+  # Trace order/index invariant this whole streaming rework relies on: every
+  # switch below first deletes ALL of the client's current traces, then adds
+  # the new set in a FIXED order -- static: [main, AOI?]; animated:
+  # [background, trail, AOI?] -- so the animated view's trail trace is always
+  # at index 1 (see gaze_push_trail_restyle() above), with no separate index
+  # bookkeeping needed anywhere in this section.
+  observeEvent(list(gaze_anim_playing(), gaze_scrub_active()), {
+    show_animated <- isTRUE(gaze_anim_playing()) || isTRUE(gaze_scrub_active())
+    target_mode <- if (show_animated) "animated" else "static"
+    current_mode <- isolate(gaze_view_mode())
+    if (identical(target_mode, current_mode)) {
+      return(invisible(NULL))
+    }
+
+    df <- isolate(filtered_trajectory())
+    aoi <- isolate(aoi_polygon())
+    aoi_spec <- gaze_aoi_trace_spec(aoi)
+
+    old_count <- if (identical(current_mode, "static")) {
+      if (is.null(aoi_spec)) 1L else 2L
+    } else {
+      if (is.null(aoi_spec)) 2L else 3L
+    }
+
+    if (show_animated) {
+      trail_length <- isolate(input$gaze_trail_length)
+      if (is.null(trail_length) || is.na(trail_length) || trail_length < 1) {
+        trail_length <- 90
+      }
+      bg_spec <- gaze_background_trace_spec(df)
+      trail_spec <- gaze_trail_trace_spec(df, isolate(gaze_anim_index()), trail_length)
+      new_traces <- Filter(Negate(is.null), list(bg_spec, trail_spec, aoi_spec))
+    } else {
+      static_spec <- gaze_static_trace_spec(df)
+      new_traces <- Filter(Negate(is.null), list(static_spec, aoi_spec))
+    }
+
+    # Nothing usable to show in either the old or the new form (e.g. a
+    # degenerate/empty window reached via a scrub-while-paused edge case,
+    # see this observer's own header comment) -- update the tracked mode so
+    # future real transitions stay correct, but skip the proxy calls
+    # entirely rather than risk deleteTraces()/addTraces() against a widget
+    # that's actually showing a validate() error state, not a real figure.
+    if (length(new_traces) == 0) {
+      gaze_view_mode(target_mode)
+      return(invisible(NULL))
+    }
+
+    plotly::plotlyProxyInvoke(gaze_plotly_proxy, "deleteTraces", as.list(seq_len(old_count) - 1L))
+    plotly::plotlyProxyInvoke(gaze_plotly_proxy, "addTraces", new_traces)
+    gaze_view_mode(target_mode)
   }, ignoreInit = TRUE)
 
   # Resets every piece of this tab's per-file state -- the time-range
@@ -2648,45 +2854,31 @@ server <- function(input, output, session) {
     data[!is.na(ts) & ts >= rng[1] & ts <= rng[2], , drop = FALSE]
   })
 
-  # output$gaze_trajectory_plot: branches between the plain, unchanged
-  # static view and the animated onion-skin view. The animated view now
-  # renders whenever EITHER gaze_anim_playing() is TRUE OR gaze_scrub_active()
-  # is TRUE -- the latter added by this rework so a deliberate scrub while
-  # paused shows the animated frame at that exact position, per that
-  # reactiveVal's own comment above; a paused-and-never-scrubbed view is
-  # still exactly the plain static build_gaze_trajectory_plot() view this
-  # tab showed before either the original onion-skin feature or this
-  # rework. The animated branch reuses gaze_bg_plot()'s CACHED background
-  # trace and only rebuilds the small trail trace here, per-tick -- see this
-  # section's earlier header comment on why that split matters for a
-  # several-thousand-sample recording.
+  # output$gaze_trajectory_plot: keyed ONLY on the WINDOW
+  # (filtered_trajectory()/aoi_polygon()) -- NOT on
+  # gaze_anim_playing()/gaze_scrub_active()/gaze_anim_index()/gaze_anim_ms(),
+  # unlike before this rework. Always renders the plain static
+  # build_gaze_trajectory_plot() view; switching into/out of the animated
+  # onion-skin view is handled entirely by the mode-transition and per-tick
+  # restyle observers above, via plotly::plotlyProxyInvoke(), not by a full
+  # re-render here -- see this section's header comment for why a full
+  # rebuild on every ~150ms tick was the root cause of the flicker/falls-
+  # behind-real-time bug this rework fixes. This is safe specifically
+  # because filtered_trajectory()/aoi_polygon() changing is EXACTLY the same
+  # trigger set the reset observer above (`observeEvent(list(
+  # selected_source_file(), input$gaze_time_range, aoi_polygon()), ...)`)
+  # already stops/resets playback on -- so every time this renderPlotly()
+  # actually reruns, gaze_anim_playing()/gaze_scrub_active() are guaranteed
+  # to already be FALSE (or about to become so in the same flush), meaning
+  # "always render static here" and "the client's true current state" can
+  # never disagree.
   output$gaze_trajectory_plot <- renderPlotly({
     df <- filtered_trajectory()
     validate(need(nrow(df) > 0, "No gaze samples in the current time range."))
 
-    show_animated <- isTRUE(gaze_anim_playing()) || isTRUE(gaze_scrub_active())
-    if (!show_animated) {
-      plot <- build_gaze_trajectory_plot(df, aoi_polygon())
-      validate(need(!is.null(plot), "No usable (non-missing) gaze coordinates in the current time range."))
-      return(plot)
-    }
-
-    bg <- gaze_bg_plot()
-    validate(need(!is.null(bg), "No usable (non-missing) gaze coordinates in the current time range."))
-
-    trail_length <- input$gaze_trail_length
-    if (is.null(trail_length) || is.na(trail_length) || trail_length < 1) {
-      trail_length <- 90
-    }
-
-    plot <- build_gaze_trajectory_trail_trace(bg, df, gaze_anim_index(), trail_length)
-    plot <- add_aoi_overlay_trace(plot, aoi_polygon())
-    plotly::layout(
-      plot,
-      xaxis = list(title = "gazeX.preprocessed_px"),
-      yaxis = list(title = "gazeY.preprocessed_px"),
-      showlegend = TRUE
-    )
+    plot <- build_gaze_trajectory_plot(df, aoi_polygon())
+    validate(need(!is.null(plot), "No usable (non-missing) gaze coordinates in the current time range."))
+    plot
   })
 
   # output$gaze_now_playing_ui: the "now playing" stimulus label (repo-owner

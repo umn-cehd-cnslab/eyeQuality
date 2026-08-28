@@ -2202,11 +2202,27 @@ thin_for_display <- function(df, cap = gaze_trajectory_display_cap) {
 # aoi: NULL, or list(x = ..., y = ...) as compute_aoi_percent() expects --
 #   overlaid as a semi-transparent filled polygon trace when present.
 #
-# Returns a plotly object, or NULL if df is NULL/missing the required
-# columns, or has 0 usable (non-NA coordinate) rows -- callers should
-# validate()/req() around that rather than handing plotly an empty trace.
-build_gaze_trajectory_plot <- function(
-    df, aoi = NULL,
+# gaze_static_trace_spec / gaze_aoi_trace_spec: the SAME "Gaze path" main
+# trace and AOI-overlay trace build_gaze_trajectory_plot() below draws,
+# factored out as plain-list trace specs (the same field names
+# plotly::add_trace() itself takes as arguments) rather than already-built
+# plotly objects. This split exists so app.R's server can reuse the exact
+# same trace contents both for the ordinary renderPlotly() build below AND
+# as raw payloads for plotly::plotlyProxyInvoke(..., "addTraces", ...) when
+# switching the CLIENT's already-rendered widget between the static and
+# animated onion-skin view without a full re-render -- see this file's
+# "Real-time-matched playback" section further down, and app.R's own
+# gaze_view_mode-keyed mode-transition observer, for why a full rebuild on
+# every Play/Pause/scrub is exactly the flicker/lagging-real-time bug this
+# split avoids. Single source of truth: build_gaze_trajectory_plot() below
+# is just `plotly::add_trace()` calls over these specs, not a separate
+# reimplementation of them.
+#
+# Returns a plain list usable as `...` args to plotly::add_trace(), or NULL
+# under the same "nothing usable" conditions the functions built on top of
+# these specs already document.
+gaze_static_trace_spec <- function(
+    df,
     time_col = "recordingTimestamp_ms",
     x_col = "gazeX.preprocessed_px",
     y_col = "gazeY.preprocessed_px") {
@@ -2221,9 +2237,7 @@ build_gaze_trajectory_plot <- function(
   df <- df[order(df[[time_col]]), , drop = FALSE]
   plot_df <- thin_for_display(df)
 
-  p <- plotly::plot_ly()
-  p <- plotly::add_trace(
-    p,
+  list(
     x = plot_df[[x_col]], y = plot_df[[y_col]],
     type = "scatter", mode = "lines+markers",
     line = list(color = "rgba(120,120,120,0.35)", width = 1),
@@ -2238,21 +2252,47 @@ build_gaze_trajectory_plot <- function(
     hoverinfo = "text+x+y",
     name = "Gaze path"
   )
+}
 
-  # AOI overlay: a second trace tracing the polygon's corners back to its
-  # own first corner (closing it), filled ("toself") so the region itself is
-  # visually obvious, not just its outline -- works the same way for any
-  # simple polygon this tab hands in, not just a rectangle, matching
-  # points_in_polygon()'s own not-rectangle-specific design.
-  if (!is.null(aoi) && length(aoi$x) >= 3 && length(aoi$x) == length(aoi$y)) {
-    p <- plotly::add_trace(
-      p,
-      x = c(aoi$x, aoi$x[1]), y = c(aoi$y, aoi$y[1]),
-      type = "scatter", mode = "lines",
-      fill = "toself", fillcolor = "rgba(220,20,60,0.15)",
-      line = list(color = "crimson", width = 2),
-      name = "AOI", hoverinfo = "skip"
-    )
+# gaze_aoi_trace_spec: the AOI polygon overlay trace, as a plain trace spec
+# -- see gaze_static_trace_spec()'s own header comment above for why this
+# split exists. Traces the polygon's corners back to its own first corner
+# (closing it), filled ("toself") so the region itself is visually obvious,
+# not just its outline -- works the same way for any simple polygon this tab
+# hands in, not just a rectangle, matching points_in_polygon()'s own
+# not-rectangle-specific design.
+#
+# Returns NULL when `aoi` isn't a usable (>= 3 vertex) polygon.
+gaze_aoi_trace_spec <- function(aoi) {
+  if (is.null(aoi) || length(aoi$x) < 3 || length(aoi$x) != length(aoi$y)) {
+    return(NULL)
+  }
+  list(
+    x = c(aoi$x, aoi$x[1]), y = c(aoi$y, aoi$y[1]),
+    type = "scatter", mode = "lines",
+    fill = "toself", fillcolor = "rgba(220,20,60,0.15)",
+    line = list(color = "crimson", width = 2),
+    name = "AOI", hoverinfo = "skip"
+  )
+}
+
+# Returns a plotly object, or NULL if df is NULL/missing the required
+# columns, or has 0 usable (non-NA coordinate) rows -- callers should
+# validate()/req() around that rather than handing plotly an empty trace.
+build_gaze_trajectory_plot <- function(
+    df, aoi = NULL,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px") {
+  spec <- gaze_static_trace_spec(df, time_col, x_col, y_col)
+  if (is.null(spec)) {
+    return(NULL)
+  }
+  p <- do.call(plotly::add_trace, c(list(plotly::plot_ly()), spec))
+
+  aoi_spec <- gaze_aoi_trace_spec(aoi)
+  if (!is.null(aoi_spec)) {
+    p <- do.call(plotly::add_trace, c(list(p), aoi_spec))
   }
 
   plotly::layout(
@@ -2325,9 +2365,16 @@ prepare_gaze_trajectory_data <- function(
 # thin_for_display()/gaze_trajectory_display_cap, for the same rendering-
 # performance reason documented there), with no per-tick dependency at all.
 #
-# Returns a plotly object with just this one trace, or NULL when
-# prepare_gaze_trajectory_data() returns NULL (nothing usable to show).
-build_gaze_trajectory_background_trace <- function(
+# gaze_background_trace_spec: the same context trace
+# build_gaze_trajectory_background_trace() below draws, as a plain trace
+# spec -- see gaze_static_trace_spec()'s own header comment (above,
+# alongside build_gaze_trajectory_plot()) for why this split exists;
+# app.R's mode-transition observer uses this directly as an addTraces()
+# payload when entering the animated view via the proxy.
+#
+# Returns NULL when prepare_gaze_trajectory_data() returns NULL (nothing
+# usable to show).
+gaze_background_trace_spec <- function(
     df,
     time_col = "recordingTimestamp_ms",
     x_col = "gazeX.preprocessed_px",
@@ -2339,14 +2386,28 @@ build_gaze_trajectory_background_trace <- function(
   }
   plot_df <- thin_for_display(prepared)
 
-  plotly::add_trace(
-    plotly::plot_ly(),
+  list(
     x = plot_df[[x_col]], y = plot_df[[y_col]],
     type = "scatter", mode = "markers",
     marker = list(size = 5, color = sprintf("rgba(120,120,120,%.3f)", opacity)),
     hoverinfo = "skip",
     name = "All samples (context)"
   )
+}
+
+# Returns a plotly object with just this one trace, or NULL when
+# prepare_gaze_trajectory_data() returns NULL (nothing usable to show).
+build_gaze_trajectory_background_trace <- function(
+    df,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px",
+    opacity = 0.08) {
+  spec <- gaze_background_trace_spec(df, time_col, x_col, y_col, opacity)
+  if (is.null(spec)) {
+    return(NULL)
+  }
+  do.call(plotly::add_trace, c(list(plotly::plot_ly()), spec))
 }
 
 # build_gaze_trajectory_trail_trace: adds the fading "comet trail" trace --
@@ -2373,19 +2434,29 @@ build_gaze_trajectory_background_trace <- function(
 # the current gaze position" reads clearly even before the opacity ramp is
 # consciously noticed.
 #
-# Returns `p` unchanged if `p` or the prepared data is NULL (nothing to draw
-# the trail onto, or nothing usable in df).
-build_gaze_trajectory_trail_trace <- function(
-    p, df, current_index, trail_length = 90,
+# gaze_trail_trace_spec: the same fading "comet trail" trace
+# build_gaze_trajectory_trail_trace() below draws, as a plain trace spec --
+# see gaze_static_trace_spec()'s own header comment (above, alongside
+# build_gaze_trajectory_plot()) for why this split exists. app.R's server
+# uses this directly TWICE: once as an addTraces() payload (mode-transition
+# observer, entering the animated view) and once, per tick, as the source of
+# a `plotlyProxyInvoke(..., "restyle", ...)` payload that updates ONLY this
+# trace's x/y/marker/text in the already-rendered widget -- the actual fix
+# for the "full renderPlotly() rebuild on every ~150ms tick" root cause of
+# the flicker/falls-behind-real-time bug this trace-spec split exists for.
+#
+# current_index / trail_length: see build_gaze_trajectory_trail_trace()
+# below (unchanged contract).
+#
+# Returns NULL when the prepared data is NULL (nothing usable in df).
+gaze_trail_trace_spec <- function(
+    df, current_index, trail_length = 90,
     time_col = "recordingTimestamp_ms",
     x_col = "gazeX.preprocessed_px",
     y_col = "gazeY.preprocessed_px") {
-  if (is.null(p)) {
-    return(p)
-  }
   prepared <- prepare_gaze_trajectory_data(df, time_col, x_col, y_col)
   if (is.null(prepared)) {
-    return(p)
+    return(NULL)
   }
 
   n <- nrow(prepared)
@@ -2399,8 +2470,7 @@ build_gaze_trajectory_trail_trace <- function(
   sizes <- rep(7, m)
   sizes[m] <- 12 # the current/most-recent point, drawn larger
 
-  plotly::add_trace(
-    p,
+  list(
     x = trail_df[[x_col]], y = trail_df[[y_col]],
     type = "scatter", mode = "markers",
     marker = list(size = sizes, color = sprintf("rgba(30,144,255,%.3f)", opacities)),
@@ -2410,24 +2480,36 @@ build_gaze_trajectory_trail_trace <- function(
   )
 }
 
-# add_aoi_overlay_trace: the same AOI polygon overlay trace
-# build_gaze_trajectory_plot() draws, factored out here as its own small
-# helper so the animation composition below can add it on top of a trail
-# frame without duplicating build_gaze_trajectory_plot()'s internals or
-# calling (and thereby not touching) that function. Returns `p` unchanged
-# when `p` is NULL or `aoi` isn't a usable (>= 3 vertex) polygon.
-add_aoi_overlay_trace <- function(p, aoi) {
-  if (is.null(p) || is.null(aoi) || length(aoi$x) < 3 || length(aoi$x) != length(aoi$y)) {
+# Returns `p` unchanged if `p` or the prepared data is NULL (nothing to draw
+# the trail onto, or nothing usable in df).
+build_gaze_trajectory_trail_trace <- function(
+    p, df, current_index, trail_length = 90,
+    time_col = "recordingTimestamp_ms",
+    x_col = "gazeX.preprocessed_px",
+    y_col = "gazeY.preprocessed_px") {
+  if (is.null(p)) {
     return(p)
   }
-  plotly::add_trace(
-    p,
-    x = c(aoi$x, aoi$x[1]), y = c(aoi$y, aoi$y[1]),
-    type = "scatter", mode = "lines",
-    fill = "toself", fillcolor = "rgba(220,20,60,0.15)",
-    line = list(color = "crimson", width = 2),
-    name = "AOI", hoverinfo = "skip"
-  )
+  spec <- gaze_trail_trace_spec(df, current_index, trail_length, time_col, x_col, y_col)
+  if (is.null(spec)) {
+    return(p)
+  }
+  do.call(plotly::add_trace, c(list(p), spec))
+}
+
+# add_aoi_overlay_trace: the same AOI polygon overlay trace
+# build_gaze_trajectory_plot() draws (via gaze_aoi_trace_spec(), above),
+# factored out here as its own small helper so the animation composition
+# below can add it on top of a trail frame without duplicating
+# build_gaze_trajectory_plot()'s internals or calling (and thereby not
+# touching) that function. Returns `p` unchanged when `p` is NULL or `aoi`
+# isn't a usable (>= 3 vertex) polygon.
+add_aoi_overlay_trace <- function(p, aoi) {
+  spec <- gaze_aoi_trace_spec(aoi)
+  if (is.null(p) || is.null(spec)) {
+    return(p)
+  }
+  do.call(plotly::add_trace, c(list(p), spec))
 }
 
 # build_gaze_trajectory_animation_plot: the one-call composer of a single
