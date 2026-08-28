@@ -26,7 +26,7 @@ jobs:
       CRAN_MIRROR: https://packagemanager.posit.co/cran/__linux__/noble/latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install R and system dependencies
         run: |
