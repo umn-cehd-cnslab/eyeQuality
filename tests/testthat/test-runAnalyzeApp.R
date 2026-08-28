@@ -4484,3 +4484,293 @@ test_that("read_one_qcsummary/load_qcsummary_table/load_plot_data/load_gaze_traj
   expect_error(read_one_qcsummary(missing_qcsummary))
   expect_false(windows_safe_file_exists(missing_qcsummary))
 })
+
+# ---------------------------------------------------------------------------
+# Precision QC metrics (precision_sdX_wholeFile, etc.) in the Compare files
+# tab -- is_precision_metric() / metric_value_column() /
+# split_metric_columns() (analyze_helpers.R), and their effect on
+# build_qc_comparison_plot()/build_qc_comparison_table()/
+# build_qc_comparison_scatter() and the wide comparison table's DT formatting
+# in app.R.
+# ---------------------------------------------------------------------------
+#
+# calculateOutputMetrics() (R/calculateOutputMetrics.R) writes its value for
+# any of the 24 precision_* qc_metric rows to a dedicated "precision_value"
+# column (a raw visual-angle-degree magnitude, NOT a 0-1 fraction) -- never
+# to "percent", which every other qc_metric row uses instead.
+# precision_comparison_test_table() below mirrors that real shape: a
+# precision_* row's synthetic table carries "precision_value", not "percent",
+# matching what a real combined qcsummary table looks like after
+# load_qcsummary_table()'s dplyr::bind_rows() NA-fills the column each kind
+# of row doesn't populate.
+
+precision_comparison_test_table <- function(metric, precision_value, qc_flags = NULL) {
+  n <- length(precision_value)
+  if (is.null(qc_flags)) {
+    qc_flags <- rep(FALSE, n)
+  }
+  data.frame(
+    recording = paste0("rec-", seq_len(n)),
+    batch_name = "test_batch",
+    source_file = paste0("/data/rec-", seq_len(n), "_qcsummary.tsv"),
+    qc_metric = metric,
+    precision_value = precision_value,
+    qc_flag = qc_flags,
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("is_precision_metric identifies every precision_* qc_metric row calculateOutputMetrics() actually writes, and nothing else", {
+  # The exact 24 row names calculateOutputMetrics() (R/calculateOutputMetrics.R)
+  # writes into summary_df_rows -- pinned here directly, not re-derived, so a
+  # rename/drop there that broke the "precision_" prefix convention would be
+  # caught by this test rather than silently passing.
+  precision_rows <- c(
+    "precision_sdX_wholeFile", "precision_sdY_wholeFile",
+    "precision_rmsX_mean_wholeFile", "precision_rmsX_median_wholeFile",
+    "precision_rmsY_mean_wholeFile", "precision_rmsY_median_wholeFile",
+    "precision_rmsEuc_mean_wholeFile", "precision_rmsEuc_median_wholeFile",
+    "precision_sdX_longestFixation", "precision_sdY_longestFixation",
+    "precision_rmsX_mean_longestFixation", "precision_rmsX_median_longestFixation",
+    "precision_rmsY_mean_longestFixation", "precision_rmsY_median_longestFixation",
+    "precision_rmsEuc_mean_longestFixation", "precision_rmsEuc_median_longestFixation",
+    "precision_sdX_medianFixation", "precision_sdY_medianFixation",
+    "precision_rmsX_mean_medianFixation", "precision_rmsX_median_medianFixation",
+    "precision_rmsY_mean_medianFixation", "precision_rmsY_median_medianFixation",
+    "precision_rmsEuc_mean_medianFixation", "precision_rmsEuc_median_medianFixation"
+  )
+  expect_length(precision_rows, 24)
+  expect_true(all(is_precision_metric(precision_rows)))
+
+  non_precision_rows <- c(
+    "valid_raw_data", "robustness_proportion_valid_data_to_all_data",
+    "interpolated_LeftEye", "interpolated_RightEye", "blinks_BothEyes",
+    "ivt_fixations", "robustness_fixation_duration"
+  )
+  expect_false(any(is_precision_metric(non_precision_rows)))
+})
+
+test_that("is_precision_metric is vectorized, and an NA qc_metric value (never expected in practice) falls back to FALSE rather than erroring", {
+  result <- is_precision_metric(c("precision_sdX_wholeFile", "valid_raw_data", NA_character_))
+  expect_equal(result, c(TRUE, FALSE, FALSE))
+})
+
+test_that("metric_value_column returns 'precision_value' for a precision_* metric and 'percent' for everything else", {
+  expect_equal(metric_value_column("precision_sdX_wholeFile"), "precision_value")
+  expect_equal(metric_value_column("precision_rmsEuc_median_longestFixation"), "precision_value")
+  expect_equal(metric_value_column("valid_raw_data"), "percent")
+  expect_equal(metric_value_column("blinks_BothEyes"), "percent")
+})
+
+test_that("split_metric_columns partitions column names into percent/precision groups, preserving order, with no columns lost or duplicated", {
+  cols <- c("valid_raw_data", "precision_sdX_wholeFile", "interpolated_LeftEye", "precision_sdY_wholeFile")
+  result <- split_metric_columns(cols)
+  expect_equal(result$percent, c("valid_raw_data", "interpolated_LeftEye"))
+  expect_equal(result$precision, c("precision_sdX_wholeFile", "precision_sdY_wholeFile"))
+})
+
+test_that("split_metric_columns returns two zero-length vectors for an empty input, not an error", {
+  result <- split_metric_columns(character(0))
+  expect_length(result$percent, 0)
+  expect_length(result$precision, 0)
+})
+
+test_that("build_qc_comparison_plot plots a precision_* metric's raw precision_value on its own natural scale, unformatted as a percentage", {
+  tbl <- precision_comparison_test_table("precision_sdX_wholeFile", c(0.42, 1.8, 0.95))
+  plot <- build_qc_comparison_plot(tbl, "precision_sdX_wholeFile", default_qc_thresholds())
+
+  expect_s3_class(plot, "ggplot")
+  expect_equal(sort(plot$data$plot_value), sort(c(0.42, 1.8, 0.95)))
+  # Never thresholdable (precision metrics are deliberately excluded from
+  # qc_threshold_config -- see that data.frame's own comment) -- every row
+  # gets the third, "no opinion" status, matching a descriptive metric like
+  # blinks_BothEyes.
+  expect_true(all(as.character(plot$data$comparison_status) == "No threshold configured"))
+  # Axis label carries a degrees unit rather than being left bare or
+  # percent-labeled.
+  expect_match(plot$labels$y, "degrees", fixed = TRUE)
+})
+
+test_that("build_qc_comparison_plot's y-axis range for a precision metric reflects the raw data scale, not a percent-multiplied-by-100 one", {
+  tbl <- precision_comparison_test_table("precision_sdX_wholeFile", c(0.5, 1.5))
+  plot <- build_qc_comparison_plot(tbl, "precision_sdX_wholeFile", default_qc_thresholds())
+  built <- ggplot2::ggplot_build(plot)
+  # coord_flip() means the bars' actual value axis is panel_scales_y here --
+  # its range should sit close to the raw 0.5-1.5 input, not a percent-style
+  # 0-100(+) range a stray "x * 100" formatting mistake would produce.
+  y_range <- built$layout$panel_scales_y[[1]]$range$range
+  expect_true(all(y_range >= 0 & y_range <= 5))
+})
+
+test_that("build_qc_comparison_plot returns NULL for a precision metric whose precision_value column isn't present in the table at all (e.g. an older qcsummary.tsv that never computed precision)", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5)) # no precision_value column at all
+  plot <- build_qc_comparison_plot(tbl, "precision_sdX_wholeFile", default_qc_thresholds())
+  expect_null(plot)
+})
+
+test_that("build_qc_comparison_table correctly resolves values from precision_value for a precision metric and percent for a standard metric selected in the same call", {
+  percent_rows <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  precision_rows <- precision_comparison_test_table("precision_sdX_wholeFile", c(0.42, 1.8))
+  # Align identifying columns across the two synthetic tables the way a real
+  # combined multi-metric table would (same recording/source_file per row
+  # position).
+  precision_rows$recording <- percent_rows$recording
+  precision_rows$source_file <- percent_rows$source_file
+  long_tbl <- dplyr::bind_rows(percent_rows, precision_rows)
+
+  result <- build_qc_comparison_table(long_tbl, c("valid_raw_data", "precision_sdX_wholeFile"))
+
+  expect_equal(nrow(result), 2)
+  by_recording <- setNames(seq_len(nrow(result)), result$recording)
+  expect_equal(result$valid_raw_data[by_recording[["rec-1"]]], 0.9)
+  expect_equal(result$precision_sdX_wholeFile[by_recording[["rec-1"]]], 0.42)
+  expect_equal(result$valid_raw_data[by_recording[["rec-2"]]], 0.5)
+  expect_equal(result$precision_sdX_wholeFile[by_recording[["rec-2"]]], 1.8)
+})
+
+test_that("build_qc_comparison_table omits a precision metric column entirely when the table has no rows/column for it, same as any other unmatched metric", {
+  tbl <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  result <- build_qc_comparison_table(tbl, c("valid_raw_data", "precision_sdX_wholeFile"))
+  # precision_sdX_wholeFile has no matching rows in this table (it only has
+  # valid_raw_data rows) -- consistent with build_qc_comparison_table()'s
+  # existing "no matching rows for one of several selected metrics" behavior,
+  # not a new precision-specific failure mode.
+  expect_true("valid_raw_data" %in% names(result))
+  expect_false("precision_sdX_wholeFile" %in% names(result))
+})
+
+test_that("build_qc_comparison_scatter plots a percent metric against a precision metric, each axis independently scaled/labeled by its own kind, in either axis order", {
+  percent_rows <- comparison_test_table("valid_raw_data", c(0.9, 0.5))
+  precision_rows <- precision_comparison_test_table("precision_sdX_wholeFile", c(0.4, 1.2))
+  precision_rows$recording <- percent_rows$recording
+  precision_rows$source_file <- percent_rows$source_file
+  tbl <- dplyr::bind_rows(percent_rows, precision_rows)
+
+  plot_xy <- build_qc_comparison_scatter(tbl, "valid_raw_data", "precision_sdX_wholeFile", default_qc_thresholds())
+  expect_s3_class(plot_xy, "ggplot")
+  expect_equal(nrow(plot_xy$data), 2)
+  # x is percent-based (no "degrees" label), y is precision-based (labeled
+  # "degrees") -- each axis independently reflects its own metric's kind.
+  expect_false(grepl("degrees", plot_xy$labels$x, fixed = TRUE))
+  expect_match(plot_xy$labels$y, "degrees", fixed = TRUE)
+
+  plot_yx <- build_qc_comparison_scatter(tbl, "precision_sdX_wholeFile", "valid_raw_data", default_qc_thresholds())
+  expect_s3_class(plot_yx, "ggplot")
+  expect_match(plot_yx$labels$x, "degrees", fixed = TRUE)
+  expect_false(grepl("degrees", plot_yx$labels$y, fixed = TRUE))
+})
+
+test_that("build_qc_comparison_scatter plots two precision metrics against each other on their own natural scale, with no configured threshold lines", {
+  x_rows <- precision_comparison_test_table("precision_sdX_wholeFile", c(0.4, 1.2))
+  y_rows <- precision_comparison_test_table("precision_sdY_wholeFile", c(0.3, 0.9))
+  y_rows$recording <- x_rows$recording
+  y_rows$source_file <- x_rows$source_file
+  tbl <- dplyr::bind_rows(x_rows, y_rows)
+
+  plot <- build_qc_comparison_scatter(
+    tbl, "precision_sdX_wholeFile", "precision_sdY_wholeFile", default_qc_thresholds()
+  )
+
+  expect_s3_class(plot, "ggplot")
+  expect_equal(nrow(plot$data), 2)
+  expect_match(plot$labels$x, "degrees", fixed = TRUE)
+  expect_match(plot$labels$y, "degrees", fixed = TRUE)
+  # Neither axis has a configured threshold (precision metrics are excluded
+  # from qc_threshold_config by design), so no dashed reference line at all.
+  expect_true(is.null(find_hline_layer(plot)))
+  expect_true(is.null(find_vline_layer(plot)))
+})
+
+test_that("selecting a single precision metric in the Compare files tab renders the bar chart end to end, plotting the raw precision_value rather than a percent-scaled one", {
+  skip_on_cran()
+
+  dir <- tempfile("p10precision_compare_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(
+      qc_metric = c("valid_raw_data", "precision_sdX_wholeFile"),
+      percent = c(0.9, NA),
+      precision_value = c(NA, 0.35)
+    ),
+    file.path(dir, "sub-r_ses-1_desc-precisioncmp_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(
+      compare_batch_name_filter = "precisioncmp",
+      compare_task_name_filter = task_name_none_sentinel(),
+      compare_metric_plot = "precision_sdX_wholeFile",
+      compare_metrics_table = c("valid_raw_data", "precision_sdX_wholeFile")
+    )
+
+    # renderPlot completes without error/validation message.
+    expect_false(is.null(session$getOutput("compare_plot")))
+    # The wide DT table, mixing a percent and a precision metric column,
+    # also renders without error.
+    expect_true(nzchar(session$getOutput("compare_table")))
+
+    # Confirm what's actually driving the chart: rebuild it via the exact
+    # same production helper/reactive chain output$compare_plot itself uses,
+    # and check it plots the raw precision_value (0.35), never a
+    # percent-scaled (e.g. 35) value.
+    tbl <- filter_by_batch_name(qc_table_flagged(), input$compare_batch_name_filter)
+    plot <- build_qc_comparison_plot(tbl, "precision_sdX_wholeFile", qc_thresholds())
+    expect_equal(plot$data$plot_value, 0.35)
+
+    # And the wide table's own value resolution (same helper
+    # output$compare_table calls) puts 0.35 -- not NA, not 35 -- in the
+    # precision_sdX_wholeFile column.
+    wide <- build_qc_comparison_table(current_load_result()$table, input$compare_metrics_table)
+    expect_equal(wide$precision_sdX_wholeFile[1], 0.35)
+    expect_equal(wide$valid_raw_data[1], 0.9)
+  })
+})
+
+test_that("selecting one percent metric and one precision metric together in the Compare files tab renders a scatterplot end to end, each axis independently scaled", {
+  skip_on_cran()
+
+  dir <- tempfile("p10precision_mixed_")
+  dir.create(dir)
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
+
+  readr::write_tsv(
+    data.frame(
+      qc_metric = c("valid_raw_data", "precision_sdX_wholeFile"),
+      percent = c(0.9, NA),
+      precision_value = c(NA, 0.35)
+    ),
+    file.path(dir, "sub-s_ses-1_desc-precisionmixed_preproc_qcsummary.tsv")
+  )
+  path_segments <- rel_home_segments_p1007(dir)
+
+  shiny::testServer(analyze_app_dir, {
+    session$setInputs(analyze_directory = list(root = "Home", path = path_segments), analyze_recursiveSearch = FALSE)
+    session$setInputs(load = 1)
+    session$setInputs(
+      compare_batch_name_filter = "precisionmixed",
+      compare_task_name_filter = task_name_none_sentinel(),
+      compare_metric_plot = c("valid_raw_data", "precision_sdX_wholeFile")
+    )
+
+    # renderPlot completes without error/validation message -- a mixed
+    # percent+precision pair is a normal, supported comparison (independent
+    # x/y axes, unlike the single-metric bar chart's shared y-axis).
+    expect_false(is.null(session$getOutput("compare_plot")))
+
+    # Confirm what's actually driving the chart: rebuild it via the exact
+    # same production helper output$compare_plot itself uses, and check each
+    # axis is independently scaled/labeled by its own metric's kind.
+    tbl <- filter_by_batch_name(qc_table_flagged(), input$compare_batch_name_filter)
+    plot <- build_qc_comparison_scatter(tbl, "valid_raw_data", "precision_sdX_wholeFile", qc_thresholds())
+    expect_s3_class(plot, "ggplot")
+    expect_false(grepl("degrees", plot$labels$x, fixed = TRUE))
+    expect_match(plot$labels$y, "degrees", fixed = TRUE)
+  })
+})

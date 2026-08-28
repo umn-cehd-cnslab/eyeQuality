@@ -1123,6 +1123,80 @@ filter_recognized_qc_thresholds <- function(qcThresholds) {
 # pass/fail itself, so this view can never drift from the QC table's own
 # flagging.
 
+# is_precision_metric / metric_value_column: -------------------------------
+#
+# Every OTHER qc_metric row calculateOutputMetrics() writes (R/calculateOutputMetrics.R)
+# stores its value in the "percent" column, a genuine 0-1 fraction -- the bar
+# chart/scatter/wide table below, plus qc_threshold_config/compute_qc_flags(),
+# are all built around that assumption (percent-scale axes, 0-1 threshold
+# comparisons, DT::formatPercentage() in app.R's wide-table render). The 24
+# gaze-precision rows calculateOutputMetrics() also writes (qc_metric values
+# like "precision_sdX_wholeFile", "precision_rmsEuc_median_longestFixation",
+# etc.) are NOT fractions -- they're raw visual-angle-degree magnitudes -- so
+# calculateOutputMetrics() deliberately stores them in a separate
+# "precision_value" column instead, specifically so they can't get
+# misinterpreted as percentages by that machinery. These two helpers are the
+# one place that distinguishes the two kinds of row and picks the right
+# column, so build_qc_comparison_plot()/build_qc_comparison_table()/
+# build_qc_comparison_scatter() below don't each reimplement (or drift on)
+# that branch, and so the 24 exact row names are never enumerated anywhere in
+# this app -- all 24 share a "precision_" qc_metric name prefix, which is
+# what's actually tested here, derived directly rather than hardcoded as a
+# list.
+#
+# Precision metrics are deliberately NOT added to qc_threshold_config (see
+# that data.frame's own comment for the identical reasoning already applied
+# to blinks_*/smoothed_*/ivt_*/etc.) -- like those, precision has no single
+# universal pass/fail cutoff this app has a basis for asserting, so it's
+# plottable/comparable here but never flagged by compute_qc_flags().
+
+# is_precision_metric: TRUE for qc_metric values that are one of
+# calculateOutputMetrics()'s precision_* rows. Vectorized over qc_metric; a
+# real qc_metric value is never actually NA in practice (every row this app
+# loads comes from a real qc_metric column value -- see read_one_qcsummary()),
+# but if one ever were, base grepl()'s own documented behavior applies: NA
+# input yields FALSE (i.e. "not a precision metric"), the same sensible
+# default every other unmatched/missing-metric case in this app already
+# falls back to (e.g. compute_qc_flags() never flags an unrecognized metric).
+is_precision_metric <- function(qc_metric) {
+  grepl("^precision_", qc_metric)
+}
+
+# metric_value_column: which table column holds a SINGLE given qc_metric's
+# value -- "precision_value" for a precision_* metric, "percent" (the
+# standard 0-1-fraction column) for every other metric. Single-metric
+# (length-1, non-NA `qc_metric`) helper, used by build_qc_comparison_plot()
+# and build_qc_comparison_scatter() which each already operate on one metric
+# at a time per axis; build_qc_comparison_table() branches per-ROW itself
+# instead (via is_precision_metric() directly), since a single pivoted table
+# can mix both kinds of metric across its columns.
+metric_value_column <- function(qc_metric) {
+  if (isTRUE(is_precision_metric(qc_metric))) "precision_value" else "percent"
+}
+
+# split_metric_columns: partitions a vector of qc_metric column names (e.g.
+# build_qc_comparison_table()'s own output columns, minus the
+# recording/batch_name/source_file id columns) into "percent" (0-1-fraction)
+# and "precision" (precision_* / precision_value) groups, using
+# is_precision_metric(). Exists as its own small, independently testable
+# helper so app.R's wide-table DT renders (output$compare_table,
+# output$qc_major_table) have one shared, correct place to decide which
+# columns get DT::formatPercentage() vs. DT::formatRound() -- see
+# is_precision_metric()'s own header comment for why the two groups need
+# different display formatting.
+#
+# cols: character vector of column names (order preserved within each group).
+# Returns list(percent = <cols not matching precision_*>, precision = <cols
+# matching precision_*>). A zero-length `cols` returns two zero-length
+# vectors rather than erroring.
+split_metric_columns <- function(cols) {
+  is_precision <- is_precision_metric(cols)
+  list(
+    percent = cols[!is_precision],
+    precision = cols[is_precision]
+  )
+}
+
 # build_qc_comparison_plot: a horizontal bar chart of one qc_metric's value
 # across every loaded recording, for spotting outlier files at a glance
 # (rather than scanning the long QC table row by row). Reuses ggplot2 (already
@@ -1152,6 +1226,21 @@ build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
   if (nrow(rows) == 0) {
     return(NULL)
   }
+
+  # value_col: "percent" (0-1 fraction) for a standard qc_metric, or
+  # "precision_value" (raw visual-angle degrees) for one of
+  # calculateOutputMetrics()'s precision_* rows -- see is_precision_metric()/
+  # metric_value_column()'s own header comment. A qcsummary.tsv written by an
+  # older eyeQuality version that never computed precision at all won't carry
+  # a "precision_value" column in table_flagged (load_qcsummary_table()'s
+  # dplyr::bind_rows() only adds a column when at least one loaded file has
+  # it) -- treated the same as "no rows for this metric" rather than erroring.
+  value_col <- metric_value_column(metric)
+  if (!value_col %in% names(rows)) {
+    return(NULL)
+  }
+  rows$plot_value <- rows[[value_col]]
+  precision <- isTRUE(is_precision_metric(metric))
 
   cfg_row <- qc_threshold_config[qc_threshold_config$qc_metric == metric, , drop = FALSE]
   has_threshold <- nrow(cfg_row) == 1
@@ -1203,8 +1292,8 @@ build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
   plot <- ggplot2::ggplot(
     rows,
     ggplot2::aes(
-      x = stats::reorder(bar_label, percent),
-      y = percent,
+      x = stats::reorder(bar_label, plot_value),
+      y = plot_value,
       fill = comparison_status
     )
   ) +
@@ -1218,14 +1307,19 @@ build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
       ),
       drop = FALSE
     ) +
-    # percent's underlying values are 0-1 fractions (see
-    # calculateOutputMetrics.R), not already scaled to 0-100 -- labeled as a
-    # percentage here purely for axis display, matching the numericInput
-    # thresholds' own 0-100 unit.
-    ggplot2::scale_y_continuous(labels = function(x) paste0(round(x * 100), "%")) +
+    # Precision metrics plot on their own natural scale (raw visual-angle
+    # degrees, precision_value) -- unlike "percent" (a 0-1 fraction, labeled
+    # as a percentage here purely for axis display, matching the
+    # numericInput thresholds' own 0-100 unit), degrees have no fixed 0-1
+    # range and multiplying by 100 or appending "%" would misrepresent them.
+    (if (precision) {
+      ggplot2::scale_y_continuous()
+    } else {
+      ggplot2::scale_y_continuous(labels = function(x) paste0(round(x * 100), "%"))
+    }) +
     ggplot2::labs(
       x = NULL,
-      y = metric,
+      y = if (precision) paste0(metric, " (degrees)") else metric,
       fill = "QC status",
       title = paste("Across-file comparison:", metric)
     ) +
@@ -1262,12 +1356,18 @@ build_qc_comparison_plot <- function(table_flagged, metric, thresholds) {
 # above) or scrolling through the long table's every metric row per file.
 #
 # table: the combined qcsummary table (load_result()$table -- pre- or
-#   post-qc_flag, this function only reads qc_metric/percent so either works,
-#   but app.R passes the plain, un-flagged table since qc_flag isn't a
-#   per-metric-column concept in wide form -- see app.R's compare_table
-#   render for how threshold crossing is instead shown per output column via
-#   DT::formatStyle()).
-# metrics: character vector of qc_metric values to include as columns.
+#   post-qc_flag, this function only reads qc_metric/percent/precision_value
+#   so either works, but app.R passes the plain, un-flagged table since
+#   qc_flag isn't a per-metric-column concept in wide form -- see app.R's
+#   compare_table render for how threshold crossing is instead shown per
+#   output column via DT::formatStyle()).
+# metrics: character vector of qc_metric values to include as columns. May
+#   freely mix standard (percent-based) and precision_* metrics -- each
+#   resulting column is populated from whichever source column that row's
+#   own qc_metric actually uses (is_precision_metric()/metric_value_column()),
+#   so the wide table itself has no "all columns are percent" assumption; it's
+#   only each COLUMN's own display formatting (app.R's compare_table render)
+#   that needs to branch per column.
 #
 # Returns a data.frame with recording/batch_name/source_file plus one column
 # per (present) entry of `metrics`, or NULL if `table` is empty/NULL, or none
@@ -1276,14 +1376,32 @@ build_qc_comparison_table <- function(table, metrics) {
   if (is.null(table) || nrow(table) == 0 || length(metrics) == 0) {
     return(NULL)
   }
-  if (!all(c("recording", "batch_name", "source_file", "qc_metric", "percent") %in% names(table))) {
+  if (!all(c("recording", "batch_name", "source_file", "qc_metric") %in% names(table))) {
     return(NULL)
   }
 
-  subset_tbl <- table[table$qc_metric %in% metrics, c("recording", "batch_name", "source_file", "qc_metric", "percent")]
+  subset_tbl <- table[table$qc_metric %in% metrics, , drop = FALSE]
   if (nrow(subset_tbl) == 0) {
     return(NULL)
   }
+
+  # value: per-row source column, "precision_value" for a precision_* metric
+  # or "percent" otherwise (metric_value_column()'s own per-row equivalent --
+  # see that function's header comment on why this table branches per row
+  # rather than calling metric_value_column() once). Either source column
+  # missing entirely from `table` (e.g. an older qcsummary.tsv with no
+  # precision_value column at all -- see load_qcsummary_table()'s
+  # dplyr::bind_rows() comment) degrades to NA for that row rather than
+  # erroring.
+  precision_rows <- is_precision_metric(subset_tbl$qc_metric)
+  subset_tbl$value <- NA_real_
+  if ("percent" %in% names(subset_tbl)) {
+    subset_tbl$value[!precision_rows] <- subset_tbl$percent[!precision_rows]
+  }
+  if ("precision_value" %in% names(subset_tbl)) {
+    subset_tbl$value[precision_rows] <- subset_tbl$precision_value[precision_rows]
+  }
+  subset_tbl <- subset_tbl[, c("recording", "batch_name", "source_file", "qc_metric", "value")]
 
   # values_fn = first-value-wins rather than the default list-column
   # behavior: guards against a (theoretically possible, e.g. a hand-edited
@@ -1295,7 +1413,7 @@ build_qc_comparison_table <- function(table, metrics) {
     subset_tbl,
     id_cols = c("recording", "batch_name", "source_file"),
     names_from = "qc_metric",
-    values_from = "percent",
+    values_from = "value",
     values_fn = function(x) x[1]
   )
 }
@@ -1502,7 +1620,15 @@ filter_by_task_name <- function(table, selected) {
 #   flagged_values: comma-separated percent values, converted to the 0-100
 #     scale the sidebar's numericInput thresholds already use (matching
 #     qc_thresholds_to_percent()'s convention), in the same order as
-#     flagged_metrics.
+#     flagged_metrics. Reads table_flagged$percent specifically (not
+#     is_precision_metric()-aware) -- deliberately fine, not a gap: this
+#     column is only ever populated for rows table_flagged$qc_flag is TRUE
+#     for, and qc_flag can never be TRUE for a precision_* row, since
+#     precision metrics are excluded from qc_threshold_config
+#     (compute_qc_flags() only sets qc_flag for a row whose qc_metric has a
+#     configured threshold -- see that function's own source of truth
+#     comment). So precision_* rows are cleanly excluded from this export by
+#     construction, with no separate filtering needed here.
 #   note: only present when `notes` (below) is supplied -- that recording's
 #     current review note (see the "review notes" section further down), or
 #     "" if it has none.
@@ -2512,10 +2638,11 @@ note_for_recording <- function(notes_df, recording, batch_name) {
 #   configured threshold, exactly like build_qc_comparison_plot()'s own
 #   geom_hline().
 #
-# Returns a ggplot object, or NULL if metric_x/metric_y are missing,
+# Returns a ggplot object, or NULL if metric_x/metric_y are missing or
 # identical, or build_qc_comparison_table() (reused here for the actual
 # long-to-wide pivot, rather than a second pivot implementation) has no
-# usable rows for them.
+# usable rows for
+# them.
 build_qc_comparison_scatter <- function(table_flagged, metric_x, metric_y, thresholds) {
   if (is.null(table_flagged) || is.null(metric_x) || is.null(metric_y) ||
     !nzchar(metric_x) || !nzchar(metric_y) || identical(metric_x, metric_y)) {
@@ -2534,19 +2661,34 @@ build_qc_comparison_scatter <- function(table_flagged, metric_x, metric_y, thres
     levels = c("Flagged", "OK")
   )
 
+  # x and y axes are scaled/labeled independently -- a scatterplot's two
+  # axes are genuinely independent scales (unlike build_qc_comparison_plot()'s
+  # single shared bar-chart y-axis, where mixing a 0-1 fraction with a raw
+  # visual-angle-degree value on ONE axis would be misleading), so a
+  # percent-based metric on one axis and a precision-based metric on the
+  # other is a perfectly normal, useful comparison (e.g. "does robustness
+  # correlate with precision?") and is deliberately allowed here.
+  precision_x <- isTRUE(is_precision_metric(metric_x))
+  precision_y <- isTRUE(is_precision_metric(metric_y))
+
   plot <- ggplot2::ggplot(
     wide,
     ggplot2::aes(x = .data[[metric_x]], y = .data[[metric_y]], color = comparison_status)
   ) +
     ggplot2::geom_point(size = 3, alpha = 0.85) +
     ggplot2::scale_color_manual(values = c(Flagged = "#c0392b", OK = "#27ae60"), drop = FALSE) +
-    # Both axes are 0-1 fractions (calculateOutputMetrics()'s "percent"
-    # column), labeled as percentages here purely for display, matching
-    # build_qc_comparison_plot()'s own axis convention.
-    ggplot2::scale_x_continuous(labels = function(x) paste0(round(x * 100), "%")) +
-    ggplot2::scale_y_continuous(labels = function(x) paste0(round(x * 100), "%")) +
+    # Percent-based axes are 0-1 fractions (calculateOutputMetrics()'s
+    # "percent" column), labeled as percentages here purely for display,
+    # matching build_qc_comparison_plot()'s own axis convention. Precision
+    # axes (raw visual-angle degrees, precision_value) are left on their
+    # natural numeric scale instead -- multiplying by 100 or appending "%"
+    # would misrepresent them.
+    (if (precision_x) ggplot2::scale_x_continuous() else ggplot2::scale_x_continuous(labels = function(x) paste0(round(x * 100), "%"))) +
+    (if (precision_y) ggplot2::scale_y_continuous() else ggplot2::scale_y_continuous(labels = function(x) paste0(round(x * 100), "%"))) +
     ggplot2::labs(
-      x = metric_x, y = metric_y, color = "QC status",
+      x = if (precision_x) paste0(metric_x, " (degrees)") else metric_x,
+      y = if (precision_y) paste0(metric_y, " (degrees)") else metric_y,
+      color = "QC status",
       title = paste("Across-file comparison:", metric_x, "vs.", metric_y)
     ) +
     ggplot2::theme_minimal(base_size = 15) +

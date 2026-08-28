@@ -2662,6 +2662,14 @@ server <- function(input, output, session) {
       plot <- if (length(metrics) == 1) {
         build_qc_comparison_plot(tbl, metrics[1], qc_thresholds())
       } else {
+        # A percentage-based metric and a precision-based (visual-angle-
+        # degree) metric CAN be compared here -- a scatterplot's x/y axes
+        # are independent scales, unlike build_qc_comparison_plot()'s single
+        # shared bar-chart y-axis, so mixing them is a normal, useful
+        # comparison (e.g. "does robustness correlate with precision?"), not
+        # the misleading case a shared axis would be. Each axis is scaled/
+        # labeled according to its own metric's kind -- see
+        # build_qc_comparison_scatter()'s own comment.
         build_qc_comparison_scatter(tbl, metrics[1], metrics[2], qc_thresholds())
       }
       req(plot)
@@ -2748,8 +2756,22 @@ server <- function(input, output, session) {
       dt <- dt %>% DT::formatStyle(cfg$qc_metric, backgroundColor = DT::styleInterval(threshold_value, colors))
     }
 
+    # Percent-based metric columns (0-1 fractions) get DT's percentage
+    # formatting, matching every other percent-scale view in this app.
+    # precision_* columns (raw visual-angle degrees, precision_value --
+    # see is_precision_metric()/metric_value_column()'s own header comment,
+    # analyze_helpers.R) are NOT percentages -- formatPercentage()-ing them
+    # would multiply a degree value by 100 and append "%", producing a
+    # meaningless number -- so they instead get plain numeric rounding only.
     metric_cols <- setdiff(names(tbl), c("recording", "batch_name", "source_file"))
-    dt %>% DT::formatPercentage(metric_cols, 1)
+    split_cols <- split_metric_columns(metric_cols)
+    if (length(split_cols$percent) > 0) {
+      dt <- dt %>% DT::formatPercentage(split_cols$percent, 1)
+    }
+    if (length(split_cols$precision) > 0) {
+      dt <- dt %>% DT::formatRound(split_cols$precision, 3)
+    }
+    dt
   })
 }
 
