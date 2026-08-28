@@ -58,8 +58,14 @@ test_that("eyeQuality end-to-end output shape and metrics match expectations for
   expect_equal(unique(result$gazeY.preprocessed_px), 800)
   expect_equal(unique(result$distanceZ.preprocessed_mm), 600)
   expect_equal(unique(result$pupil.preprocessed), 3.5)
-  expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
-  expect_equal(unique(result$gazeY.preprocessed_va), 7.84, tolerance = 1e-6)
+  # 12.78/7.86 (not 12.77/7.84): calculateVisualAngle() previously used a
+  # (displayResolution_px + 1) * 0.5 screen-center pixel that didn't match
+  # convertVisualAngToPixels()'s displayResolution_px / 2 center -- see
+  # R/calculateVisualAngle.R's "Screen-center pixel convention" section.
+  # The fix aligns both on displayResolution_px / 2, the correct center for
+  # this package's ADCS-derived pixel coordinates.
+  expect_equal(unique(result$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
+  expect_equal(unique(result$gazeY.preprocessed_va), 7.86, tolerance = 1e-6)
   expect_equal(unique(result$blink.classification), 0)
   expect_equal(unique(result$offscreen.classification), "onscreen")
   # velocity is undefined for the very first sample and IVT can't classify a
@@ -97,8 +103,14 @@ test_that("eyeQuality end-to-end output shape and metrics match expectations for
   expect_equal(unique(result$gazeY.preprocessed_px), 800)
   expect_equal(unique(result$distanceZ.preprocessed_mm), 600)
   expect_equal(unique(result$pupil.preprocessed), 3.5)
-  expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
-  expect_equal(unique(result$gazeY.preprocessed_va), 7.84, tolerance = 1e-6)
+  # 12.78/7.86 (not 12.77/7.84): calculateVisualAngle() previously used a
+  # (displayResolution_px + 1) * 0.5 screen-center pixel that didn't match
+  # convertVisualAngToPixels()'s displayResolution_px / 2 center -- see
+  # R/calculateVisualAngle.R's "Screen-center pixel convention" section.
+  # The fix aligns both on displayResolution_px / 2, the correct center for
+  # this package's ADCS-derived pixel coordinates.
+  expect_equal(unique(result$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
+  expect_equal(unique(result$gazeY.preprocessed_va), 7.86, tolerance = 1e-6)
   expect_equal(unique(result$blink.classification), 0)
   expect_equal(unique(result$offscreen.classification), "onscreen")
   expect_equal(
@@ -136,8 +148,14 @@ test_that("eyeQuality end-to-end output shape and metrics match expectations for
   expect_equal(unique(result$gazeY.preprocessed_px), 800)
   expect_equal(unique(result$distanceZ.preprocessed_mm), 600)
   expect_equal(unique(result$pupil.preprocessed), 3.5)
-  expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
-  expect_equal(unique(result$gazeY.preprocessed_va), 7.84, tolerance = 1e-6)
+  # 12.78/7.86 (not 12.77/7.84): calculateVisualAngle() previously used a
+  # (displayResolution_px + 1) * 0.5 screen-center pixel that didn't match
+  # convertVisualAngToPixels()'s displayResolution_px / 2 center -- see
+  # R/calculateVisualAngle.R's "Screen-center pixel convention" section.
+  # The fix aligns both on displayResolution_px / 2, the correct center for
+  # this package's ADCS-derived pixel coordinates.
+  expect_equal(unique(result$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
+  expect_equal(unique(result$gazeY.preprocessed_va), 7.86, tolerance = 1e-6)
   expect_equal(unique(result$blink.classification), 0)
   expect_equal(unique(result$offscreen.classification), "onscreen")
   expect_equal(
@@ -171,8 +189,14 @@ test_that("eyeQuality end-to-end output shape and metrics match expectations for
   expect_equal(unique(result$gazeY.preprocessed_px), 800)
   expect_equal(unique(result$distanceZ.preprocessed_mm), 600)
   expect_equal(unique(result$pupil.preprocessed), 3.5)
-  expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
-  expect_equal(unique(result$gazeY.preprocessed_va), 7.84, tolerance = 1e-6)
+  # 12.78/7.86 (not 12.77/7.84): calculateVisualAngle() previously used a
+  # (displayResolution_px + 1) * 0.5 screen-center pixel that didn't match
+  # convertVisualAngToPixels()'s displayResolution_px / 2 center -- see
+  # R/calculateVisualAngle.R's "Screen-center pixel convention" section.
+  # The fix aligns both on displayResolution_px / 2, the correct center for
+  # this package's ADCS-derived pixel coordinates.
+  expect_equal(unique(result$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
+  expect_equal(unique(result$gazeY.preprocessed_va), 7.86, tolerance = 1e-6)
   expect_equal(unique(result$blink.classification), 0)
   expect_equal(unique(result$offscreen.classification), "onscreen")
   expect_equal(

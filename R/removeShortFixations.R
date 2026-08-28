@@ -7,6 +7,7 @@
 #' @param fixationStart list of fixation start points as indexes, generated from output of function findFixationIndices
 #' @param fixationLength integer list of fixation durations, generated from output of function findFixationIndices
 #' @param shortFixationThreshold_ms threshold for minimum duration of a given fixation to be considered acceptable. Recommended default: 60 ms
+#' @param sampling_interval recording's actual sample-to-sample interval, in ms (i.e. 1000 / recordingFrequency_hz). Used to convert a fixation length in samples to ms when comparing against shortFixationThreshold_ms. Default: 3.3, matching a ~303 Hz recording
 #'
 #' @return return list of updated fixation metrics, including classification (class.adj), duration, and distance
 #' @export
@@ -18,7 +19,8 @@ removeShortFixations <-
            fixationEnd,
            fixationStart,
            fixationLength,
-           shortFixationThreshold_ms) {
+           shortFixationThreshold_ms,
+           sampling_interval = 3.3) {
     print("Removing short fixations")
     fix_x <-
       fix_y <-
@@ -26,7 +28,7 @@ removeShortFixations <-
     data$class.adj.shortfix <- entryClass
 
     for (ifix in 1:length(rleFixIndex)) {
-      if (fixationLength[rleFixIndex][ifix] * 3.3 < shortFixationThreshold_ms) {
+      if (fixationLength[rleFixIndex][ifix] * sampling_interval < shortFixationThreshold_ms) {
         end.change.index <- fixationEnd[rleFixIndex][ifix]
         start.change.index <- fixationStart[rleFixIndex][ifix]
         data$class.adj.shortfix[start.change.index:end.change.index] <-

@@ -93,8 +93,21 @@ test_that("eyeQualityBatch passes caller-supplied displayDimensionX_mm/Y_mm thro
   # values below are calculateVisualAngle(1400, 600, 1920, X_mm) rounded to
   # 2 decimal places, i.e. exactly what eyeQuality() would have computed had
   # it been called directly with these displayDimensionX_mm values
-  expect_equal(unique(data_default$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
-  expect_equal(unique(data_custom$gazeX.preprocessed_va), 7.48, tolerance = 1e-6)
+  #
+  # calculateVisualAngle() previously used a (displayResolution_px + 1) * 0.5
+  # screen-center pixel that didn't match convertVisualAngToPixels()'s
+  # displayResolution_px / 2 center -- see R/calculateVisualAngle.R's
+  # "Screen-center pixel convention" section. The fix aligns both on
+  # displayResolution_px / 2, the correct center for this package's
+  # ADCS-derived pixel coordinates. For this fixture's specific geometry
+  # (gaze_px=1400, displayResolution_px=1920), the half-pixel shift doesn't
+  # cross a rounding boundary at 2 decimal places for either
+  # displayDimensionX_mm value used here, so both values are unaffected
+  # (verified empirically, not assumed -- other fixtures' geometry DOES
+  # cross a rounding boundary, e.g. test-tobiiProFixture.R/
+  # test-tobiiStudioFixture.R's 12.78 -> 12.77).
+  expect_equal(unique(data_default$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
+  expect_equal(unique(data_custom$gazeX.preprocessed_va), 7.49, tolerance = 1e-6)
 
   # the regression this guards against: eyeQualityBatch() used to hardcode
   # displayDimensionX_mm = 594, displayDimensionY_mm = 344 literally inside

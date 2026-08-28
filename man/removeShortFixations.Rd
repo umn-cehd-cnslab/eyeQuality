@@ -11,7 +11,8 @@ removeShortFixations(
   fixationEnd,
   fixationStart,
   fixationLength,
-  shortFixationThreshold_ms
+  shortFixationThreshold_ms,
+  sampling_interval = 3.3
 )
 }
 \arguments{
@@ -28,6 +29,8 @@ removeShortFixations(
 \item{fixationLength}{integer list of fixation durations, generated from output of function findFixationIndices}
 
 \item{shortFixationThreshold_ms}{threshold for minimum duration of a given fixation to be considered acceptable. Recommended default: 60 ms}
+
+\item{sampling_interval}{recording's actual sample-to-sample interval, in ms (i.e. 1000 / recordingFrequency_hz). Used to convert a fixation length in samples to ms when comparing against shortFixationThreshold_ms. Default: 3.3, matching a ~303 Hz recording}
 }
 \value{
 return list of updated fixation metrics, including classification (class.adj), duration, and distance

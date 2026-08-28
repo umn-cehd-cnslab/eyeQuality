@@ -21,15 +21,13 @@ Useful links:
 Authors:
 \itemize{
   \item Lana Hantzsch \email{hantz006@umn.edu}
-  \item Eli Johnson
   \item Jed Elison \email{jtelison@umn.edu} [funder]
 }
 
 Other contributors:
 \itemize{
-  \item Elizabeth Sharer [contributor]
   \item Caitlin Sisk [contributor]
-  \item Isa Stallworthy [contributor]
+  \item Eli Johnson [contributor]
 }
 
 }

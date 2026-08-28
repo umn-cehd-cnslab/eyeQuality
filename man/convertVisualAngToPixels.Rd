@@ -26,3 +26,25 @@ px the pixel value for the input VA
 \description{
 Calculate pixel position from visual angle
 }
+\section{Screen-center pixel convention}{
+
+The \code{displayResolution_px / 2} center used here must stay in sync with
+\code{calculateVisualAngle()}'s screen-center convention -- see that
+function's matching roxygen section for the full trace of why
+\code{displayResolution_px / 2} (not \code{(displayResolution_px + 1) / 2}) is the
+correct center for this package's pixel coordinates, which derive from
+Tobii's ADCS normalized \verb{[0.0, 1.0]} display coordinates multiplied by
+\code{displayResolution_px} (a continuous edge-to-edge span, not a discrete
+0-indexed grid). With matching centers, \code{calculateVisualAngle()} and
+this function are exact algebraic inverses: writing \code{c} for the shared
+center pixel, \code{calculateVisualAngle()} computes
+\code{Ang = atan(((px - c) * dim_mm) / (distanceZ * res_px)) * 180 / pi}, and
+this function computes
+\verb{px' = tan(Ang * pi / 180) * distanceZ * res_px / dim_mm + c}, which
+algebraically simplifies back to \verb{px' = (px - c) + c = px} for any
+shared \code{c} -- so any mismatch between the two functions' center formulas
+(as existed before this fix: \code{calculateVisualAngle()} used
+\code{(res_px + 1) / 2} while this function used \code{res_px / 2}) introduces a
+systematic half-pixel bias rather than a true round trip.
+}
+

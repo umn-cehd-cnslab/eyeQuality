@@ -10,6 +10,7 @@
 #' @param fixationLength list of fixation durations, generated from output of function findFixationIndices
 #' @param mergeDistance_va maximum distance (in VA) between two fixations to be merged. Default: 0/5 VA
 #' @param mergeTimeGap_ms maximum time lapsed (in ms) between two fixations to be merged. Default: 75 ms
+#' @param sampling_interval recording's actual sample-to-sample interval, in ms (i.e. 1000 / recordingFrequency_hz). Used to convert a gap duration in samples to ms when comparing against mergeTimeGap_ms. Default: 3.3, matching a ~303 Hz recording
 #'
 #' @return return list of updated fixation metrics, including classification (class.adj), duration, and distance
 #' @export
@@ -25,7 +26,8 @@ mergeAdjacentFixations <-
            fixationStart,
            fixationLength,
            mergeDistance_va = 0.5,
-           mergeTimeGap_ms = 75) {
+           mergeTimeGap_ms = 75,
+           sampling_interval = 3.3) {
     # list2env(findFixationIndices(data.raw.df$class), envir = globalenv())
 
     fix_x <-
@@ -115,10 +117,10 @@ mergeAdjacentFixations <-
             # if two consecutive fixations are fairly close to eachother...
             if (!is.na(fix_euc) & fix_euc < mergeDistance_va) {
               # ... and if not too much time has transpired, then merge
-              if (gap_dur * 3.3 < mergeTimeGap_ms) {
+              if (gap_dur * sampling_interval < mergeTimeGap_ms) {
                 data$class.adj[start.change.index:end.change.index] <- "fixation"
               }
-              if (gap_dur * 3.3 >= mergeTimeGap_ms) {
+              if (gap_dur * sampling_interval >= mergeTimeGap_ms) {
                 data$class.adj.xva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
                   fix_x[ifix]
                 data$class.adj.yva[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
@@ -132,7 +134,7 @@ mergeAdjacentFixations <-
                 data$class.adj.num[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix]] <-
                   ifix
                 # print(data[fixationStart[rleFixIndex][ifix]:fixationEnd[rleFixIndex][ifix + 1],c("class","class.adj","class.adj.euc","class.adj.gap.dur","class.adj.xva","class.adj.yva","class.adj.num")])
-                # print(paste("Too Long: ",gap_dur*3.3, " ms duration ,", fix_euc, "va distance between fixations"))
+                # print(paste("Too Long: ",gap_dur*sampling_interval, " ms duration ,", fix_euc, "va distance between fixations"))
                 fixation_complete <- TRUE
               }
             }
@@ -274,11 +276,11 @@ mergeAdjacentFixations <-
           if (!is.na(fix_euc) &
             !is.na(mergeDistance_va) & fix_euc < mergeDistance_va) {
             # ... and if not too much time has transpired, then merge
-            if (gap_dur * 3.3 < mergeTimeGap_ms) {
+            if (gap_dur * sampling_interval < mergeTimeGap_ms) {
               data$class.adj[start.change.index:end.change.index] <- "fixation"
               ifix <- ifix - 1
             }
-            if (gap_dur * 3.3 >= mergeTimeGap_ms) {
+            if (gap_dur * sampling_interval >= mergeTimeGap_ms) {
               fixation_b_complete <- TRUE
             }
           }

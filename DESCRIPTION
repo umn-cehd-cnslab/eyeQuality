@@ -4,10 +4,8 @@ Version: 0.1.0
 Authors@R: c(
     person("Aaron", "Glick", email = "glick094@umn.edu", role = c("aut", "cre"), comment = c(ORCID = "0000-0001-6926-7166")), 
     person("Lana", "Hantzsch", email = "hantz006@umn.edu", role = c("aut")),
-    person("Eli", "Johnson", role = c("aut")), 
-    person("Elizabeth", "Sharer", role = c("ctb")),
     person("Caitlin", "Sisk", role = c("ctb")),
-    person("Isa", "Stallworthy", role = c("ctb")), 
+    person("Eli", "Johnson", role = c("ctb")), 
     person("Jed", "Elison", email = "jtelison@umn.edu", role = c("aut", "fnd"))
     )
 Description: Provides a preprocessing and quality-control pipeline for eye
@@ -55,6 +53,7 @@ Imports:
     forecast,
     pracma,
     zoo,
+    runner,
     ggplot2,
     ggpubr,
     parallel,

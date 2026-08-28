@@ -48,7 +48,14 @@ test_that("eyeQuality runs end-to-end on the Tobii Pro sample fixture without er
   # "Sensor" filter regression in extractEventRows.R) producing all-NA
   # output that would still pass a bare "doesn't error" check.
   expect_false(any(is.na(result$gazeX.preprocessed_va)))
-  expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
+  # 12.78 (not 12.77): calculateVisualAngle() previously used a
+  # (displayResolution_px + 1) * 0.5 screen-center pixel that didn't match
+  # convertVisualAngToPixels()'s displayResolution_px / 2 center; fixed so
+  # both functions use displayResolution_px / 2, the convention confirmed
+  # correct for this package's Tobii ADCS-derived pixel coordinates -- see
+  # R/calculateVisualAngle.R's "Screen-center pixel convention" section.
+  # 12.77 was this fixture's value under the old, half-pixel-biased center.
+  expect_equal(unique(result$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
 })
 
 test_that("eyeQuality runs end-to-end on the Tobii Pro monocular fixture without error", {
@@ -75,5 +82,12 @@ test_that("eyeQuality runs end-to-end on the Tobii Pro monocular fixture without
   # ("Invalid") branch of removeInvalidGaze.R, as distinct from
   # TobiiStudio's numeric threshold branch.
   expect_false(any(is.na(result$gazeX.preprocessed_va)))
-  expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
+  # 12.78 (not 12.77): calculateVisualAngle() previously used a
+  # (displayResolution_px + 1) * 0.5 screen-center pixel that didn't match
+  # convertVisualAngToPixels()'s displayResolution_px / 2 center; fixed so
+  # both functions use displayResolution_px / 2, the convention confirmed
+  # correct for this package's Tobii ADCS-derived pixel coordinates -- see
+  # R/calculateVisualAngle.R's "Screen-center pixel convention" section.
+  # 12.77 was this fixture's value under the old, half-pixel-biased center.
+  expect_equal(unique(result$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
 })

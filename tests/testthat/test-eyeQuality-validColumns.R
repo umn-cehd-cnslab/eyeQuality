@@ -154,7 +154,15 @@ test_that("eyeQuality() end-to-end pipeline recovers constant gaze position thro
   # the same hand-derived value used by the P1-01 fixture test, giving a
   # concrete pre-change-equivalent value to check against even without an
   # actual pre-change snapshot to diff.
-  expect_equal(unique(result$gazeX.preprocessed_va), 12.77, tolerance = 1e-6)
+  #
+  # 12.78 (not 12.77): calculateVisualAngle() previously used a
+  # (displayResolution_px + 1) * 0.5 screen-center pixel, which was not an
+  # exact inverse of convertVisualAngToPixels()'s displayResolution_px / 2
+  # center (see R/calculateVisualAngle.R's "Screen-center pixel convention"
+  # section). The fix aligns both functions on displayResolution_px / 2,
+  # which is the correct center for this package's ADCS-derived pixel
+  # coordinates; 12.77 was the old, half-pixel-biased value.
+  expect_equal(unique(result$gazeX.preprocessed_va), 12.78, tolerance = 1e-6)
 })
 
 # Regression tests for P3-07: eyeQuality() was rewired to call

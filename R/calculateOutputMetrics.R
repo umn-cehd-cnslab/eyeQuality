@@ -11,12 +11,151 @@ safe_max <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
 # standard idiom for this exact false positive.
 utils::globalVariables(".")
 
+# Precision metrics (SD + RMS sample-to-sample) -----------------------------
+#
+# Ports an existing lab script (previously run ad hoc, outside this
+# package, against IBIS study data) into the pipeline proper, generalized
+# to run for three fixation-selection variants -- "whole file" (no
+# filtering), "longest fixation", and "median fixation" -- instead of the
+# original's two, and to derive its rolling-window size from the
+# recording's actual sampling rate (calculateFrequency_hz()) instead of a
+# hardcoded ~300Hz assumption.
+
+# Returns the rows of `data` belonging to the fixation(s) tied for the
+# longest (or median) IVT.fixationDuration_ms. Mirrors the reference
+# script's tie-handling: more than one IVT.fixationIndex can be tied for
+# the target duration, and all of their rows are included together. Returns
+# a zero-row data frame (not an error) when there are no classified
+# fixations to select from.
+.select_fixation_rows <- function(data, statistic = c("longest", "median")) {
+  statistic <- match.arg(statistic)
+
+  if (!all(c("IVT.fixationIndex", "IVT.fixationDuration_ms") %in% colnames(data)) ||
+    all(is.na(data$IVT.fixationIndex))) {
+    return(data[0, , drop = FALSE])
+  }
+
+  target_duration <- if (statistic == "longest") {
+    safe_max(data$IVT.fixationDuration_ms)
+  } else {
+    stats::median(data$IVT.fixationDuration_ms, na.rm = TRUE)
+  }
+
+  if (is.na(target_duration)) {
+    return(data[0, , drop = FALSE])
+  }
+
+  target_fix_ind <- unique(stats::na.omit(
+    data$IVT.fixationIndex[data$IVT.fixationDuration_ms == target_duration]
+  ))
+
+  data[!is.na(data$IVT.fixationIndex) & data$IVT.fixationIndex %in% target_fix_ind, , drop = FALSE]
+}
+
+# Root-mean-square sample-to-sample deviation of one gaze stream, matching
+# the reference script's rms.s2sdev(): the RMS of consecutive-sample
+# differences, ignoring NA pairs.
+.rms_s2s_deviation <- function(data_stream) {
+  sqrt(sum((data_stream - dplyr::lag(data_stream))^2, na.rm = TRUE) / sum(!is.na(data_stream)))
+}
+
+# Computes the RMS-S2S rolling-window size, in samples, for a window of
+# `window_ms` milliseconds, derived from `data`'s ACTUAL sampling rate
+# (calculateFrequency_hz()) rather than a hardcoded frequency assumption.
+# Returns NA if the sampling rate can't be determined (e.g. no
+# recordingTimestamp_ms column, or a degenerate/non-finite frequency).
+.precision_window_size_samples <- function(data, window_ms = 100) {
+  if (!"recordingTimestamp_ms" %in% colnames(data)) {
+    return(NA_real_)
+  }
+  recording_frequency_hz <- calculateFrequency_hz(data)
+  if (is.na(recording_frequency_hz) || !is.finite(recording_frequency_hz) || recording_frequency_hz <= 0) {
+    return(NA_real_)
+  }
+  floor(window_ms / (1000 / recording_frequency_hz)) + 1
+}
+
+# NaN can come out of mean()/median() (e.g. an all-NA rolling-window result)
+# where NA is the value this file's other NA-safe helpers (and downstream
+# consumers of qcsummary.tsv) expect -- collapse it the same way.
+.nan_to_na <- function(x) if (is.nan(x)) NA_real_ else x
+
+# Computes the 8 SD/RMS-S2S precision values for one fixation-selection
+# variant ("all" = whole file, "longest", "median") of `data`.
+# `window_size_samples` must be precomputed once, from the FULL,
+# unsubsetted file's actual sampling rate (see calculateOutputMetrics()
+# below) -- sampling rate is a property of the recording/device, not of an
+# arbitrary row subset, so it should not be re-derived per fixation.
+# Returns all-NA (not an error) if the visual-angle gaze columns are
+# missing entirely, or if the requested fixation subset is empty.
+.calculate_precision_metrics <- function(data,
+                                          fixation_selection = c("all", "longest", "median"),
+                                          window_size_samples) {
+  fixation_selection <- match.arg(fixation_selection)
+
+  na_result <- list(
+    sdX = NA_real_,
+    sdY = NA_real_,
+    rmsX_mean = NA_real_,
+    rmsX_median = NA_real_,
+    rmsY_mean = NA_real_,
+    rmsY_median = NA_real_,
+    rmsEuc_mean = NA_real_,
+    rmsEuc_median = NA_real_
+  )
+
+  if (!all(c("gazeX.preprocessed_va", "gazeY.preprocessed_va") %in% colnames(data))) {
+    return(na_result)
+  }
+
+  if (length(window_size_samples) != 1 || is.na(window_size_samples) ||
+    !is.finite(window_size_samples) || window_size_samples < 1) {
+    return(na_result)
+  }
+
+  subset_data <- switch(fixation_selection,
+    all = data,
+    longest = .select_fixation_rows(data, "longest"),
+    median = .select_fixation_rows(data, "median")
+  )
+
+  if (nrow(subset_data) == 0) {
+    return(na_result)
+  }
+
+  gaze_x <- subset_data$gazeX.preprocessed_va
+  gaze_y <- subset_data$gazeY.preprocessed_va
+
+  rms_x <- runner::runner(gaze_x, lag = 1, k = window_size_samples, na_pad = TRUE, f = .rms_s2s_deviation)
+  rms_y <- runner::runner(gaze_y, lag = 1, k = window_size_samples, na_pad = TRUE, f = .rms_s2s_deviation)
+  rms_euc <- sqrt(rms_x^2 + rms_y^2)
+
+  list(
+    sdX = .nan_to_na(sd(gaze_x, na.rm = TRUE)),
+    sdY = .nan_to_na(sd(gaze_y, na.rm = TRUE)),
+    rmsX_mean = .nan_to_na(mean(rms_x, na.rm = TRUE)),
+    rmsX_median = .nan_to_na(stats::median(rms_x, na.rm = TRUE)),
+    rmsY_mean = .nan_to_na(mean(rms_y, na.rm = TRUE)),
+    rmsY_median = .nan_to_na(stats::median(rms_y, na.rm = TRUE)),
+    rmsEuc_mean = .nan_to_na(mean(rms_euc, na.rm = TRUE)),
+    rmsEuc_median = .nan_to_na(stats::median(rms_euc, na.rm = TRUE))
+  )
+}
+
 #' Calculate Output Metrics
+#'
+#' Also computes SD and RMS sample-to-sample (RMS-S2S) gaze precision --
+#' how tightly clustered repeated gaze samples are, in visual-angle degrees
+#' -- for three fixation-selection variants of the recording (the whole
+#' file, its longest fixation, and its median-duration fixation), using a
+#' rolling window sized from the recording's actual sampling rate.
 #'
 #' @param data dataframe
 #' @importFrom rlang .data
 #' @importFrom stats sd
 #' @importFrom stats median
+#' @importFrom stats na.omit
+#' @importFrom runner runner
 #' @return summary_df dataframe describing each
 #' @export
 #'
@@ -517,6 +656,19 @@ calculateOutputMetrics <- function(data) {
       sd = sd(.data$duration, na.rm = TRUE)
     )
 
+  # Precision (SD + RMS-S2S), computed for three fixation-selection
+  # variants. The rolling window size is derived from this recording's
+  # actual sampling rate (calculateFrequency_hz(), on the full,
+  # unsubsetted file's timestamps) rather than a hardcoded frequency
+  # assumption, computed once and reused across all three variants --
+  # sampling rate is a property of the recording/device, not of an
+  # arbitrary fixation subset.
+  precision_window_size_samples <- .precision_window_size_samples(data, window_ms = 100)
+
+  precision_wholeFile <- .calculate_precision_metrics(data, "all", precision_window_size_samples)
+  precision_longestFixation <- .calculate_precision_metrics(data, "longest", precision_window_size_samples)
+  precision_medianFixation <- .calculate_precision_metrics(data, "median", precision_window_size_samples)
+
   # setup output dataframe
   summary_df_rows <- c(
     "missing_raw_data_LeftEye",
@@ -546,7 +698,31 @@ calculateOutputMetrics <- function(data) {
     "ivt_fixations",
     "ivt_saccades",
     "ivt_unclassified",
-    "ivt_missing"
+    "ivt_missing",
+    "precision_sdX_wholeFile",
+    "precision_sdY_wholeFile",
+    "precision_rmsX_mean_wholeFile",
+    "precision_rmsX_median_wholeFile",
+    "precision_rmsY_mean_wholeFile",
+    "precision_rmsY_median_wholeFile",
+    "precision_rmsEuc_mean_wholeFile",
+    "precision_rmsEuc_median_wholeFile",
+    "precision_sdX_longestFixation",
+    "precision_sdY_longestFixation",
+    "precision_rmsX_mean_longestFixation",
+    "precision_rmsX_median_longestFixation",
+    "precision_rmsY_mean_longestFixation",
+    "precision_rmsY_median_longestFixation",
+    "precision_rmsEuc_mean_longestFixation",
+    "precision_rmsEuc_median_longestFixation",
+    "precision_sdX_medianFixation",
+    "precision_sdY_medianFixation",
+    "precision_rmsX_mean_medianFixation",
+    "precision_rmsX_median_medianFixation",
+    "precision_rmsY_mean_medianFixation",
+    "precision_rmsY_median_medianFixation",
+    "precision_rmsEuc_mean_medianFixation",
+    "precision_rmsEuc_median_medianFixation"
   )
   summary_df_columns <- c(
     "n",
@@ -560,7 +736,8 @@ calculateOutputMetrics <- function(data) {
     "group_mean",
     "group_min",
     "group_max",
-    "group_sd"
+    "group_sd",
+    "precision_value"
   )
   summary_df <-
     data.frame(matrix(
@@ -1169,6 +1346,23 @@ calculateOutputMetrics <- function(data) {
     summary_df[["ivt_fixations", "group_max"]]
   summary_df[["robustness_fixation_duration", "group_sd"]] <-
     summary_df[["ivt_fixations", "group_sd"]]
+
+  # Precision metrics (SD + RMS-S2S) populate the dedicated precision_value
+  # column -- these are raw visual-angle-degree magnitudes, not ratios, so
+  # percent/percent_numerator/percent_denominator are left NA for all 24
+  # rows, same as every other column that doesn't apply to a given row.
+  precision_variants <- list(
+    wholeFile = precision_wholeFile,
+    longestFixation = precision_longestFixation,
+    medianFixation = precision_medianFixation
+  )
+  for (variant_name in names(precision_variants)) {
+    variant_values <- precision_variants[[variant_name]]
+    for (metric_name in names(variant_values)) {
+      row_name <- paste0("precision_", metric_name, "_", variant_name)
+      summary_df[[row_name, "precision_value"]] <- variant_values[[metric_name]]
+    }
+  }
 
   print(summary_df)
 

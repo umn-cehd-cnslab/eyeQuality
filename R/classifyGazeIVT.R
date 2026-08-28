@@ -89,7 +89,8 @@ classifyGazeIVT <-
           fixationStart = ivt_env$start.fix,
           fixationLength = ivt_env$lengths.fix,
           mergeDistance_va = maxAdjacentFixationAngle,
-          mergeTimeGap_ms = maxAdjacentFixationTime
+          mergeTimeGap_ms = maxAdjacentFixationTime,
+          sampling_interval = sampling_interval
         )
       if (sum(data$class.adj %in% "fixation") == 0) {
         fixation_flag <- FALSE
@@ -121,7 +122,8 @@ classifyGazeIVT <-
             fixationEnd = ivt_env$end.fix,
             fixationStart = ivt_env$start.fix,
             fixationLength = ivt_env$lengths.fix,
-            shortFixationThreshold_ms = minFixationDuration
+            shortFixationThreshold_ms = minFixationDuration,
+            sampling_interval = sampling_interval
           )
         if (sum(data$class.adj.shortfix %in% "fixation") == 0) {
           fixation_flag <- FALSE

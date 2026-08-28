@@ -235,12 +235,13 @@ test_that("load_qcsummary_table combines a real 4-file batch run into one table 
   expect_length(result$read_errors, 0)
   expect_null(result$diagnostic_message)
 
-  # calculateOutputMetrics() produces one row per qc_metric (32 metric rows,
+  # calculateOutputMetrics() produces one row per qc_metric (56 metric rows,
   # confirmed directly against R/calculateOutputMetrics.R's summary_df row
   # labels: 28 declared up front plus 4 more -- ivt_blinks and the three
-  # robustness_* rows -- assigned dynamically further down), not one row per
-  # file, so 4 files combine to 4 * 32 = 128 rows.
-  expect_equal(nrow(result$table), 128)
+  # robustness_* rows -- assigned dynamically further down, plus 24 precision
+  # metric rows added later, 8 metrics x 3 fixation-selection variants), not
+  # one row per file, so 4 files combine to 4 * 56 = 224 rows.
+  expect_equal(nrow(result$table), 224)
   expect_equal(colnames(result$table)[1:4], c("recording", "task_name", "batch_name", "source_file"))
 
   expect_equal(
@@ -258,10 +259,10 @@ test_that("load_qcsummary_table combines a real 4-file batch run into one table 
   # derive_task_label() correctly falls through to NA for every row here.
   expect_true(all(is.na(result$table$task_name)))
 
-  # exactly one qc_metric row set (32 rows) per recording -- not merged
+  # exactly one qc_metric row set (56 rows) per recording -- not merged
   # across files and not duplicated
   rows_per_recording <- table(result$table$recording)
-  expect_true(all(rows_per_recording == 32))
+  expect_true(all(rows_per_recording == 56))
 })
 
 # ---------------------------------------------------------------------------
@@ -485,7 +486,7 @@ test_that("load_plot_data returns ok = FALSE with a clear error (not a crash) wh
 # result$table$source_file[sel[1]] (the same pre-sort/filter data.frame) --
 # these tests exercise that indexing directly, standing in for a value DT's
 # JS would send after a user has sorted/filtered/paged the table.
-test_that("row selection resolves distinct qc_table_rows_selected indices to their correct, distinct source_file/recording, matching a real 4-file, 128-row combined table", {
+test_that("row selection resolves distinct qc_table_rows_selected indices to their correct, distinct source_file/recording, matching a real 4-file, 224-row combined table", {
   skip_on_cran()
 
   app_dir <- system.file("shiny-apps", "app", package = "eyeQuality")
@@ -508,14 +509,15 @@ test_that("row selection resolves distinct qc_table_rows_selected indices to the
   # Build the exact combined table the app itself would build, to know ahead
   # of time which row indices belong to which recording/source_file.
   expected_table <- load_qcsummary_table(dir, recursive = TRUE)$table
-  expect_equal(nrow(expected_table), 128)
+  expect_equal(nrow(expected_table), 224)
 
-  # 32 qc_metric rows per file, in discover_qcsummary_files()'s sorted file
-  # order -- pick one row index from each of the 4 files' row ranges,
-  # deliberately not just row 1 of each, to stand in for indices a user could
-  # only have reached after sorting/filtering/paging away from the table's
-  # natural top-to-bottom order.
-  probe_indices <- c(5, 40, 70, 115)
+  # 56 qc_metric rows per file (32 original + 24 precision metric rows), in
+  # discover_qcsummary_files()'s sorted file order -- file row ranges are
+  # 1-56, 57-112, 113-168, 169-224. Pick one row index from each range,
+  # deliberately not just the first row of each, to stand in for indices a
+  # user could only have reached after sorting/filtering/paging away from
+  # the table's natural top-to-bottom order.
+  probe_indices <- c(5, 70, 130, 190)
   expected_recordings <- expected_table$recording[probe_indices]
   expect_length(unique(expected_recordings), 4)
 
@@ -547,7 +549,7 @@ test_that("row selection resolves distinct qc_table_rows_selected indices to the
 
     result <- load_result()
     expect_equal(result$n_files, 4L)
-    expect_equal(nrow(result$table), 128)
+    expect_equal(nrow(result$table), 224)
 
     # Compared via normalizePath() on both sides rather than raw string
     # equality: what this test actually needs to pin down is that

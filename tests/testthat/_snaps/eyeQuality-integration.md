@@ -32,6 +32,30 @@
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2
       ivt_missing                                        0    0.00                 0
+      precision_sdX_wholeFile                           NA      NA                NA
+      precision_sdY_wholeFile                           NA      NA                NA
+      precision_rmsX_mean_wholeFile                     NA      NA                NA
+      precision_rmsX_median_wholeFile                   NA      NA                NA
+      precision_rmsY_mean_wholeFile                     NA      NA                NA
+      precision_rmsY_median_wholeFile                   NA      NA                NA
+      precision_rmsEuc_mean_wholeFile                   NA      NA                NA
+      precision_rmsEuc_median_wholeFile                 NA      NA                NA
+      precision_sdX_longestFixation                     NA      NA                NA
+      precision_sdY_longestFixation                     NA      NA                NA
+      precision_rmsX_mean_longestFixation               NA      NA                NA
+      precision_rmsX_median_longestFixation             NA      NA                NA
+      precision_rmsY_mean_longestFixation               NA      NA                NA
+      precision_rmsY_median_longestFixation             NA      NA                NA
+      precision_rmsEuc_mean_longestFixation             NA      NA                NA
+      precision_rmsEuc_median_longestFixation           NA      NA                NA
+      precision_sdX_medianFixation                      NA      NA                NA
+      precision_sdY_medianFixation                      NA      NA                NA
+      precision_rmsX_mean_medianFixation                NA      NA                NA
+      precision_rmsX_median_medianFixation              NA      NA                NA
+      precision_rmsY_mean_medianFixation                NA      NA                NA
+      precision_rmsY_median_medianFixation              NA      NA                NA
+      precision_rmsEuc_mean_medianFixation              NA      NA                NA
+      precision_rmsEuc_median_medianFixation            NA      NA                NA
       ivt_blinks                                         0    0.00                 0
       robustness_proportion_valid_data_to_all_data     200    1.00               200
       robustness_proportion_blink_data_to_missing_data   0      NA                 0
@@ -65,6 +89,30 @@
       ivt_saccades                                                     200
       ivt_unclassified                                                 200
       ivt_missing                                                      200
+      precision_sdX_wholeFile                                           NA
+      precision_sdY_wholeFile                                           NA
+      precision_rmsX_mean_wholeFile                                     NA
+      precision_rmsX_median_wholeFile                                   NA
+      precision_rmsY_mean_wholeFile                                     NA
+      precision_rmsY_median_wholeFile                                   NA
+      precision_rmsEuc_mean_wholeFile                                   NA
+      precision_rmsEuc_median_wholeFile                                 NA
+      precision_sdX_longestFixation                                     NA
+      precision_sdY_longestFixation                                     NA
+      precision_rmsX_mean_longestFixation                               NA
+      precision_rmsX_median_longestFixation                             NA
+      precision_rmsY_mean_longestFixation                               NA
+      precision_rmsY_median_longestFixation                             NA
+      precision_rmsEuc_mean_longestFixation                             NA
+      precision_rmsEuc_median_longestFixation                           NA
+      precision_sdX_medianFixation                                      NA
+      precision_sdY_medianFixation                                      NA
+      precision_rmsX_mean_medianFixation                                NA
+      precision_rmsX_median_medianFixation                              NA
+      precision_rmsY_mean_medianFixation                                NA
+      precision_rmsY_median_medianFixation                              NA
+      precision_rmsEuc_mean_medianFixation                              NA
+      precision_rmsEuc_median_medianFixation                            NA
       ivt_blinks                                                       200
       robustness_proportion_valid_data_to_all_data                     200
       robustness_proportion_blink_data_to_missing_data                   0
@@ -98,6 +146,30 @@
       ivt_saccades                                                           NA
       ivt_unclassified                                                       NA
       ivt_missing                                                            NA
+      precision_sdX_wholeFile                                                NA
+      precision_sdY_wholeFile                                                NA
+      precision_rmsX_mean_wholeFile                                          NA
+      precision_rmsX_median_wholeFile                                        NA
+      precision_rmsY_mean_wholeFile                                          NA
+      precision_rmsY_median_wholeFile                                        NA
+      precision_rmsEuc_mean_wholeFile                                        NA
+      precision_rmsEuc_median_wholeFile                                      NA
+      precision_sdX_longestFixation                                          NA
+      precision_sdY_longestFixation                                          NA
+      precision_rmsX_mean_longestFixation                                    NA
+      precision_rmsX_median_longestFixation                                  NA
+      precision_rmsY_mean_longestFixation                                    NA
+      precision_rmsY_median_longestFixation                                  NA
+      precision_rmsEuc_mean_longestFixation                                  NA
+      precision_rmsEuc_median_longestFixation                                NA
+      precision_sdX_medianFixation                                           NA
+      precision_sdY_medianFixation                                           NA
+      precision_rmsX_mean_medianFixation                                     NA
+      precision_rmsX_median_medianFixation                                   NA
+      precision_rmsY_mean_medianFixation                                     NA
+      precision_rmsY_median_medianFixation                                   NA
+      precision_rmsEuc_mean_medianFixation                                   NA
+      precision_rmsEuc_median_medianFixation                                 NA
       ivt_blinks                                                             NA
       robustness_proportion_valid_data_to_all_data                           NA
       robustness_proportion_blink_data_to_missing_data                       NA
@@ -131,6 +203,30 @@
       ivt_saccades                                                         NA       0
       ivt_unclassified                                                     NA       2
       ivt_missing                                                          NA       0
+      precision_sdX_wholeFile                                              NA      NA
+      precision_sdY_wholeFile                                              NA      NA
+      precision_rmsX_mean_wholeFile                                        NA      NA
+      precision_rmsX_median_wholeFile                                      NA      NA
+      precision_rmsY_mean_wholeFile                                        NA      NA
+      precision_rmsY_median_wholeFile                                      NA      NA
+      precision_rmsEuc_mean_wholeFile                                      NA      NA
+      precision_rmsEuc_median_wholeFile                                    NA      NA
+      precision_sdX_longestFixation                                        NA      NA
+      precision_sdY_longestFixation                                        NA      NA
+      precision_rmsX_mean_longestFixation                                  NA      NA
+      precision_rmsX_median_longestFixation                                NA      NA
+      precision_rmsY_mean_longestFixation                                  NA      NA
+      precision_rmsY_median_longestFixation                                NA      NA
+      precision_rmsEuc_mean_longestFixation                                NA      NA
+      precision_rmsEuc_median_longestFixation                              NA      NA
+      precision_sdX_medianFixation                                         NA      NA
+      precision_sdY_medianFixation                                         NA      NA
+      precision_rmsX_mean_medianFixation                                   NA      NA
+      precision_rmsX_median_medianFixation                                 NA      NA
+      precision_rmsY_mean_medianFixation                                   NA      NA
+      precision_rmsY_median_medianFixation                                 NA      NA
+      precision_rmsEuc_mean_medianFixation                                 NA      NA
+      precision_rmsEuc_median_medianFixation                               NA      NA
       ivt_blinks                                                           NA       0
       robustness_proportion_valid_data_to_all_data                         NA      NA
       robustness_proportion_blink_data_to_missing_data                     NA      NA
@@ -164,6 +260,30 @@
       ivt_saccades                                               NA        NaN
       ivt_unclassified                                           NA        NaN
       ivt_missing                                                NA        NaN
+      precision_sdX_wholeFile                                    NA         NA
+      precision_sdY_wholeFile                                    NA         NA
+      precision_rmsX_mean_wholeFile                              NA         NA
+      precision_rmsX_median_wholeFile                            NA         NA
+      precision_rmsY_mean_wholeFile                              NA         NA
+      precision_rmsY_median_wholeFile                            NA         NA
+      precision_rmsEuc_mean_wholeFile                            NA         NA
+      precision_rmsEuc_median_wholeFile                          NA         NA
+      precision_sdX_longestFixation                              NA         NA
+      precision_sdY_longestFixation                              NA         NA
+      precision_rmsX_mean_longestFixation                        NA         NA
+      precision_rmsX_median_longestFixation                      NA         NA
+      precision_rmsY_mean_longestFixation                        NA         NA
+      precision_rmsY_median_longestFixation                      NA         NA
+      precision_rmsEuc_mean_longestFixation                      NA         NA
+      precision_rmsEuc_median_longestFixation                    NA         NA
+      precision_sdX_medianFixation                               NA         NA
+      precision_sdY_medianFixation                               NA         NA
+      precision_rmsX_mean_medianFixation                         NA         NA
+      precision_rmsX_median_medianFixation                       NA         NA
+      precision_rmsY_mean_medianFixation                         NA         NA
+      precision_rmsY_median_medianFixation                       NA         NA
+      precision_rmsEuc_mean_medianFixation                       NA         NA
+      precision_rmsEuc_median_medianFixation                     NA         NA
       ivt_blinks                                                 NA        NaN
       robustness_proportion_valid_data_to_all_data               NA         NA
       robustness_proportion_blink_data_to_missing_data           NA         NA
@@ -197,10 +317,91 @@
       ivt_saccades                                            NA        NA       NA
       ivt_unclassified                                        NA        NA       NA
       ivt_missing                                             NA        NA       NA
+      precision_sdX_wholeFile                                 NA        NA       NA
+      precision_sdY_wholeFile                                 NA        NA       NA
+      precision_rmsX_mean_wholeFile                           NA        NA       NA
+      precision_rmsX_median_wholeFile                         NA        NA       NA
+      precision_rmsY_mean_wholeFile                           NA        NA       NA
+      precision_rmsY_median_wholeFile                         NA        NA       NA
+      precision_rmsEuc_mean_wholeFile                         NA        NA       NA
+      precision_rmsEuc_median_wholeFile                       NA        NA       NA
+      precision_sdX_longestFixation                           NA        NA       NA
+      precision_sdY_longestFixation                           NA        NA       NA
+      precision_rmsX_mean_longestFixation                     NA        NA       NA
+      precision_rmsX_median_longestFixation                   NA        NA       NA
+      precision_rmsY_mean_longestFixation                     NA        NA       NA
+      precision_rmsY_median_longestFixation                   NA        NA       NA
+      precision_rmsEuc_mean_longestFixation                   NA        NA       NA
+      precision_rmsEuc_median_longestFixation                 NA        NA       NA
+      precision_sdX_medianFixation                            NA        NA       NA
+      precision_sdY_medianFixation                            NA        NA       NA
+      precision_rmsX_mean_medianFixation                      NA        NA       NA
+      precision_rmsX_median_medianFixation                    NA        NA       NA
+      precision_rmsY_mean_medianFixation                      NA        NA       NA
+      precision_rmsY_median_medianFixation                    NA        NA       NA
+      precision_rmsEuc_mean_medianFixation                    NA        NA       NA
+      precision_rmsEuc_median_medianFixation                  NA        NA       NA
       ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA
+                                                       precision_value
+      missing_raw_data_LeftEye                                      NA
+      missing_raw_data_RightEye                                     NA
+      missing_raw_data_BothEyes                                     NA
+      valid_raw_data                                                NA
+      blinks_LeftEye                                                NA
+      blinks_RightEye                                               NA
+      blinks_BothEyes                                               NA
+      final_na                                                      NA
+      final_valid                                                   NA
+      interpolated_LeftEye                                          NA
+      interpolated_RightEye                                         NA
+      eye_select_LeftOnly                                           NA
+      eye_select_RightOnly                                          NA
+      eye_select_mean                                               NA
+      eye_selected_mean_X                                           NA
+      eye_selected_mean_Y                                           NA
+      eye_selected_mean_pupil                                       NA
+      eye_selected_mean_distZ                                       NA
+      smoothed_X                                                    NA
+      smoothed_Y                                                    NA
+      smoothed_pupil                                                NA
+      smoothed_distZ                                                NA
+      smoothed_velocity_X                                           NA
+      smoothed_velocity_Y                                           NA
+      ivt_fixations                                                 NA
+      ivt_saccades                                                  NA
+      ivt_unclassified                                              NA
+      ivt_missing                                                   NA
+      precision_sdX_wholeFile                                        0
+      precision_sdY_wholeFile                                        0
+      precision_rmsX_mean_wholeFile                                  0
+      precision_rmsX_median_wholeFile                                0
+      precision_rmsY_mean_wholeFile                                  0
+      precision_rmsY_median_wholeFile                                0
+      precision_rmsEuc_mean_wholeFile                                0
+      precision_rmsEuc_median_wholeFile                              0
+      precision_sdX_longestFixation                                  0
+      precision_sdY_longestFixation                                  0
+      precision_rmsX_mean_longestFixation                            0
+      precision_rmsX_median_longestFixation                          0
+      precision_rmsY_mean_longestFixation                            0
+      precision_rmsY_median_longestFixation                          0
+      precision_rmsEuc_mean_longestFixation                          0
+      precision_rmsEuc_median_longestFixation                        0
+      precision_sdX_medianFixation                                   0
+      precision_sdY_medianFixation                                   0
+      precision_rmsX_mean_medianFixation                             0
+      precision_rmsX_median_medianFixation                           0
+      precision_rmsY_mean_medianFixation                             0
+      precision_rmsY_median_medianFixation                           0
+      precision_rmsEuc_mean_medianFixation                           0
+      precision_rmsEuc_median_medianFixation                         0
+      ivt_blinks                                                    NA
+      robustness_proportion_valid_data_to_all_data                  NA
+      robustness_proportion_blink_data_to_missing_data              NA
+      robustness_fixation_duration                                  NA
 
 # eyeQuality end-to-end output shape and metrics match expectations for tobii_studio_monocular.tsv
 
@@ -236,6 +437,30 @@
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2
       ivt_missing                                        0    0.00                 0
+      precision_sdX_wholeFile                           NA      NA                NA
+      precision_sdY_wholeFile                           NA      NA                NA
+      precision_rmsX_mean_wholeFile                     NA      NA                NA
+      precision_rmsX_median_wholeFile                   NA      NA                NA
+      precision_rmsY_mean_wholeFile                     NA      NA                NA
+      precision_rmsY_median_wholeFile                   NA      NA                NA
+      precision_rmsEuc_mean_wholeFile                   NA      NA                NA
+      precision_rmsEuc_median_wholeFile                 NA      NA                NA
+      precision_sdX_longestFixation                     NA      NA                NA
+      precision_sdY_longestFixation                     NA      NA                NA
+      precision_rmsX_mean_longestFixation               NA      NA                NA
+      precision_rmsX_median_longestFixation             NA      NA                NA
+      precision_rmsY_mean_longestFixation               NA      NA                NA
+      precision_rmsY_median_longestFixation             NA      NA                NA
+      precision_rmsEuc_mean_longestFixation             NA      NA                NA
+      precision_rmsEuc_median_longestFixation           NA      NA                NA
+      precision_sdX_medianFixation                      NA      NA                NA
+      precision_sdY_medianFixation                      NA      NA                NA
+      precision_rmsX_mean_medianFixation                NA      NA                NA
+      precision_rmsX_median_medianFixation              NA      NA                NA
+      precision_rmsY_mean_medianFixation                NA      NA                NA
+      precision_rmsY_median_medianFixation              NA      NA                NA
+      precision_rmsEuc_mean_medianFixation              NA      NA                NA
+      precision_rmsEuc_median_medianFixation            NA      NA                NA
       ivt_blinks                                         0    0.00                 0
       robustness_proportion_valid_data_to_all_data     200    1.00               200
       robustness_proportion_blink_data_to_missing_data   0      NA                 0
@@ -269,6 +494,30 @@
       ivt_saccades                                                     200
       ivt_unclassified                                                 200
       ivt_missing                                                      200
+      precision_sdX_wholeFile                                           NA
+      precision_sdY_wholeFile                                           NA
+      precision_rmsX_mean_wholeFile                                     NA
+      precision_rmsX_median_wholeFile                                   NA
+      precision_rmsY_mean_wholeFile                                     NA
+      precision_rmsY_median_wholeFile                                   NA
+      precision_rmsEuc_mean_wholeFile                                   NA
+      precision_rmsEuc_median_wholeFile                                 NA
+      precision_sdX_longestFixation                                     NA
+      precision_sdY_longestFixation                                     NA
+      precision_rmsX_mean_longestFixation                               NA
+      precision_rmsX_median_longestFixation                             NA
+      precision_rmsY_mean_longestFixation                               NA
+      precision_rmsY_median_longestFixation                             NA
+      precision_rmsEuc_mean_longestFixation                             NA
+      precision_rmsEuc_median_longestFixation                           NA
+      precision_sdX_medianFixation                                      NA
+      precision_sdY_medianFixation                                      NA
+      precision_rmsX_mean_medianFixation                                NA
+      precision_rmsX_median_medianFixation                              NA
+      precision_rmsY_mean_medianFixation                                NA
+      precision_rmsY_median_medianFixation                              NA
+      precision_rmsEuc_mean_medianFixation                              NA
+      precision_rmsEuc_median_medianFixation                            NA
       ivt_blinks                                                       200
       robustness_proportion_valid_data_to_all_data                     200
       robustness_proportion_blink_data_to_missing_data                   0
@@ -302,6 +551,30 @@
       ivt_saccades                                                           NA
       ivt_unclassified                                                       NA
       ivt_missing                                                            NA
+      precision_sdX_wholeFile                                                NA
+      precision_sdY_wholeFile                                                NA
+      precision_rmsX_mean_wholeFile                                          NA
+      precision_rmsX_median_wholeFile                                        NA
+      precision_rmsY_mean_wholeFile                                          NA
+      precision_rmsY_median_wholeFile                                        NA
+      precision_rmsEuc_mean_wholeFile                                        NA
+      precision_rmsEuc_median_wholeFile                                      NA
+      precision_sdX_longestFixation                                          NA
+      precision_sdY_longestFixation                                          NA
+      precision_rmsX_mean_longestFixation                                    NA
+      precision_rmsX_median_longestFixation                                  NA
+      precision_rmsY_mean_longestFixation                                    NA
+      precision_rmsY_median_longestFixation                                  NA
+      precision_rmsEuc_mean_longestFixation                                  NA
+      precision_rmsEuc_median_longestFixation                                NA
+      precision_sdX_medianFixation                                           NA
+      precision_sdY_medianFixation                                           NA
+      precision_rmsX_mean_medianFixation                                     NA
+      precision_rmsX_median_medianFixation                                   NA
+      precision_rmsY_mean_medianFixation                                     NA
+      precision_rmsY_median_medianFixation                                   NA
+      precision_rmsEuc_mean_medianFixation                                   NA
+      precision_rmsEuc_median_medianFixation                                 NA
       ivt_blinks                                                             NA
       robustness_proportion_valid_data_to_all_data                           NA
       robustness_proportion_blink_data_to_missing_data                       NA
@@ -335,6 +608,30 @@
       ivt_saccades                                                         NA       0
       ivt_unclassified                                                     NA       2
       ivt_missing                                                          NA       0
+      precision_sdX_wholeFile                                              NA      NA
+      precision_sdY_wholeFile                                              NA      NA
+      precision_rmsX_mean_wholeFile                                        NA      NA
+      precision_rmsX_median_wholeFile                                      NA      NA
+      precision_rmsY_mean_wholeFile                                        NA      NA
+      precision_rmsY_median_wholeFile                                      NA      NA
+      precision_rmsEuc_mean_wholeFile                                      NA      NA
+      precision_rmsEuc_median_wholeFile                                    NA      NA
+      precision_sdX_longestFixation                                        NA      NA
+      precision_sdY_longestFixation                                        NA      NA
+      precision_rmsX_mean_longestFixation                                  NA      NA
+      precision_rmsX_median_longestFixation                                NA      NA
+      precision_rmsY_mean_longestFixation                                  NA      NA
+      precision_rmsY_median_longestFixation                                NA      NA
+      precision_rmsEuc_mean_longestFixation                                NA      NA
+      precision_rmsEuc_median_longestFixation                              NA      NA
+      precision_sdX_medianFixation                                         NA      NA
+      precision_sdY_medianFixation                                         NA      NA
+      precision_rmsX_mean_medianFixation                                   NA      NA
+      precision_rmsX_median_medianFixation                                 NA      NA
+      precision_rmsY_mean_medianFixation                                   NA      NA
+      precision_rmsY_median_medianFixation                                 NA      NA
+      precision_rmsEuc_mean_medianFixation                                 NA      NA
+      precision_rmsEuc_median_medianFixation                               NA      NA
       ivt_blinks                                                           NA       0
       robustness_proportion_valid_data_to_all_data                         NA      NA
       robustness_proportion_blink_data_to_missing_data                     NA      NA
@@ -368,6 +665,30 @@
       ivt_saccades                                               NA        NaN
       ivt_unclassified                                           NA        NaN
       ivt_missing                                                NA        NaN
+      precision_sdX_wholeFile                                    NA         NA
+      precision_sdY_wholeFile                                    NA         NA
+      precision_rmsX_mean_wholeFile                              NA         NA
+      precision_rmsX_median_wholeFile                            NA         NA
+      precision_rmsY_mean_wholeFile                              NA         NA
+      precision_rmsY_median_wholeFile                            NA         NA
+      precision_rmsEuc_mean_wholeFile                            NA         NA
+      precision_rmsEuc_median_wholeFile                          NA         NA
+      precision_sdX_longestFixation                              NA         NA
+      precision_sdY_longestFixation                              NA         NA
+      precision_rmsX_mean_longestFixation                        NA         NA
+      precision_rmsX_median_longestFixation                      NA         NA
+      precision_rmsY_mean_longestFixation                        NA         NA
+      precision_rmsY_median_longestFixation                      NA         NA
+      precision_rmsEuc_mean_longestFixation                      NA         NA
+      precision_rmsEuc_median_longestFixation                    NA         NA
+      precision_sdX_medianFixation                               NA         NA
+      precision_sdY_medianFixation                               NA         NA
+      precision_rmsX_mean_medianFixation                         NA         NA
+      precision_rmsX_median_medianFixation                       NA         NA
+      precision_rmsY_mean_medianFixation                         NA         NA
+      precision_rmsY_median_medianFixation                       NA         NA
+      precision_rmsEuc_mean_medianFixation                       NA         NA
+      precision_rmsEuc_median_medianFixation                     NA         NA
       ivt_blinks                                                 NA        NaN
       robustness_proportion_valid_data_to_all_data               NA         NA
       robustness_proportion_blink_data_to_missing_data           NA         NA
@@ -401,10 +722,91 @@
       ivt_saccades                                            NA        NA       NA
       ivt_unclassified                                        NA        NA       NA
       ivt_missing                                             NA        NA       NA
+      precision_sdX_wholeFile                                 NA        NA       NA
+      precision_sdY_wholeFile                                 NA        NA       NA
+      precision_rmsX_mean_wholeFile                           NA        NA       NA
+      precision_rmsX_median_wholeFile                         NA        NA       NA
+      precision_rmsY_mean_wholeFile                           NA        NA       NA
+      precision_rmsY_median_wholeFile                         NA        NA       NA
+      precision_rmsEuc_mean_wholeFile                         NA        NA       NA
+      precision_rmsEuc_median_wholeFile                       NA        NA       NA
+      precision_sdX_longestFixation                           NA        NA       NA
+      precision_sdY_longestFixation                           NA        NA       NA
+      precision_rmsX_mean_longestFixation                     NA        NA       NA
+      precision_rmsX_median_longestFixation                   NA        NA       NA
+      precision_rmsY_mean_longestFixation                     NA        NA       NA
+      precision_rmsY_median_longestFixation                   NA        NA       NA
+      precision_rmsEuc_mean_longestFixation                   NA        NA       NA
+      precision_rmsEuc_median_longestFixation                 NA        NA       NA
+      precision_sdX_medianFixation                            NA        NA       NA
+      precision_sdY_medianFixation                            NA        NA       NA
+      precision_rmsX_mean_medianFixation                      NA        NA       NA
+      precision_rmsX_median_medianFixation                    NA        NA       NA
+      precision_rmsY_mean_medianFixation                      NA        NA       NA
+      precision_rmsY_median_medianFixation                    NA        NA       NA
+      precision_rmsEuc_mean_medianFixation                    NA        NA       NA
+      precision_rmsEuc_median_medianFixation                  NA        NA       NA
       ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA
+                                                       precision_value
+      missing_raw_data_LeftEye                                      NA
+      missing_raw_data_RightEye                                     NA
+      missing_raw_data_BothEyes                                     NA
+      valid_raw_data                                                NA
+      blinks_LeftEye                                                NA
+      blinks_RightEye                                               NA
+      blinks_BothEyes                                               NA
+      final_na                                                      NA
+      final_valid                                                   NA
+      interpolated_LeftEye                                          NA
+      interpolated_RightEye                                         NA
+      eye_select_LeftOnly                                           NA
+      eye_select_RightOnly                                          NA
+      eye_select_mean                                               NA
+      eye_selected_mean_X                                           NA
+      eye_selected_mean_Y                                           NA
+      eye_selected_mean_pupil                                       NA
+      eye_selected_mean_distZ                                       NA
+      smoothed_X                                                    NA
+      smoothed_Y                                                    NA
+      smoothed_pupil                                                NA
+      smoothed_distZ                                                NA
+      smoothed_velocity_X                                           NA
+      smoothed_velocity_Y                                           NA
+      ivt_fixations                                                 NA
+      ivt_saccades                                                  NA
+      ivt_unclassified                                              NA
+      ivt_missing                                                   NA
+      precision_sdX_wholeFile                                        0
+      precision_sdY_wholeFile                                        0
+      precision_rmsX_mean_wholeFile                                  0
+      precision_rmsX_median_wholeFile                                0
+      precision_rmsY_mean_wholeFile                                  0
+      precision_rmsY_median_wholeFile                                0
+      precision_rmsEuc_mean_wholeFile                                0
+      precision_rmsEuc_median_wholeFile                              0
+      precision_sdX_longestFixation                                  0
+      precision_sdY_longestFixation                                  0
+      precision_rmsX_mean_longestFixation                            0
+      precision_rmsX_median_longestFixation                          0
+      precision_rmsY_mean_longestFixation                            0
+      precision_rmsY_median_longestFixation                          0
+      precision_rmsEuc_mean_longestFixation                          0
+      precision_rmsEuc_median_longestFixation                        0
+      precision_sdX_medianFixation                                   0
+      precision_sdY_medianFixation                                   0
+      precision_rmsX_mean_medianFixation                             0
+      precision_rmsX_median_medianFixation                           0
+      precision_rmsY_mean_medianFixation                             0
+      precision_rmsY_median_medianFixation                           0
+      precision_rmsEuc_mean_medianFixation                           0
+      precision_rmsEuc_median_medianFixation                         0
+      ivt_blinks                                                    NA
+      robustness_proportion_valid_data_to_all_data                  NA
+      robustness_proportion_blink_data_to_missing_data              NA
+      robustness_fixation_duration                                  NA
 
 # eyeQuality end-to-end output shape and metrics match expectations for tobii_pro_sample.tsv
 
@@ -440,6 +842,30 @@
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2
       ivt_missing                                        0    0.00                 0
+      precision_sdX_wholeFile                           NA      NA                NA
+      precision_sdY_wholeFile                           NA      NA                NA
+      precision_rmsX_mean_wholeFile                     NA      NA                NA
+      precision_rmsX_median_wholeFile                   NA      NA                NA
+      precision_rmsY_mean_wholeFile                     NA      NA                NA
+      precision_rmsY_median_wholeFile                   NA      NA                NA
+      precision_rmsEuc_mean_wholeFile                   NA      NA                NA
+      precision_rmsEuc_median_wholeFile                 NA      NA                NA
+      precision_sdX_longestFixation                     NA      NA                NA
+      precision_sdY_longestFixation                     NA      NA                NA
+      precision_rmsX_mean_longestFixation               NA      NA                NA
+      precision_rmsX_median_longestFixation             NA      NA                NA
+      precision_rmsY_mean_longestFixation               NA      NA                NA
+      precision_rmsY_median_longestFixation             NA      NA                NA
+      precision_rmsEuc_mean_longestFixation             NA      NA                NA
+      precision_rmsEuc_median_longestFixation           NA      NA                NA
+      precision_sdX_medianFixation                      NA      NA                NA
+      precision_sdY_medianFixation                      NA      NA                NA
+      precision_rmsX_mean_medianFixation                NA      NA                NA
+      precision_rmsX_median_medianFixation              NA      NA                NA
+      precision_rmsY_mean_medianFixation                NA      NA                NA
+      precision_rmsY_median_medianFixation              NA      NA                NA
+      precision_rmsEuc_mean_medianFixation              NA      NA                NA
+      precision_rmsEuc_median_medianFixation            NA      NA                NA
       ivt_blinks                                         0    0.00                 0
       robustness_proportion_valid_data_to_all_data     200    1.00               200
       robustness_proportion_blink_data_to_missing_data   0      NA                 0
@@ -473,6 +899,30 @@
       ivt_saccades                                                     200
       ivt_unclassified                                                 200
       ivt_missing                                                      200
+      precision_sdX_wholeFile                                           NA
+      precision_sdY_wholeFile                                           NA
+      precision_rmsX_mean_wholeFile                                     NA
+      precision_rmsX_median_wholeFile                                   NA
+      precision_rmsY_mean_wholeFile                                     NA
+      precision_rmsY_median_wholeFile                                   NA
+      precision_rmsEuc_mean_wholeFile                                   NA
+      precision_rmsEuc_median_wholeFile                                 NA
+      precision_sdX_longestFixation                                     NA
+      precision_sdY_longestFixation                                     NA
+      precision_rmsX_mean_longestFixation                               NA
+      precision_rmsX_median_longestFixation                             NA
+      precision_rmsY_mean_longestFixation                               NA
+      precision_rmsY_median_longestFixation                             NA
+      precision_rmsEuc_mean_longestFixation                             NA
+      precision_rmsEuc_median_longestFixation                           NA
+      precision_sdX_medianFixation                                      NA
+      precision_sdY_medianFixation                                      NA
+      precision_rmsX_mean_medianFixation                                NA
+      precision_rmsX_median_medianFixation                              NA
+      precision_rmsY_mean_medianFixation                                NA
+      precision_rmsY_median_medianFixation                              NA
+      precision_rmsEuc_mean_medianFixation                              NA
+      precision_rmsEuc_median_medianFixation                            NA
       ivt_blinks                                                       200
       robustness_proportion_valid_data_to_all_data                     200
       robustness_proportion_blink_data_to_missing_data                   0
@@ -506,6 +956,30 @@
       ivt_saccades                                                           NA
       ivt_unclassified                                                       NA
       ivt_missing                                                            NA
+      precision_sdX_wholeFile                                                NA
+      precision_sdY_wholeFile                                                NA
+      precision_rmsX_mean_wholeFile                                          NA
+      precision_rmsX_median_wholeFile                                        NA
+      precision_rmsY_mean_wholeFile                                          NA
+      precision_rmsY_median_wholeFile                                        NA
+      precision_rmsEuc_mean_wholeFile                                        NA
+      precision_rmsEuc_median_wholeFile                                      NA
+      precision_sdX_longestFixation                                          NA
+      precision_sdY_longestFixation                                          NA
+      precision_rmsX_mean_longestFixation                                    NA
+      precision_rmsX_median_longestFixation                                  NA
+      precision_rmsY_mean_longestFixation                                    NA
+      precision_rmsY_median_longestFixation                                  NA
+      precision_rmsEuc_mean_longestFixation                                  NA
+      precision_rmsEuc_median_longestFixation                                NA
+      precision_sdX_medianFixation                                           NA
+      precision_sdY_medianFixation                                           NA
+      precision_rmsX_mean_medianFixation                                     NA
+      precision_rmsX_median_medianFixation                                   NA
+      precision_rmsY_mean_medianFixation                                     NA
+      precision_rmsY_median_medianFixation                                   NA
+      precision_rmsEuc_mean_medianFixation                                   NA
+      precision_rmsEuc_median_medianFixation                                 NA
       ivt_blinks                                                             NA
       robustness_proportion_valid_data_to_all_data                           NA
       robustness_proportion_blink_data_to_missing_data                       NA
@@ -539,6 +1013,30 @@
       ivt_saccades                                                         NA       0
       ivt_unclassified                                                     NA       2
       ivt_missing                                                          NA       0
+      precision_sdX_wholeFile                                              NA      NA
+      precision_sdY_wholeFile                                              NA      NA
+      precision_rmsX_mean_wholeFile                                        NA      NA
+      precision_rmsX_median_wholeFile                                      NA      NA
+      precision_rmsY_mean_wholeFile                                        NA      NA
+      precision_rmsY_median_wholeFile                                      NA      NA
+      precision_rmsEuc_mean_wholeFile                                      NA      NA
+      precision_rmsEuc_median_wholeFile                                    NA      NA
+      precision_sdX_longestFixation                                        NA      NA
+      precision_sdY_longestFixation                                        NA      NA
+      precision_rmsX_mean_longestFixation                                  NA      NA
+      precision_rmsX_median_longestFixation                                NA      NA
+      precision_rmsY_mean_longestFixation                                  NA      NA
+      precision_rmsY_median_longestFixation                                NA      NA
+      precision_rmsEuc_mean_longestFixation                                NA      NA
+      precision_rmsEuc_median_longestFixation                              NA      NA
+      precision_sdX_medianFixation                                         NA      NA
+      precision_sdY_medianFixation                                         NA      NA
+      precision_rmsX_mean_medianFixation                                   NA      NA
+      precision_rmsX_median_medianFixation                                 NA      NA
+      precision_rmsY_mean_medianFixation                                   NA      NA
+      precision_rmsY_median_medianFixation                                 NA      NA
+      precision_rmsEuc_mean_medianFixation                                 NA      NA
+      precision_rmsEuc_median_medianFixation                               NA      NA
       ivt_blinks                                                           NA       0
       robustness_proportion_valid_data_to_all_data                         NA      NA
       robustness_proportion_blink_data_to_missing_data                     NA      NA
@@ -572,6 +1070,30 @@
       ivt_saccades                                               NA        NaN
       ivt_unclassified                                           NA        NaN
       ivt_missing                                                NA        NaN
+      precision_sdX_wholeFile                                    NA         NA
+      precision_sdY_wholeFile                                    NA         NA
+      precision_rmsX_mean_wholeFile                              NA         NA
+      precision_rmsX_median_wholeFile                            NA         NA
+      precision_rmsY_mean_wholeFile                              NA         NA
+      precision_rmsY_median_wholeFile                            NA         NA
+      precision_rmsEuc_mean_wholeFile                            NA         NA
+      precision_rmsEuc_median_wholeFile                          NA         NA
+      precision_sdX_longestFixation                              NA         NA
+      precision_sdY_longestFixation                              NA         NA
+      precision_rmsX_mean_longestFixation                        NA         NA
+      precision_rmsX_median_longestFixation                      NA         NA
+      precision_rmsY_mean_longestFixation                        NA         NA
+      precision_rmsY_median_longestFixation                      NA         NA
+      precision_rmsEuc_mean_longestFixation                      NA         NA
+      precision_rmsEuc_median_longestFixation                    NA         NA
+      precision_sdX_medianFixation                               NA         NA
+      precision_sdY_medianFixation                               NA         NA
+      precision_rmsX_mean_medianFixation                         NA         NA
+      precision_rmsX_median_medianFixation                       NA         NA
+      precision_rmsY_mean_medianFixation                         NA         NA
+      precision_rmsY_median_medianFixation                       NA         NA
+      precision_rmsEuc_mean_medianFixation                       NA         NA
+      precision_rmsEuc_median_medianFixation                     NA         NA
       ivt_blinks                                                 NA        NaN
       robustness_proportion_valid_data_to_all_data               NA         NA
       robustness_proportion_blink_data_to_missing_data           NA         NA
@@ -605,10 +1127,91 @@
       ivt_saccades                                            NA        NA       NA
       ivt_unclassified                                        NA        NA       NA
       ivt_missing                                             NA        NA       NA
+      precision_sdX_wholeFile                                 NA        NA       NA
+      precision_sdY_wholeFile                                 NA        NA       NA
+      precision_rmsX_mean_wholeFile                           NA        NA       NA
+      precision_rmsX_median_wholeFile                         NA        NA       NA
+      precision_rmsY_mean_wholeFile                           NA        NA       NA
+      precision_rmsY_median_wholeFile                         NA        NA       NA
+      precision_rmsEuc_mean_wholeFile                         NA        NA       NA
+      precision_rmsEuc_median_wholeFile                       NA        NA       NA
+      precision_sdX_longestFixation                           NA        NA       NA
+      precision_sdY_longestFixation                           NA        NA       NA
+      precision_rmsX_mean_longestFixation                     NA        NA       NA
+      precision_rmsX_median_longestFixation                   NA        NA       NA
+      precision_rmsY_mean_longestFixation                     NA        NA       NA
+      precision_rmsY_median_longestFixation                   NA        NA       NA
+      precision_rmsEuc_mean_longestFixation                   NA        NA       NA
+      precision_rmsEuc_median_longestFixation                 NA        NA       NA
+      precision_sdX_medianFixation                            NA        NA       NA
+      precision_sdY_medianFixation                            NA        NA       NA
+      precision_rmsX_mean_medianFixation                      NA        NA       NA
+      precision_rmsX_median_medianFixation                    NA        NA       NA
+      precision_rmsY_mean_medianFixation                      NA        NA       NA
+      precision_rmsY_median_medianFixation                    NA        NA       NA
+      precision_rmsEuc_mean_medianFixation                    NA        NA       NA
+      precision_rmsEuc_median_medianFixation                  NA        NA       NA
       ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA
+                                                       precision_value
+      missing_raw_data_LeftEye                                      NA
+      missing_raw_data_RightEye                                     NA
+      missing_raw_data_BothEyes                                     NA
+      valid_raw_data                                                NA
+      blinks_LeftEye                                                NA
+      blinks_RightEye                                               NA
+      blinks_BothEyes                                               NA
+      final_na                                                      NA
+      final_valid                                                   NA
+      interpolated_LeftEye                                          NA
+      interpolated_RightEye                                         NA
+      eye_select_LeftOnly                                           NA
+      eye_select_RightOnly                                          NA
+      eye_select_mean                                               NA
+      eye_selected_mean_X                                           NA
+      eye_selected_mean_Y                                           NA
+      eye_selected_mean_pupil                                       NA
+      eye_selected_mean_distZ                                       NA
+      smoothed_X                                                    NA
+      smoothed_Y                                                    NA
+      smoothed_pupil                                                NA
+      smoothed_distZ                                                NA
+      smoothed_velocity_X                                           NA
+      smoothed_velocity_Y                                           NA
+      ivt_fixations                                                 NA
+      ivt_saccades                                                  NA
+      ivt_unclassified                                              NA
+      ivt_missing                                                   NA
+      precision_sdX_wholeFile                                        0
+      precision_sdY_wholeFile                                        0
+      precision_rmsX_mean_wholeFile                                  0
+      precision_rmsX_median_wholeFile                                0
+      precision_rmsY_mean_wholeFile                                  0
+      precision_rmsY_median_wholeFile                                0
+      precision_rmsEuc_mean_wholeFile                                0
+      precision_rmsEuc_median_wholeFile                              0
+      precision_sdX_longestFixation                                  0
+      precision_sdY_longestFixation                                  0
+      precision_rmsX_mean_longestFixation                            0
+      precision_rmsX_median_longestFixation                          0
+      precision_rmsY_mean_longestFixation                            0
+      precision_rmsY_median_longestFixation                          0
+      precision_rmsEuc_mean_longestFixation                          0
+      precision_rmsEuc_median_longestFixation                        0
+      precision_sdX_medianFixation                                   0
+      precision_sdY_medianFixation                                   0
+      precision_rmsX_mean_medianFixation                             0
+      precision_rmsX_median_medianFixation                           0
+      precision_rmsY_mean_medianFixation                             0
+      precision_rmsY_median_medianFixation                           0
+      precision_rmsEuc_mean_medianFixation                           0
+      precision_rmsEuc_median_medianFixation                         0
+      ivt_blinks                                                    NA
+      robustness_proportion_valid_data_to_all_data                  NA
+      robustness_proportion_blink_data_to_missing_data              NA
+      robustness_fixation_duration                                  NA
 
 # eyeQuality end-to-end output shape and metrics match expectations for tobii_pro_monocular.tsv
 
@@ -644,6 +1247,30 @@
       ivt_saccades                                       0    0.00                 0
       ivt_unclassified                                   2    0.01                 2
       ivt_missing                                        0    0.00                 0
+      precision_sdX_wholeFile                           NA      NA                NA
+      precision_sdY_wholeFile                           NA      NA                NA
+      precision_rmsX_mean_wholeFile                     NA      NA                NA
+      precision_rmsX_median_wholeFile                   NA      NA                NA
+      precision_rmsY_mean_wholeFile                     NA      NA                NA
+      precision_rmsY_median_wholeFile                   NA      NA                NA
+      precision_rmsEuc_mean_wholeFile                   NA      NA                NA
+      precision_rmsEuc_median_wholeFile                 NA      NA                NA
+      precision_sdX_longestFixation                     NA      NA                NA
+      precision_sdY_longestFixation                     NA      NA                NA
+      precision_rmsX_mean_longestFixation               NA      NA                NA
+      precision_rmsX_median_longestFixation             NA      NA                NA
+      precision_rmsY_mean_longestFixation               NA      NA                NA
+      precision_rmsY_median_longestFixation             NA      NA                NA
+      precision_rmsEuc_mean_longestFixation             NA      NA                NA
+      precision_rmsEuc_median_longestFixation           NA      NA                NA
+      precision_sdX_medianFixation                      NA      NA                NA
+      precision_sdY_medianFixation                      NA      NA                NA
+      precision_rmsX_mean_medianFixation                NA      NA                NA
+      precision_rmsX_median_medianFixation              NA      NA                NA
+      precision_rmsY_mean_medianFixation                NA      NA                NA
+      precision_rmsY_median_medianFixation              NA      NA                NA
+      precision_rmsEuc_mean_medianFixation              NA      NA                NA
+      precision_rmsEuc_median_medianFixation            NA      NA                NA
       ivt_blinks                                         0    0.00                 0
       robustness_proportion_valid_data_to_all_data     200    1.00               200
       robustness_proportion_blink_data_to_missing_data   0      NA                 0
@@ -677,6 +1304,30 @@
       ivt_saccades                                                     200
       ivt_unclassified                                                 200
       ivt_missing                                                      200
+      precision_sdX_wholeFile                                           NA
+      precision_sdY_wholeFile                                           NA
+      precision_rmsX_mean_wholeFile                                     NA
+      precision_rmsX_median_wholeFile                                   NA
+      precision_rmsY_mean_wholeFile                                     NA
+      precision_rmsY_median_wholeFile                                   NA
+      precision_rmsEuc_mean_wholeFile                                   NA
+      precision_rmsEuc_median_wholeFile                                 NA
+      precision_sdX_longestFixation                                     NA
+      precision_sdY_longestFixation                                     NA
+      precision_rmsX_mean_longestFixation                               NA
+      precision_rmsX_median_longestFixation                             NA
+      precision_rmsY_mean_longestFixation                               NA
+      precision_rmsY_median_longestFixation                             NA
+      precision_rmsEuc_mean_longestFixation                             NA
+      precision_rmsEuc_median_longestFixation                           NA
+      precision_sdX_medianFixation                                      NA
+      precision_sdY_medianFixation                                      NA
+      precision_rmsX_mean_medianFixation                                NA
+      precision_rmsX_median_medianFixation                              NA
+      precision_rmsY_mean_medianFixation                                NA
+      precision_rmsY_median_medianFixation                              NA
+      precision_rmsEuc_mean_medianFixation                              NA
+      precision_rmsEuc_median_medianFixation                            NA
       ivt_blinks                                                       200
       robustness_proportion_valid_data_to_all_data                     200
       robustness_proportion_blink_data_to_missing_data                   0
@@ -710,6 +1361,30 @@
       ivt_saccades                                                           NA
       ivt_unclassified                                                       NA
       ivt_missing                                                            NA
+      precision_sdX_wholeFile                                                NA
+      precision_sdY_wholeFile                                                NA
+      precision_rmsX_mean_wholeFile                                          NA
+      precision_rmsX_median_wholeFile                                        NA
+      precision_rmsY_mean_wholeFile                                          NA
+      precision_rmsY_median_wholeFile                                        NA
+      precision_rmsEuc_mean_wholeFile                                        NA
+      precision_rmsEuc_median_wholeFile                                      NA
+      precision_sdX_longestFixation                                          NA
+      precision_sdY_longestFixation                                          NA
+      precision_rmsX_mean_longestFixation                                    NA
+      precision_rmsX_median_longestFixation                                  NA
+      precision_rmsY_mean_longestFixation                                    NA
+      precision_rmsY_median_longestFixation                                  NA
+      precision_rmsEuc_mean_longestFixation                                  NA
+      precision_rmsEuc_median_longestFixation                                NA
+      precision_sdX_medianFixation                                           NA
+      precision_sdY_medianFixation                                           NA
+      precision_rmsX_mean_medianFixation                                     NA
+      precision_rmsX_median_medianFixation                                   NA
+      precision_rmsY_mean_medianFixation                                     NA
+      precision_rmsY_median_medianFixation                                   NA
+      precision_rmsEuc_mean_medianFixation                                   NA
+      precision_rmsEuc_median_medianFixation                                 NA
       ivt_blinks                                                             NA
       robustness_proportion_valid_data_to_all_data                           NA
       robustness_proportion_blink_data_to_missing_data                       NA
@@ -743,6 +1418,30 @@
       ivt_saccades                                                         NA       0
       ivt_unclassified                                                     NA       2
       ivt_missing                                                          NA       0
+      precision_sdX_wholeFile                                              NA      NA
+      precision_sdY_wholeFile                                              NA      NA
+      precision_rmsX_mean_wholeFile                                        NA      NA
+      precision_rmsX_median_wholeFile                                      NA      NA
+      precision_rmsY_mean_wholeFile                                        NA      NA
+      precision_rmsY_median_wholeFile                                      NA      NA
+      precision_rmsEuc_mean_wholeFile                                      NA      NA
+      precision_rmsEuc_median_wholeFile                                    NA      NA
+      precision_sdX_longestFixation                                        NA      NA
+      precision_sdY_longestFixation                                        NA      NA
+      precision_rmsX_mean_longestFixation                                  NA      NA
+      precision_rmsX_median_longestFixation                                NA      NA
+      precision_rmsY_mean_longestFixation                                  NA      NA
+      precision_rmsY_median_longestFixation                                NA      NA
+      precision_rmsEuc_mean_longestFixation                                NA      NA
+      precision_rmsEuc_median_longestFixation                              NA      NA
+      precision_sdX_medianFixation                                         NA      NA
+      precision_sdY_medianFixation                                         NA      NA
+      precision_rmsX_mean_medianFixation                                   NA      NA
+      precision_rmsX_median_medianFixation                                 NA      NA
+      precision_rmsY_mean_medianFixation                                   NA      NA
+      precision_rmsY_median_medianFixation                                 NA      NA
+      precision_rmsEuc_mean_medianFixation                                 NA      NA
+      precision_rmsEuc_median_medianFixation                               NA      NA
       ivt_blinks                                                           NA       0
       robustness_proportion_valid_data_to_all_data                         NA      NA
       robustness_proportion_blink_data_to_missing_data                     NA      NA
@@ -776,6 +1475,30 @@
       ivt_saccades                                               NA        NaN
       ivt_unclassified                                           NA        NaN
       ivt_missing                                                NA        NaN
+      precision_sdX_wholeFile                                    NA         NA
+      precision_sdY_wholeFile                                    NA         NA
+      precision_rmsX_mean_wholeFile                              NA         NA
+      precision_rmsX_median_wholeFile                            NA         NA
+      precision_rmsY_mean_wholeFile                              NA         NA
+      precision_rmsY_median_wholeFile                            NA         NA
+      precision_rmsEuc_mean_wholeFile                            NA         NA
+      precision_rmsEuc_median_wholeFile                          NA         NA
+      precision_sdX_longestFixation                              NA         NA
+      precision_sdY_longestFixation                              NA         NA
+      precision_rmsX_mean_longestFixation                        NA         NA
+      precision_rmsX_median_longestFixation                      NA         NA
+      precision_rmsY_mean_longestFixation                        NA         NA
+      precision_rmsY_median_longestFixation                      NA         NA
+      precision_rmsEuc_mean_longestFixation                      NA         NA
+      precision_rmsEuc_median_longestFixation                    NA         NA
+      precision_sdX_medianFixation                               NA         NA
+      precision_sdY_medianFixation                               NA         NA
+      precision_rmsX_mean_medianFixation                         NA         NA
+      precision_rmsX_median_medianFixation                       NA         NA
+      precision_rmsY_mean_medianFixation                         NA         NA
+      precision_rmsY_median_medianFixation                       NA         NA
+      precision_rmsEuc_mean_medianFixation                       NA         NA
+      precision_rmsEuc_median_medianFixation                     NA         NA
       ivt_blinks                                                 NA        NaN
       robustness_proportion_valid_data_to_all_data               NA         NA
       robustness_proportion_blink_data_to_missing_data           NA         NA
@@ -809,8 +1532,89 @@
       ivt_saccades                                            NA        NA       NA
       ivt_unclassified                                        NA        NA       NA
       ivt_missing                                             NA        NA       NA
+      precision_sdX_wholeFile                                 NA        NA       NA
+      precision_sdY_wholeFile                                 NA        NA       NA
+      precision_rmsX_mean_wholeFile                           NA        NA       NA
+      precision_rmsX_median_wholeFile                         NA        NA       NA
+      precision_rmsY_mean_wholeFile                           NA        NA       NA
+      precision_rmsY_median_wholeFile                         NA        NA       NA
+      precision_rmsEuc_mean_wholeFile                         NA        NA       NA
+      precision_rmsEuc_median_wholeFile                       NA        NA       NA
+      precision_sdX_longestFixation                           NA        NA       NA
+      precision_sdY_longestFixation                           NA        NA       NA
+      precision_rmsX_mean_longestFixation                     NA        NA       NA
+      precision_rmsX_median_longestFixation                   NA        NA       NA
+      precision_rmsY_mean_longestFixation                     NA        NA       NA
+      precision_rmsY_median_longestFixation                   NA        NA       NA
+      precision_rmsEuc_mean_longestFixation                   NA        NA       NA
+      precision_rmsEuc_median_longestFixation                 NA        NA       NA
+      precision_sdX_medianFixation                            NA        NA       NA
+      precision_sdY_medianFixation                            NA        NA       NA
+      precision_rmsX_mean_medianFixation                      NA        NA       NA
+      precision_rmsX_median_medianFixation                    NA        NA       NA
+      precision_rmsY_mean_medianFixation                      NA        NA       NA
+      precision_rmsY_median_medianFixation                    NA        NA       NA
+      precision_rmsEuc_mean_medianFixation                    NA        NA       NA
+      precision_rmsEuc_median_medianFixation                  NA        NA       NA
       ivt_blinks                                              NA        NA       NA
       robustness_proportion_valid_data_to_all_data            NA        NA       NA
       robustness_proportion_blink_data_to_missing_data        NA        NA       NA
       robustness_fixation_duration                        3349.0    3349.0       NA
+                                                       precision_value
+      missing_raw_data_LeftEye                                      NA
+      missing_raw_data_RightEye                                     NA
+      missing_raw_data_BothEyes                                     NA
+      valid_raw_data                                                NA
+      blinks_LeftEye                                                NA
+      blinks_RightEye                                               NA
+      blinks_BothEyes                                               NA
+      final_na                                                      NA
+      final_valid                                                   NA
+      interpolated_LeftEye                                          NA
+      interpolated_RightEye                                         NA
+      eye_select_LeftOnly                                           NA
+      eye_select_RightOnly                                          NA
+      eye_select_mean                                               NA
+      eye_selected_mean_X                                           NA
+      eye_selected_mean_Y                                           NA
+      eye_selected_mean_pupil                                       NA
+      eye_selected_mean_distZ                                       NA
+      smoothed_X                                                    NA
+      smoothed_Y                                                    NA
+      smoothed_pupil                                                NA
+      smoothed_distZ                                                NA
+      smoothed_velocity_X                                           NA
+      smoothed_velocity_Y                                           NA
+      ivt_fixations                                                 NA
+      ivt_saccades                                                  NA
+      ivt_unclassified                                              NA
+      ivt_missing                                                   NA
+      precision_sdX_wholeFile                                        0
+      precision_sdY_wholeFile                                        0
+      precision_rmsX_mean_wholeFile                                  0
+      precision_rmsX_median_wholeFile                                0
+      precision_rmsY_mean_wholeFile                                  0
+      precision_rmsY_median_wholeFile                                0
+      precision_rmsEuc_mean_wholeFile                                0
+      precision_rmsEuc_median_wholeFile                              0
+      precision_sdX_longestFixation                                  0
+      precision_sdY_longestFixation                                  0
+      precision_rmsX_mean_longestFixation                            0
+      precision_rmsX_median_longestFixation                          0
+      precision_rmsY_mean_longestFixation                            0
+      precision_rmsY_median_longestFixation                          0
+      precision_rmsEuc_mean_longestFixation                          0
+      precision_rmsEuc_median_longestFixation                        0
+      precision_sdX_medianFixation                                   0
+      precision_sdY_medianFixation                                   0
+      precision_rmsX_mean_medianFixation                             0
+      precision_rmsX_median_medianFixation                           0
+      precision_rmsY_mean_medianFixation                             0
+      precision_rmsY_median_medianFixation                           0
+      precision_rmsEuc_mean_medianFixation                           0
+      precision_rmsEuc_median_medianFixation                         0
+      ivt_blinks                                                    NA
+      robustness_proportion_valid_data_to_all_data                  NA
+      robustness_proportion_blink_data_to_missing_data              NA
+      robustness_fixation_duration                                  NA
 
