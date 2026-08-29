@@ -2966,6 +2966,34 @@ test_that("build_gaze_trajectory_plot returns NULL when there's nothing usable i
   expect_length(no_aoi_trace$x$data, 1)
 })
 
+# Y-axis reversal regression tests: Tobii (and screen-based eye trackers
+# generally) report gaze position in on-screen display coordinates with
+# (0, 0) at the TOP-LEFT corner and Y increasing DOWNWARD -- the opposite of
+# plotly's default bottom-left-origin axis convention. Both the static
+# "Gaze path" view (build_gaze_trajectory_plot()) and the standalone
+# animation composer (build_gaze_trajectory_animation_plot()) gained
+# yaxis = list(..., autorange = "reversed") in their plotly::layout() calls
+# so a plotted recording is no longer shown upside down relative to the
+# actual screen. plotly lazily merges layout attributes, so checking the
+# raw, un-built p$x$layout$yaxis directly returns NULL/empty -- an explicit
+# plotly::plotly_build() is needed first.
+test_that("build_gaze_trajectory_plot's yaxis is reversed (autorange = 'reversed')", {
+  skip_if_not_installed("plotly")
+
+  built <- plotly::plotly_build(build_gaze_trajectory_plot(animation_test_df()))
+  expect_equal(built$x$layout$yaxis$autorange, "reversed")
+})
+
+test_that("build_gaze_trajectory_animation_plot's yaxis is reversed (autorange = 'reversed')", {
+  skip_if_not_installed("plotly")
+
+  df <- animation_test_df()
+  built <- plotly::plotly_build(
+    build_gaze_trajectory_animation_plot(df, current_index = 4, trail_length = 3)
+  )
+  expect_equal(built$x$layout$yaxis$autorange, "reversed")
+})
+
 test_that("gaze_trail_trace_spec's trail immediately reflects a changed trail_length at a fixed current_index", {
   # The direct pure-function replacement for what used to be asserted via
   # session$getOutput("gaze_trajectory_plot") before the plotlyProxy

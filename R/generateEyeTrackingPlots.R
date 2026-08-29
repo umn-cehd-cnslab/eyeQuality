@@ -17,10 +17,16 @@ generateEyeTrackingPlots <- function(data) {
   }
 
   # Plot raw data for each channel
+  # scale_y_reverse() on the two Y-position channels only (not X, pupil, or
+  # Z-distance): Tobii (and screen-based eye trackers generally) report gaze
+  # position with (0, 0) at the screen's top-left corner and Y increasing
+  # downward, so left un-reversed, these plots show a HIGHER value as
+  # visually higher on the chart when it actually means further DOWN the
+  # screen -- confirmed against real data (repo-owner field-testing).
   rawGaze_leftX <- data %>% plotGazeAndBlinks(resolveValidCol(data, "gazeLeftX")) + ggplot2::labs(y = "Left eye x-position")
-  rawGaze_leftY <- data %>% plotGazeAndBlinks(resolveValidCol(data, "gazeLeftY")) + ggplot2::labs(y = "Left eye y-position")
+  rawGaze_leftY <- data %>% plotGazeAndBlinks(resolveValidCol(data, "gazeLeftY")) + ggplot2::labs(y = "Left eye y-position") + ggplot2::scale_y_reverse()
   rawGaze_rightX <- data %>% plotGazeAndBlinks(resolveValidCol(data, "gazeRightX")) + ggplot2::labs(y = "Right eye x-position")
-  rawGaze_rightY <- data %>% plotGazeAndBlinks(resolveValidCol(data, "gazeRightY")) + ggplot2::labs(y = "Right eye y-position")
+  rawGaze_rightY <- data %>% plotGazeAndBlinks(resolveValidCol(data, "gazeRightY")) + ggplot2::labs(y = "Right eye y-position") + ggplot2::scale_y_reverse()
 
   rawGaze_leftPupil <- data %>% plotGazeAndBlinks(resolveValidCol(data, "pupilLeft")) + ggplot2::labs(y = "Left pupil measurement")
   rawGaze_rightPupil <- data %>% plotGazeAndBlinks(resolveValidCol(data, "pupilRight")) + ggplot2::labs(y = "Right pupil measurement")
@@ -50,7 +56,7 @@ generateEyeTrackingPlots <- function(data) {
 
   # Get final plot of smoothed gaze for X and Y positions
   gaze_X <- data %>% plotGazeAndBlinks("gazeX.preprocessed_px", showFixations = TRUE) + ggplot2::labs(x = "Recording Timestamp (ms)", y = "Gaze x-position")
-  gaze_Y <- data %>% plotGazeAndBlinks("gazeY.preprocessed_px", showFixations = TRUE) + ggplot2::labs(x = "Recording Timestamp (ms)", y = "Gaze y-position")
+  gaze_Y <- data %>% plotGazeAndBlinks("gazeY.preprocessed_px", showFixations = TRUE) + ggplot2::labs(x = "Recording Timestamp (ms)", y = "Gaze y-position") + ggplot2::scale_y_reverse()
 
   gazePlot <- ggpubr::ggarrange(
     gaze_X,

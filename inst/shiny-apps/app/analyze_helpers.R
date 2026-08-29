@@ -2298,7 +2298,18 @@ build_gaze_trajectory_plot <- function(
   plotly::layout(
     p,
     xaxis = list(title = paste(x_col)),
-    yaxis = list(title = paste(y_col)),
+    # autorange = "reversed": Tobii (and screen-based eye trackers
+    # generally) report gaze position in on-screen display coordinates with
+    # (0, 0) at the TOP-LEFT corner and Y increasing DOWNWARD -- the opposite
+    # of plotly's default bottom-left-origin axis convention. Left
+    # un-reversed, this plot draws every recording upside down relative to
+    # the actual screen the participant was looking at (confirmed against
+    # real data: repo-owner field-testing). Reversing here only changes
+    # which end of the axis is drawn at the top -- the underlying
+    # gazeY.preprocessed_px values themselves, and everything computed from
+    # them (the AOI polygon's stored coordinates, points_in_polygon()'s
+    # inside/outside test), are untouched.
+    yaxis = list(title = paste(y_col), autorange = "reversed"),
     showlegend = TRUE
   )
 }
@@ -2544,7 +2555,18 @@ build_gaze_trajectory_animation_plot <- function(
   plotly::layout(
     p,
     xaxis = list(title = paste(x_col)),
-    yaxis = list(title = paste(y_col)),
+    # autorange = "reversed": Tobii (and screen-based eye trackers
+    # generally) report gaze position in on-screen display coordinates with
+    # (0, 0) at the TOP-LEFT corner and Y increasing DOWNWARD -- the opposite
+    # of plotly's default bottom-left-origin axis convention. Left
+    # un-reversed, this plot draws every recording upside down relative to
+    # the actual screen the participant was looking at (confirmed against
+    # real data: repo-owner field-testing). Reversing here only changes
+    # which end of the axis is drawn at the top -- the underlying
+    # gazeY.preprocessed_px values themselves, and everything computed from
+    # them (the AOI polygon's stored coordinates, points_in_polygon()'s
+    # inside/outside test), are untouched.
+    yaxis = list(title = paste(y_col), autorange = "reversed"),
     showlegend = TRUE
   )
 }
