@@ -5,7 +5,19 @@
 \title{batch_preprocess is used to run the preprocessing function for a set of files in a BIDS like directory.
 This will process files in parallel, and compute total runtime to process.}
 \usage{
-eyeQualityBatch(directoryBIDS, batchName, numberCores = NULL, ...)
+eyeQualityBatch(
+  directoryBIDS,
+  batchName,
+  numberCores = NULL,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344,
+  verbose = FALSE,
+  outputDir = NULL,
+  outputStructure = c("flat", "bids"),
+  copyRawFile = FALSE,
+  force = FALSE,
+  ...
+)
 }
 \arguments{
 \item{directoryBIDS}{filepath to the BIDS directory of ET data to process}
@@ -13,6 +25,59 @@ eyeQualityBatch(directoryBIDS, batchName, numberCores = NULL, ...)
 \item{batchName}{string label for what to call the batch. This will be added to the output files}
 
 \item{numberCores}{optional parameter to specify number of cores to use. If not specified, function will use 80\\\% of available cores}
+
+\item{displayDimensionX_mm}{integer of display width in millimeters, passed through to \code{eyeQuality()} for every file in the batch. For example our 1920x1080 screen has a width of 594 mm}
+
+\item{displayDimensionY_mm}{integer of display height in millimeters, passed through to \code{eyeQuality()} for every file in the batch. For example our 1920x1080 screen has a height of 344 mm}
+
+\item{verbose}{optional Boolean, passed through to \code{eyeQuality()} for
+every file in the batch. When \code{TRUE}, emits additional structured,
+human-readable data-quality diagnostics during processing for each
+file. Purely additive; does not change any file's processed output.
+Default \code{FALSE}.}
+
+\item{outputDir}{optional directory to write output files to, passed
+through to \code{eyeQuality()}/\code{saveFiles()} for every file in the batch and
+also used to locate each file's existing \code{qcsummary} output (if any) for
+the resumability check described under \code{force} below. Overrides the
+default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default \code{NULL}.}
+
+\item{outputStructure}{one of \code{"flat"} (default) or \code{"bids"} (P7-07),
+passed through to \code{eyeQuality()}/\code{saveFiles()}/\code{create_new_filename()}
+for every file in the batch, and also used by the resumability check
+(\code{get_qcsummary_output_path()}) so a resumed run looks for existing
+output in the same place this run would write it. Only meaningful when
+\code{outputDir} is also set -- see \code{?create_new_filename} for the full
+\code{"bids"}-mode placement and its per-file fallback behavior for a
+non-BIDS-named input file (a \code{warning()}, not a batch-ending error).
+Default \code{"flat"}, which reproduces this function's pre-P7-07 output
+layout exactly.}
+
+\item{copyRawFile}{optional Boolean (P7-07). Only meaningful when
+\code{outputStructure == "bids"} and \code{outputDir} is set -- ignored otherwise.
+When \code{TRUE}, copies (never moves) each candidate file's own raw input
+file, unmodified and under its original filename, to
+\verb{<outputDir>/sub-<label>/ses-<label>/} -- the raw side of the BIDS
+raw/derivatives split, sibling to \verb{derivatives/eyeQuality-v1/} (see
+\code{outputStructure} above for the derivatives side). Applied to every
+candidate file discovered this run (not just files actually dispatched
+for reprocessing this run under resumability), so enabling this on a
+later resumed run still backfills the raw copy for files whose
+derivative output was already produced by an earlier run without it.
+A candidate file whose basename doesn't match the expected
+\verb{sub-<label>...ses-<label>} naming pattern has its raw-file copy step
+skipped with a \code{warning()}, rather than failing the batch (its
+derivative processing, if any, is unaffected). Default \code{FALSE}.}
+
+\item{force}{optional Boolean controlling resumability. \code{eyeQualityBatch()}
+checks, for every candidate file, whether a \code{qcsummary} output already
+exists for the given \code{batchName} (and \code{outputDir}, if set) before
+dispatching it for (re)processing. When \code{FALSE} (the default), files with
+an existing \code{qcsummary} output are skipped rather than reprocessed -
+useful for resuming an interrupted or partially-completed batch run
+without redoing already-finished work. When \code{TRUE}, every candidate file
+is (re)processed regardless of any existing output, matching this
+function's original (pre-resumability) behavior. Default \code{FALSE}.}
 
 \item{...}{additional parameters}
 }
@@ -22,4 +87,47 @@ data
 \description{
 batch_preprocess is used to run the preprocessing function for a set of files in a BIDS like directory.
 This will process files in parallel, and compute total runtime to process.
+}
+\section{Failure detail}{
+ any file whose \code{eyeQuality()} call raises an
+error is recorded, along with that error's message, in the batch summary
+text file's "Files that failed processing" section (one filepath line
+followed by an indented \code{"  error: ..."} line per failed file); this
+detail is what \code{parsePreprocessingBatchSummary(info_to_extract = "failedfiles")} returns. A file with no captured error message reached
+that section some other way this run (e.g. its worker process ended
+without raising a catchable R error) and gets a placeholder message
+instead of a blank one.
+}
+
+\examples{
+\donttest{
+# eyeQualityBatch() needs an actual directory of files to point at -- build
+# a small two-subject BIDS-like layout from the bundled sample file, inside
+# a temporary directory.
+raw_file <- system.file("extdata", "tobii_studio_sample.tsv", package = "eyeQuality")
+batch_dir <- file.path(tempdir(), "eyeQualityBatch-example")
+
+for (subject in c("sub-01", "sub-02")) {
+  session_dir <- file.path(batch_dir, subject, "ses-01")
+  dir.create(session_dir, recursive = TRUE, showWarnings = FALSE)
+  file.copy(
+    raw_file,
+    file.path(session_dir, paste0(subject, "_ses-01_task-test_recording-eyetracking_physio.tsv"))
+  )
+}
+
+eyeQualityBatch(
+  batch_dir,
+  batchName = "example",
+  numberCores = 1, # pinned to 1 core here only to keep the example light
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344
+)
+
+summary_file <- file.path(batch_dir, "preprocessing_batch_summary_desc-example.txt")
+parsePreprocessingBatchSummary(summary_file, info_to_extract = "summary")
+
+unlink(batch_dir, recursive = TRUE)
+}
+
 }

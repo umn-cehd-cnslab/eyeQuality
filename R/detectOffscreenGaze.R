@@ -19,13 +19,13 @@ detectOffscreenGaze <-
            displayResolutionY_px,
            minDisplayResolutionX_px = 0,
            minDisplayResolutionY_px = 0) {
-    #flag any gazepoints that may be offscreen based on acceptable input range
+    # flag any gazepoints that may be offscreen based on acceptable input range
     offscreen.gp <- rep(NA, length(data[[gazeX]]))
     offscreen.gp <-
       dplyr::if_else(
         !between(data[[gazeX]], minDisplayResolutionX_px, displayResolutionX_px) |
           !between(data[[gazeY]], minDisplayResolutionY_px, displayResolutionY_px),
-        "offscreen","onscreen"
+        "offscreen", "onscreen"
       )
 
     return(offscreen.gp)

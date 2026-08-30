@@ -1,0 +1,263 @@
+---
+title: "Getting started with eyeQuality"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with eyeQuality}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+```{r setup}
+library(eyeQuality)
+```
+
+## What eyeQuality does
+
+**eyeQuality** takes raw exports from eye tracking software and turns them
+into a standardized, quality-checked dataset: gaze positions in both pixel
+and visual-angle space, pupil size, blink and fixation/saccade
+classification, and a set of data-quality metrics describing how much of the
+recording was usable. The goal is to make preprocessing transparent and
+reproducible -- every step the pipeline takes is a named, individually
+testable function, and the same call works whether your data came from Tobii
+Studio or Tobii Pro.
+
+This vignette walks through preprocessing a single recording end to end. It
+uses one of the small synthetic fixture files bundled with the package
+(`system.file("extdata", ..., package = "eyeQuality")`), so every chunk below
+runs as-is -- copy it into your own session to follow along.
+
+## Supported eye trackers
+
+eyeQuality doesn't ask you which device produced a file. Instead, it keeps an
+internal *registry* of eye tracker adapters -- one adapter per device/export
+format -- and asks each registered adapter in turn "does this look like your
+data?" The first adapter that recognizes the file's raw column layout handles
+the rest of the import.
+
+```{r}
+names(registered_adapters())
+```
+
+Out of the box, eyeQuality recognizes exports from **Tobii Studio** and
+**Tobii Pro**. Each adapter also declares a `geometry_type` -- both of the
+built-in adapters are `"screen"`-based recordings (a participant looking at a
+fixed monitor, as opposed to a head-mounted tracker):
+
+```{r}
+vapply(registered_adapters(), function(a) a$geometry_type, character(1))
+```
+
+The registry is also how eyeQuality is meant to be extended: a new device
+gets its own adapter -- five small functions that translate its raw export
+into eyeQuality's common column schema (`?eyeQuality-schema`) -- registered
+with `register_eyetracker_adapter()`. See `?new_eyetracker_adapter` for the
+interface each adapter must implement if you're adding support for a device
+that isn't built in.
+
+## Preprocessing a single recording
+
+The main entry point is `eyeQuality()`. At minimum it needs a file path and
+the physical dimensions of the display the data was recorded on, **in
+millimeters** -- these are what let the pipeline convert pixel-space gaze
+positions into visual angle later on.
+
+```{r}
+raw_file <- system.file("extdata", "tobii_studio_sample.tsv", package = "eyeQuality")
+raw_file
+```
+
+```{r, results = "hide", message = FALSE}
+result <- eyeQuality(
+  raw_file,
+  displayDimensionX_mm = 594, # e.g. a 1920x1080 display, physically 594mm wide
+  displayDimensionY_mm = 344, # ...and 344mm tall
+  saveData = FALSE
+)
+```
+
+`eyeQuality()` prints a running log of every pipeline stage as it works
+(import, adapter detection, validity/offscreen masking, interpolation, blink
+and fixation/saccade classification, and so on) -- useful when you're
+diagnosing a single problem file, but noisy for a vignette, so it's
+suppressed above. Set `saveData = TRUE` and the same log is written to a run
+log file alongside your output instead of printing to the console (see
+"Saving results to disk" below).
+
+With `saveData = FALSE` (the default), `eyeQuality()` returns the
+preprocessed data as a data frame:
+
+```{r}
+nrow(result)
+colnames(result)
+```
+
+This particular fixture holds gaze constant at a single off-center screen
+location for its whole 200-sample recording, purely so its expected values
+are known exactly -- a real recording will show natural variation, fixations,
+saccades, and some missing/blink data. The columns you'll care about most for
+downstream analysis are the `.preprocessed`-suffixed ones -- eyeQuality's
+final answer for gaze position, pupil size, distance from the screen, and
+velocity after every cleaning step has been applied:
+
+```{r}
+result[5, c(
+  "gazeX.preprocessed_px", "gazeY.preprocessed_px",
+  "gazeX.preprocessed_va", "gazeY.preprocessed_va",
+  "distanceZ.preprocessed_mm", "pupil.preprocessed",
+  "IVT.classification"
+)]
+```
+
+`IVT.classification` (and its neighbors `IVT.fixationIndex`,
+`IVT.saccadeIndex`, `IVT.fixationDuration_ms`) records what the
+velocity-threshold (I-VT) algorithm decided each sample was: a fixation, a
+saccade, a blink, or missing/unclassified.
+
+### Key optional arguments
+
+`eyeQuality()` has a number of arguments beyond the required file path and
+display dimensions; the ones you're most likely to reach for are:
+
+- `eyeSelection_method` -- how to combine left/right eye data into a single
+  gaze stream. `"Maximize"` (the default) uses both eyes when available and
+  falls back to whichever eye has data when only one does; `"Strict"` only
+  keeps a sample when *both* eyes have valid data; `"Left"`/`"Right"` use
+  only that eye.
+- `validityThreshold` -- the minimum per-sample confidence (on a generic
+  `0`-`1` scale, `1` = highest confidence) to keep. Left `NULL` by default,
+  which uses each device's own sensible default rather than a single
+  hardcoded cutoff -- device-native validity scales differ (Tobii Studio's
+  native `0`-`4` code vs. Tobii Pro's binary valid/invalid flag), and
+  eyeQuality converts your `0`-`1` value onto whichever scale the detected
+  device actually uses.
+- `smoothGaze_boolean` -- whether to apply smoothing before computing visual
+  angle and velocity. `TRUE` by default.
+- `timeStart`/`timeEnd`, or `studioEvents`/`proEvents` -- restrict
+  preprocessing to a specific time window, either by explicit
+  `recordingTimestamp_ms` bounds or by a pair of event labels marking the
+  start/end of a task.
+- `includeIntermediates` -- keep every intermediate column the pipeline
+  produces along the way (raw-but-masked `.valid` columns, per-stage
+  `.int`/`.eyeSelect`/`.smooth` columns), instead of only the final
+  `.preprocessed` ones. Needed if you want to call `calculateOutputMetrics()`
+  yourself on the result (see below).
+- `verbose` -- when `TRUE`, adds extra diagnostic messages for things worth a
+  second look that a quick summary wouldn't surface on its own -- e.g. a
+  column that's present but entirely `NA`, or a long run of consecutive
+  samples below the validity threshold.
+
+## Quality metrics
+
+Every `eyeQuality()` run also computes a summary table of data-quality
+metrics -- percent of raw data missing per eye, percent classified as
+blinks/fixations/saccades, robustness ratios, and more -- and prints it to
+the console as part of the run. If you want that table back as a data frame
+to work with programmatically, call `calculateOutputMetrics()` yourself. It
+expects the intermediate columns `eyeQuality()` strips out by default, so ask
+for them with `includeIntermediates = TRUE`:
+
+```{r, results = "hide", message = FALSE}
+result_full <- eyeQuality(
+  raw_file,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344,
+  saveData = FALSE,
+  includeIntermediates = TRUE
+)
+metrics <- calculateOutputMetrics(result_full)
+```
+
+`metrics` is a data frame with one row per quality metric and columns for
+count (`n`), proportion (`percent`), and (where the metric is a duration or
+similar continuous quantity) summary statistics like `group_mean`/`group_sd`:
+
+```{r}
+metrics[c("valid_raw_data", "robustness_proportion_valid_data_to_all_data", "ivt_fixations"), c("n", "percent")]
+```
+
+Here, for example, 200/200 raw samples were valid, and 198 of the 200 final
+samples (99%) were classified as fixations -- consistent with a recording
+that never moves.
+
+## Visualizing a recording
+
+`generateEyeTrackingPlots()` takes a preprocessed data frame and returns a
+list of three `ggplot2` plots: (1) raw per-channel diagnostic plots for gaze
+X/Y, distance, and pupil size for each eye, (2) a heatmap of gaze density
+across the screen, and (3) the final smoothed gaze trace with fixation
+regions highlighted.
+
+```{r, warning = FALSE, fig.alt = "Diagnostic plots of raw gaze, pupil, and distance data for each eye"}
+plots <- generateEyeTrackingPlots(result)
+plots[[1]]
+```
+
+(Warnings are suppressed above only because this fixture's gaze never moves,
+which makes some `ggplot2` statistics degenerate on a single point; a real
+recording won't trigger them.)
+
+## Saving results to disk
+
+Passing `saveData = TRUE` instead of returning the data frame writes four
+files: the preprocessed gaze stream, the extracted event stream, the
+per-stage run timings, and the quality metrics table -- plus a run log
+capturing everything `eyeQuality()` would otherwise print to the console.
+By default these are written to a `derivatives/eyeQuality-v1/` subdirectory
+next to the input file; pass `outputDir` to write somewhere else instead, and
+`batchName` to tag the output files (useful when re-running the same file
+with different settings):
+
+```{r}
+out_dir <- file.path(tempdir(), "eyeQuality-demo")
+```
+
+```{r, results = "hide", message = FALSE}
+eyeQuality(
+  raw_file,
+  displayDimensionX_mm = 594,
+  displayDimensionY_mm = 344,
+  saveData = TRUE,
+  outputDir = out_dir,
+  batchName = "demo"
+)
+```
+
+```{r}
+list.files(out_dir)
+```
+
+```{r, include = FALSE}
+unlink(out_dir, recursive = TRUE)
+```
+
+## Processing more than one file
+
+For a whole dataset rather than a single file, `eyeQualityBatch()` runs
+`eyeQuality()` across every recording found by `listBidsFiles()` (which
+understands both a fixed BIDS-like `sub-*/ses-*/` directory layout and more
+flexible glob-style patterns) and writes one set of output files per
+recording, plus a batch-level run summary. See `vignette("batch-processing")`
+for a full walkthrough, or `?eyeQualityBatch` and `?listBidsFiles` for the
+complete set of options.
+
+## Where to go next
+
+- `?eyeQuality-schema` documents every column the pipeline produces or
+  consumes, with type, units, and NA semantics.
+- `help(package = "eyeQuality")` lists every exported function -- most of the
+  individual pipeline stages `eyeQuality()` calls internally (`eyeSelection()`,
+  `classifyBlinks()`, `classifyGazeIVT()`, `interpolateGaze()`, and so on) are
+  exported and usable on their own if you want to build a custom pipeline
+  instead of using the `eyeQuality()` wrapper.
+- `?new_eyetracker_adapter` and `?register_eyetracker_adapter` cover adding
+  support for a device that isn't built in.

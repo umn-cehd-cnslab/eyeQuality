@@ -1,23 +1,24 @@
 #' Detect Import Source Type
 #'
-#' Detects if imported data comes from TobiiPro, TobbiStudio, or another Eye Tracking export type
+#' Detects which registered eye tracker adapter's raw column layout matches
+#' `data`, by calling each registered adapter's `detect()` (see
+#' `R/adapter-interface.R`) in turn and returning the name of the first match.
 #'
 #' @param data dataframe
 #'
-#' @return A string
+#' @return A string -- the matching adapter's `name` (e.g. `"TobiiStudio"`,
+#'   `"TobiiPro"`).
 #' @export
 #'
 #'
-detectImportSourceType  <- function(data) {
-  colNames <- names(data)
-  if ("StudioVersionRec" %in% colNames) {
-    sourceType <- "TobiiStudio"
-  } else if ("Recording software version" %in% colNames) {
-    sourceType <- "TobiiPro"
-  } else {
-    stop("Data import does not match column names expected from Tobii Studio or Tobii Pro")
-    # Currently support "TobiiStudio" or "TobiiPro", as listed in function `rmInvalid2.R`
+detectImportSourceType <- function(data) {
+  adapters <- registered_adapters()
+
+  for (adapter in adapters) {
+    if (isTRUE(adapter$detect(data))) {
+      return(adapter$name)
+    }
   }
 
-  return(sourceType)
+  stop("Data import does not match column names expected from Tobii Studio or Tobii Pro")
 }

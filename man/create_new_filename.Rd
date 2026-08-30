@@ -4,7 +4,13 @@
 \alias{create_new_filename}
 \title{create_new_filename: create new output filename from save directory and data file}
 \usage{
-create_new_filename(inputfile, appendname, newFileExtension = NULL)
+create_new_filename(
+  inputfile,
+  appendname,
+  newFileExtension = NULL,
+  outputDir = NULL,
+  outputStructure = c("flat", "bids")
+)
 }
 \arguments{
 \item{inputfile}{name of input file}
@@ -12,6 +18,30 @@ create_new_filename(inputfile, appendname, newFileExtension = NULL)
 \item{appendname}{text to append before the file extension}
 
 \item{newFileExtension}{new file extension to use, if different from filename}
+
+\item{outputDir}{optional directory to write the output file to, overriding the default \verb{<input_dir>/derivatives/eyeQuality-v1/} location. Default NULL}
+
+\item{outputStructure}{one of \code{"flat"} (default) or \code{"bids"} (P7-07),
+opt-in and only meaningful when \code{outputDir} is also set. \code{"flat"} (the
+default) reproduces this function's pre-P7-07 behavior exactly: every
+file is written directly under \code{outputDir} (or the default
+\verb{<input_dir>/derivatives/eyeQuality-v1/} location when \code{outputDir} is
+\code{NULL}), keyed only by filename -- no sub-/ses- structure. \code{"bids"}
+parses \verb{sub-<label>}/\verb{ses-<label>} identifiers directly out of
+\code{inputfile}'s own basename (via
+\code{"sub-[A-Za-z0-9]+"}/\code{"ses-[A-Za-z0-9]+"}, not from any directory
+structure \code{inputfile} happens to sit in -- this works the same way
+whether the file was discovered via \code{listBidsFiles(layout = "bids")} or
+\code{layout = "glob"}) and writes to
+\verb{<outputDir>/derivatives/eyeQuality-v1/sub-<label>/ses-<label>/}
+instead, mirroring the formal BIDS derivatives convention (the raw side
+of that same split, a copy of the original input file under
+\verb{<outputDir>/sub-<label>/ses-<label>/}, is handled separately by
+\code{eyeQualityBatch()}'s \code{copyRawFile} argument -- this function only ever
+writes derivative output). A file whose basename does not match both
+identifiers falls back to this function's \code{"flat"} placement (with a
+\code{warning()}, not an error) rather than failing outright -- this keeps a
+mixed-naming batch from aborting entirely over one oddly-named file.}
 }
 \description{
 create_new_filename: create new output filename from save directory and data file

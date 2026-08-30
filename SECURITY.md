@@ -17,7 +17,7 @@ currently being supported with security updates.
 
 If you discover a vulnerability, please do the following: 
 
-* Submit an issue to the https://github.com/elab-umn/eyeQuality/issues/new github repo, and label it with the tag `security-vulnerability`
+* Submit an issue to the https://github.com/umn-cehd-cnslab/eyeQuality/issues/new github repo, and label it with the tag `security-vulnerability`
 * *Do not* take advantage of the vulnerability or problem you have discovered, for example by downloading, deleting, or modifying other people's data.
 * *Do not* use attacks on physical security, social engineering, distributed denial of service, spam, or applications of third parties.
 * *Do* provide sufficient information to reproduce the problem, so we will be able to resolve it as quickly as possible. Complex vulnerabilities may require further explanation.

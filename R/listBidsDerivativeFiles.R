@@ -20,15 +20,14 @@
 #' @export
 #'
 listBidsDerivativeFiles <- function(directory,
-                                        subjectPattern_regex = "sub-[A-Z0-9]+",
-                                        sessionPattern_regex = "ses-[0-9]+",
-                                        modalityPattern_regex = NULL,
-                                        recursiveSearch = FALSE,
-                                        derivativesDirectory_name = "derivatives",
-                                        pipelineDirectory_name = "eyeQuality-v1",
-                                        derivativePattern_regex = NULL,
-                                        ...) {
-
+                                    subjectPattern_regex = "sub-[A-Z0-9]+",
+                                    sessionPattern_regex = "ses-[0-9]+",
+                                    modalityPattern_regex = NULL,
+                                    recursiveSearch = FALSE,
+                                    derivativesDirectory_name = "derivatives",
+                                    pipelineDirectory_name = "eyeQuality-v1",
+                                    derivativePattern_regex = NULL,
+                                    ...) {
   # check to see if there are any nested folders?
   bids_dirs <-
     listBidsFiles(directory, subjectPattern_regex = subjectPattern_regex, sessionPattern_regex = sessionPattern_regex, modalityPattern_regex = modalityPattern_regex, recursiveSearch = recursiveSearch)
@@ -36,15 +35,17 @@ listBidsDerivativeFiles <- function(directory,
 
   # initialize list of files to append as we search directory
   files <- list()
-  directories_for_files = list()
+  directories_for_files <- list()
 
   # loop through files pulled from listBidFiles, to find deriv directories processed from pipeline
   for (bids_files in bids_dirs) {
     tmp_path <- fs::path_dir(bids_files)
     tmp_deriv_path <-
-      fs::path(tmp_path,
-               derivativesDirectory_name,
-               pipelineDirectory_name)
+      fs::path(
+        tmp_path,
+        derivativesDirectory_name,
+        pipelineDirectory_name
+      )
 
     if (dir.exists(tmp_deriv_path)) {
       directories_for_files <- c(directories_for_files, tmp_deriv_path)
@@ -60,7 +61,7 @@ listBidsDerivativeFiles <- function(directory,
   # get only the unique directories, since listBidFiles may have multiple data files in a single directory.
   directories_for_files <- unique(directories_for_files)
 
-  if (length(directories_for_files) == 0 ) {
+  if (length(directories_for_files) == 0) {
     print("WARNING: No derivative directories found. You may need to process your data using eyeQuality.")
     print("If you have preprocessed data files in your directory, please check your directory structure.")
     print("Confirm derivativesDirectory_name and pipelineDirectory_name are correct in your subject/session directories.")
@@ -92,7 +93,7 @@ listBidsDerivativeFiles <- function(directory,
     }
   }
 
-  if (length(files) == 0 ) {
+  if (length(files) == 0) {
     print("WARNING: No derivative files found. If you expect to have derivative files in your directory, please check your directory structure.")
     print("Try to specify a derivativePattern_regex with the naming convention for your derivative files.")
     print("If you have 'subject_dir/session_dir/additional_directory/data_files.tsv' structure, specify recursiveSearch = TRUE.")

@@ -1,0 +1,82 @@
+# Runs the full testthat suite + covr on every push/PR and fails the build if
+# tests fail. This is what actually enforces "future updates don't break
+# everything" -- it doesn't rely on any agent or human remembering to run
+# tests locally. Pair with branch protection rules requiring this check to
+# pass before merge to main.
+#
+# NOTE: this workflow deliberately avoids third-party actions for the R setup
+# steps (r-lib/actions and friends) -- see repo notes on Actions allowlisting.
+# It installs R via apt (the runner is always ubuntu-latest) and R package
+# dependencies from Posit Package Manager's Ubuntu binary CRAN mirror (a plain
+# repos URL, not a marketplace action) rather than CRAN's source-only mirror,
+# so dependencies install as precompiled binaries instead of being compiled
+# from source on every run -- CRAN's source mirror repeatedly hit packages
+# (e.g. Deriv) whose source doesn't compile against the runner's R/compiler
+# versions, which prebuilt binaries sidestep entirely.
+on:
+  push:
+  pull_request:
+
+name: test-coverage
+
+jobs:
+  test-coverage:
+    runs-on: ubuntu-latest
+    env:
+      CRAN_MIRROR: https://packagemanager.posit.co/cran/__linux__/noble/latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install R and system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            r-base r-base-dev pandoc build-essential gfortran \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libfontconfig1-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
+            libuv1-dev
+
+      - name: Set up a user-writable R library
+        run: |
+          mkdir -p "$HOME/R/library"
+          echo "R_LIBS_USER=$HOME/R/library" >> "$GITHUB_ENV"
+
+      - name: Point R at RSPM's binary packages
+        run: |
+          cat <<'RPROFILE' > "$HOME/.Rprofile"
+          options(HTTPUserAgent = sprintf(
+            "R/%s R (%s)",
+            getRversion(),
+            paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"])
+          ))
+          RPROFILE
+
+      - name: Install R package dependencies
+        run: |
+          Rscript -e 'if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'remotes::install_deps(dependencies = TRUE, repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'install.packages(c("covr", "testthat"), repos = Sys.getenv("CRAN_MIRROR"))'
+
+      - name: Run testthat suite
+        run: |
+          Rscript -e 'testthat::test_local(stop_on_failure = TRUE)'
+        shell: bash
+
+      - name: Test coverage
+        run: |
+          cov <- covr::package_coverage(quiet = FALSE)
+          covr::to_cobertura(cov)
+          print(cov)
+        shell: Rscript {0}
+
+      - uses: codecov/codecov-action@v4
+        with:
+          file: ./cobertura.xml
+          fail_ci_if_error: false
+
+      - name: Show testthat output on failure
+        if: failure()
+        run: |
+          find . -name 'testthat.Rout*' -exec cat '{}' \; || true
+        shell: bash

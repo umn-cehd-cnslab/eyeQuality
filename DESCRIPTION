@@ -1,26 +1,45 @@
 Package: eyeQuality
-Title: What the Package Does (One Line, Title Case)
-Version: 1.0.0.0
+Title: Preprocessing and Quality Control for Eye-Tracking Data
+Version: 0.1.0
 Authors@R: c(
     person("Aaron", "Glick", email = "glick094@umn.edu", role = c("aut", "cre"), comment = c(ORCID = "0000-0001-6926-7166")), 
     person("Lana", "Hantzsch", email = "hantz006@umn.edu", role = c("aut")),
-    person("Eli", "Johnson", role = c("aut")), 
-    person("Elizabeth", "Sharer", role = c("ctb")),
     person("Caitlin", "Sisk", role = c("ctb")),
-    person("Isa", "Stallworthy", role = c("ctb")), 
+    person("Eli", "Johnson", role = c("ctb")), 
     person("Jed", "Elison", email = "jtelison@umn.edu", role = c("aut", "fnd"))
     )
-Description: Preprocessing R package for transparency, reproducibility, and measurement of data quality in eye tracking datasets.
-URL: https://github.com/elab-umn/eyeQuality
-BugReports: https://github.com/elab-umn/eyeQuality/issues
+Description: Provides a preprocessing and quality-control pipeline for eye
+    tracking data, standardizing raw gaze and event exports from multiple
+    eye tracker manufacturers onto a common column schema before computing
+    per-file and per-sample data quality metrics. Device-specific import
+    logic is implemented through a pluggable adapter/registry system, so
+    support for a new eye tracker is added by registering a new adapter
+    rather than modifying the core pipeline; adapters for Tobii Studio and
+    Tobii Pro exports are included. The pipeline performs eye selection,
+    blink classification, gaze smoothing and interpolation, and off-screen
+    sample removal, and can generate diagnostic plots and summary reports
+    for individual files or for batches of files organized in a BIDS-like
+    directory structure.
+URL: https://github.com/umn-cehd-cnslab/eyeQuality
+BugReports: https://github.com/umn-cehd-cnslab/eyeQuality/issues
 License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-LazyData: true
-LazyDataCompression: xz
-Suggests: 
-    testthat (>= 3.0.0)
+Suggests:
+    testthat (>= 3.0.0),
+    lintr,
+    styler,
+    knitr,
+    rmarkdown,
+    shiny,
+    shinyFiles,
+    future,
+    promises (>= 1.3.3),
+    later,
+    DT,
+    plotly,
+    jsonlite
 Config/testthat/edition: 3
 Imports:
     rlang,
@@ -34,10 +53,15 @@ Imports:
     forecast,
     pracma,
     zoo,
+    runner,
     ggplot2,
     ggpubr,
     parallel,
-    purrr,
-    tibble
+    tibble,
+    stats,
+    tools,
+    utils,
+    yaml
 Depends: 
     R (>= 2.10)
+VignetteBuilder: knitr

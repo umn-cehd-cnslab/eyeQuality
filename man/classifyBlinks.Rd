@@ -12,6 +12,7 @@ classifyBlinks(
   maxArtifactLength_ms = 15,
   minBlinkLength_ms = 100,
   maxBlinkLength_ms = 400,
+  verbose = FALSE,
   ...
 )
 }
@@ -29,6 +30,12 @@ classifyBlinks(
 \item{minBlinkLength_ms}{integer min value for missing that could be considered a blink}
 
 \item{maxBlinkLength_ms}{integer max value for missing that could be considered a blink}
+
+\item{verbose}{optional Boolean. When \code{TRUE}, emits P3-10 diagnostics:
+candidate missing-data runs longer than \code{maxBlinkLength_ms} (not
+classified as blinks -- possible tracking loss or extended eye closure
+rather than a genuine blink) and a per-eye blink count summary. Default
+\code{FALSE}; purely additive, does not change blink classification.}
 
 \item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
 }

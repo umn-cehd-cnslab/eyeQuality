@@ -10,8 +10,11 @@ detectImportSourceType(data)
 \item{data}{dataframe}
 }
 \value{
-A string
+A string -- the matching adapter's \code{name} (e.g. \code{"TobiiStudio"},
+\code{"TobiiPro"}).
 }
 \description{
-Detects if imported data comes from TobiiPro, TobbiStudio, or another Eye Tracking export type
+Detects which registered eye tracker adapter's raw column layout matches
+\code{data}, by calling each registered adapter's \code{detect()} (see
+\code{R/adapter-interface.R}) in turn and returning the name of the first match.
 }

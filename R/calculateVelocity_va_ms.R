@@ -15,18 +15,18 @@
 #'
 calculateVelocity_va_ms <- function(data, gazeX_va, gazeY_va, timestamp, ...) {
   print("Calculating velocity...")
-  #define velocity new column names
+  # define velocity new column names
   x.vel <- "velocityX_va_ms"
   y.vel <- "velocityY_va_ms"
 
-  #specify data stream from column titles
+  # specify data stream from column titles
   xstream <- data[[gazeX_va]]
   ystream <- data[[gazeY_va]]
   timestamps <- data[[timestamp]]
 
-  #You should calculate in visual angle space, not pixels
+  # You should calculate in visual angle space, not pixels
 
-  #Establish VA Velocity in x, y, euclidean in VA PER SECOND
+  # Establish VA Velocity in x, y, euclidean in VA PER SECOND
   data[[x.vel]] <-
     c(((xstream - dplyr::lag(
       dplyr::lag(xstream)
@@ -39,9 +39,9 @@ calculateVelocity_va_ms <- function(data, gazeX_va, gazeY_va, timestamp, ...) {
     )) / (timestamps - dplyr::lag(
       dplyr::lag(timestamps)
     )) * 1000)[2:length(ystream)], NA)
-  #get euclidean velocity
+  # get euclidean velocity
   data$velocityEuclidean_va_ms <-
-    round(sqrt(data[[x.vel]] ^ 2 + data[[y.vel]] ^ 2), 2)
+    round(sqrt(data[[x.vel]]^2 + data[[y.vel]]^2), 2)
 
   return(data)
 }

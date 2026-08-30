@@ -3,15 +3,15 @@
 \docType{package}
 \name{eyeQuality-package}
 \alias{eyeQuality-package}
-\title{eyeQuality: What the Package Does (One Line, Title Case)}
+\title{eyeQuality: Preprocessing and Quality Control for Eye-Tracking Data}
 \description{
-Preprocessing R package for transparency, reproducibility, and measurement of data quality in eye tracking datasets.
+Provides a preprocessing and quality-control pipeline for eye tracking data, standardizing raw gaze and event exports from multiple eye tracker manufacturers onto a common column schema before computing per-file and per-sample data quality metrics. Device-specific import logic is implemented through a pluggable adapter/registry system, so support for a new eye tracker is added by registering a new adapter rather than modifying the core pipeline; adapters for Tobii Studio and Tobii Pro exports are included. The pipeline performs eye selection, blink classification, gaze smoothing and interpolation, and off-screen sample removal, and can generate diagnostic plots and summary reports for individual files or for batches of files organized in a BIDS-like directory structure.
 }
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/elab-umn/eyeQuality}
-  \item Report bugs at \url{https://github.com/elab-umn/eyeQuality/issues}
+  \item \url{https://github.com/umn-cehd-cnslab/eyeQuality}
+  \item Report bugs at \url{https://github.com/umn-cehd-cnslab/eyeQuality/issues}
 }
 
 }
@@ -21,15 +21,13 @@ Useful links:
 Authors:
 \itemize{
   \item Lana Hantzsch \email{hantz006@umn.edu}
-  \item Eli Johnson
   \item Jed Elison \email{jtelison@umn.edu} [funder]
 }
 
 Other contributors:
 \itemize{
-  \item Elizabeth Sharer [contributor]
   \item Caitlin Sisk [contributor]
-  \item Isa Stallworthy [contributor]
+  \item Eli Johnson [contributor]
 }
 
 }

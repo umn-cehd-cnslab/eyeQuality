@@ -33,3 +33,24 @@ vignettes/*.pdf
 .Renviron
 # Mac Hidden Files
 .DS_Store
+# Stray local test/check run output
+*.log
+
+# --- Local Claude Code tooling: not part of the published repo ---
+# Subagents, skills, hooks, and settings used to work through the
+# implementation plan. Kept local; distributed to collaborators
+# out-of-band, not via git, so the published repo/history stays silent
+# on tooling used during development.
+.claude/
+CLAUDE.md
+Agent_Team_Plan.md
+Implementation_Strategic_Plan.md
+Validation_Datasets_and_Tasks.md
+Validation_Verification_Strategy.md
+inst/doc
+/doc/
+/Meta/
+
+# Group-facing progress summary -- shared out-of-band, not via the repo
+eyeQualityUpdates.adoc
+eyeQualityUpdates.html

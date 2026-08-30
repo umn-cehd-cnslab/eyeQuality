@@ -1,0 +1,95 @@
+# Runs R CMD check on every push/PR across Windows, macOS, and Linux.
+# This is the backstop that catches regressions even if an agent or human
+# forgets to run tests locally before committing -- see Implementation_Strategic_Plan.md
+# Phase 7 (P7-05) and Phase 8 (P8-10/P8-11).
+#
+# NOTE: this workflow deliberately avoids third-party actions (r-lib/actions
+# and friends). It installs R itself via each runner's preinstalled native
+# package manager (apt on Linux, Homebrew on macOS, Chocolatey on Windows)
+# rather than a marketplace action, and installs R package dependencies from
+# CRAN directly (Posit Package Manager's Ubuntu binary mirror on Linux, so
+# dependencies install as precompiled binaries instead of being compiled from
+# source -- CRAN's source mirror repeatedly hit packages, e.g. Deriv, whose
+# source doesn't compile against the runner's R/compiler versions). Keep it
+# that way -- see repo notes on Actions allowlisting.
+on:
+  push:
+  pull_request:
+
+name: R-CMD-check
+
+jobs:
+  R-CMD-check:
+    runs-on: ${{ matrix.os }}
+
+    name: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    env:
+      R_KEEP_PKG_SOURCE: yes
+      CRAN_MIRROR: https://cloud.r-project.org
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install R and system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            r-base r-base-dev pandoc build-essential gfortran \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libfontconfig1-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev \
+            libuv1-dev qpdf
+          echo "CRAN_MIRROR=https://packagemanager.posit.co/cran/__linux__/noble/latest" >> "$GITHUB_ENV"
+
+      - name: Install R and pandoc (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install r pandoc qpdf
+
+      - name: Install R and pandoc (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install r.project -y --no-progress
+          choco install pandoc -y --no-progress
+          choco install qpdf -y --no-progress
+          $rDir = Get-ChildItem "C:\Program Files\R" -Directory | Select-Object -First 1
+          $rBin = Join-Path $rDir.FullName "bin\x64"
+          Add-Content -Path $env:GITHUB_PATH -Value $rBin
+
+      - name: Confirm R is on PATH
+        run: Rscript -e 'cat(R.version.string, "\n")'
+
+      - name: Set up a user-writable R library
+        shell: bash
+        run: |
+          mkdir -p "$HOME/R/library"
+          echo "R_LIBS_USER=$HOME/R/library" >> "$GITHUB_ENV"
+
+      - name: Point R at RSPM's binary packages (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cat <<'RPROFILE' > "$HOME/.Rprofile"
+          options(HTTPUserAgent = sprintf(
+            "R/%s R (%s)",
+            getRversion(),
+            paste(getRversion(), R.version["platform"], R.version["arch"], R.version["os"])
+          ))
+          RPROFILE
+
+      - name: Install R package dependencies
+        run: |
+          Rscript -e 'if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes", repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'remotes::install_deps(dependencies = TRUE, repos = Sys.getenv("CRAN_MIRROR"))'
+          Rscript -e 'install.packages("rcmdcheck", repos = Sys.getenv("CRAN_MIRROR"))'
+
+      - name: Build and check package
+        run: |
+          Rscript -e 'rcmdcheck::rcmdcheck(build_args = c("--no-manual", "--compact-vignettes=gs+qpdf"), args = c("--no-manual", "--as-cran"), error_on = "warning")'

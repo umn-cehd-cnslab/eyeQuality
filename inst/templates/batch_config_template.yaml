@@ -1,0 +1,110 @@
+# eyeQuality batch_config.yaml template
+#
+# Copy this file, fill in the values for your study, and load it with
+# eyeQuality::read_batch_config("your_config.yaml"). Field names match the
+# arguments of listBidsFiles()/eyeQuality()/eyeQualityBatch() exactly.
+# Run eyeQuality::validate_batch_config() (called automatically by
+# read_batch_config()) to check your edits before running a batch.
+
+# Schema version -- leave this as-is. Used to detect configs written by an
+# older/newer version of eyeQuality.
+schemaVersion: 1
+
+# A short label for this run, used to tag output filenames (e.g. the
+# preproc_qcsummary/runlog files) so multiple runs over the same data don't
+# overwrite each other's output. Required.
+batchName: "study1_run1"
+
+# Top-level directory containing your eye-tracking data files. Required.
+directoryBIDS: "/path/to/your/data"
+
+# --- Directory layout ---------------------------------------------------
+# "bids": a fixed sub-XX/ses-XX/... hierarchy, matched via
+#   subjectPattern_regex/sessionPattern_regex below. This is the default.
+# "glob": a more flexible layout (e.g. participant folders that mix raw and
+#   processed data, or a shared output directory) matched via pathPattern.
+layout: "bids"
+
+# --- Used when layout: "bids" -------------------------------------------
+# Regex each subject subfolder name must match. Set to null to search every
+# subfolder regardless of name.
+subjectPattern_regex: "sub-[A-Z0-9]+"
+# Regex each session subfolder name must match. Set to null if your data has
+# no session-level subfolder (one session per subject).
+sessionPattern_regex: "ses-[0-9]+"
+# Set to true to also search nested subfolders below the subject/session
+# level for data files.
+recursiveSearch: false
+
+# --- Used when layout: "glob" -------------------------------------------
+# Glob pattern (relative to directoryBIDS, "/" as separator) describing
+# which files to include. "*" matches within one directory level, "**"
+# matches any depth. Required when layout is "glob"; ignored otherwise.
+# Examples: "*.tsv" (files directly in directoryBIDS), "*/*.tsv" (one level
+# deep), "**/*.tsv" (any depth).
+pathPattern: null
+# Optional regex applied to each pathPattern match's relative path to drop
+# it from the result -- e.g. "derivatives" to skip a participant's own
+# processed-output subfolder when raw and processed data live together.
+excludePattern_regex: null
+
+# --- Used in either layout mode -----------------------------------------
+# Optional regex applied to each candidate file's base name. Leave null to
+# use the default (files ending in ".tsv").
+modalityPattern_regex: null
+
+# --- Device / adapter ----------------------------------------------------
+# Which eye tracker's export format this batch's data is in. Informational
+# only -- eyeQuality automatically detects the correct adapter per file from
+# its contents, so this is not used to force a specific parser. Recorded
+# here purely for documentation/reproducibility. One of the adapters listed
+# by eyeQuality::registered_adapters() (currently "TobiiStudio", "TobiiPro"),
+# or null if you'd rather not record it.
+adapterType: null
+
+# --- Display geometry -----------------------------------------------------
+# Physical display width/height in millimeters. Required. Example: a
+# 1920x1080 display that is physically 594mm wide x 344mm tall.
+displayDimensionX_mm: 594
+displayDimensionY_mm: 344
+
+# --- Processing options ---------------------------------------------------
+# How to combine left/right eye gaze: "Maximize" (use whichever eye has
+# valid data, preferring both), "Strict" (require both eyes), "Left", or
+# "Right".
+eyeSelection_method: "Maximize"
+
+# Minimum per-sample confidence to retain, on a generic 0-1 scale (1 =
+# highest confidence). Leave null to use each eye tracker's own default
+# validity threshold.
+validityThreshold: null
+
+# --- Output ----------------------------------------------------------------
+# Directory to write preprocessed output files to. Leave null to use the
+# default <directoryBIDS>/derivatives/eyeQuality-v1/ location.
+outputDir: null
+
+# How to lay out files under outputDir (ignored when outputDir is null).
+# "flat" (the default): every output file is written directly into
+#   outputDir, keyed only by filename.
+# "bids": sub-<label>/ses-<label> identifiers are parsed directly from each
+#   input file's own filename (not its folder location), and derivative
+#   output is written to
+#   <outputDir>/derivatives/eyeQuality-v1/sub-<label>/ses-<label>/ instead.
+#   A file whose name doesn't carry both identifiers falls back to flat
+#   placement (with a warning) rather than failing the whole batch.
+# Example:
+# outputStructure: "bids"
+outputStructure: "flat"
+
+# Only used when outputStructure is "bids" and outputDir is set. When true,
+# also copies each matched raw input file, unmodified and under its original
+# filename, to <outputDir>/sub-<label>/ses-<label>/ -- the raw side of the
+# BIDS raw/derivatives split, alongside derivatives/eyeQuality-v1/.
+# Example:
+# copyRawFile: true
+copyRawFile: false
+
+# Number of CPU cores to use for parallel processing. Leave null to
+# automatically use most of the available cores.
+numberCores: null

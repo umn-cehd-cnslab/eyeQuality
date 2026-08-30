@@ -13,5 +13,9 @@ calculateOutputMetrics(data)
 summary_df dataframe describing each
 }
 \description{
-Calculate Output Metrics
+Also computes SD and RMS sample-to-sample (RMS-S2S) gaze precision --
+how tightly clustered repeated gaze samples are, in visual-angle degrees
+-- for three fixation-selection variants of the recording (the whole
+file, its longest fixation, and its median-duration fixation), using a
+rolling window sized from the recording's actual sampling rate.
 }

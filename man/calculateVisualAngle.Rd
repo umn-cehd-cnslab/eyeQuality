@@ -16,7 +16,7 @@ calculateVisualAngle(
 
 \item{distanceZ}{Integer, distance from the screen in mm}
 
-\item{displayResolution_px}{Integer, display resolution on the relevant dimension (X ir Y)}
+\item{displayResolution_px}{Integer, display resolution on the relevant dimension (X or Y)}
 
 \item{displayDimension_mm}{Integer, display dimension on the relevant dimension (X or Y)}
 }
@@ -26,3 +26,29 @@ returns Angle in degrees
 \description{
 Calculate Visual Angle from pixel position
 }
+\section{Screen-center pixel convention}{
+
+\code{gaze_px} values reaching this function originate from Tobii's Active
+Display Coordinate System (ADCS): both adapters' \code{standardize()} rename
+raw device columns straight onto \code{gazeLeftX/Y}/\code{gazeRightX/Y} with no
+arithmetic in between (Tobii Studio's \code{"GazePointLeftX (ADCSpx)"} in
+\code{R/tobii-studio-adapter.R}; Tobii Pro's \code{"Gaze point left X"}, which
+Tobii Pro Lab exports in the same ADCS-derived pixel units, in
+\code{R/tobii-pro-adapter.R}). Per Tobii's SDK documentation, ADCS is a
+normalized coordinate where \verb{(0.0, 0.0)} is the exact upper-left corner
+of the active display area and \verb{(1.0, 1.0)} is the exact lower-right
+corner; the \code{...px} pixel variants are that normalized value multiplied
+by \code{displayResolution_px}, so pixel 0 is the left/top display edge and
+\code{displayResolution_px} is the right/bottom edge -- a continuous
+edge-to-edge span, not a discrete 0-indexed pixel grid running
+\verb{0..(displayResolution_px - 1)}. The screen center under that convention
+is therefore \code{displayResolution_px * .5} exactly (not
+\code{(displayResolution_px + 1) * .5}, which would be the center of a
+1-indexed discrete grid). This also matches how \code{detectOffscreenGaze()}
+(\code{R/detectOffscreenGaze.R}) already treats the on-screen pixel range as
+\verb{[0, displayResolution_px]}, and it makes this function an exact inverse
+of \code{convertVisualAngToPixels()}, which uses the same
+\code{displayResolution_px * .5} center -- see that function's matching
+section for the round-trip argument.
+}
+

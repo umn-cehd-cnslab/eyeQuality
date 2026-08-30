@@ -4,6 +4,10 @@
 #' @param recordingFrequency_hz recording Hz (calculated in calculateFrequency_hz)
 #' @param columnsToInterpolate list of column names to be interpolated
 #' @param maxGapLength_ms integer for max ms of gaps to interpolate over. Default value 50ms (pg. 119 Liz's dissertation)
+#' @param verbose optional Boolean. When `TRUE`, emits a P3-10 diagnostic per
+#'   interpolated column reporting how many missing samples were filled and
+#'   how many remain `NA` (gap too large or at the edge of the data).
+#'   Default `FALSE`; purely additive, does not change interpolation.
 #' @param ... additional passed parameters from parent function
 #'
 #' @importFrom zoo na.approx
@@ -13,7 +17,7 @@
 #
 
 interpolateGaze <-
-  function(data, recordingFrequency_hz, columnsToInterpolate, maxGapLength_ms = 50, ...) {
+  function(data, recordingFrequency_hz, columnsToInterpolate, maxGapLength_ms = 50, verbose = FALSE, ...) {
     # gap duration / sampling rate = number of samples in gap to update
     sampling.dur <- 1000 / recordingFrequency_hz
     maxGapPoints <- floor(maxGapLength_ms / sampling.dur)
@@ -28,18 +32,35 @@ interpolateGaze <-
       )
     )
 
-    #Create new names for cols
-    newCols <- paste0(columnsToInterpolate, ".int")
+    # Create new names for cols, stripping a trailing ".valid" so downstream
+    # column names are unchanged (e.g. "gazeLeftX.valid" -> "gazeLeftX.int",
+    # not "gazeLeftX.valid.int")
+    newCols <- paste0(sub("\\.valid$", "", columnsToInterpolate), ".int")
 
-    #na.approx replaces NAs by interpolation
+    # na.approx replaces NAs by interpolation
     for (int in 1:length(columnsToInterpolate)) {
       n <- newCols[int]
       i <- columnsToInterpolate[int]
       data[[n]] <-
         round(na.approx(data[[i]], na.rm = FALSE, maxgap = maxGapPoints), 2)
+
+      if (isTRUE(verbose)) {
+        naBefore <- sum(is.na(data[[i]]))
+        naAfter <- sum(is.na(data[[n]]))
+        filled <- naBefore - naAfter
+        if (naBefore > 0) {
+          .emit_diagnostic(
+            paste0(
+              "interpolateGaze: '", i, "' -- filled ", filled, " of ", naBefore,
+              " missing sample(s); ", naAfter,
+              " remain NA (gap exceeds ", maxGapLength_ms, "ms or at data edge)"
+            ),
+            verbose
+          )
+        }
+      }
     }
 
 
     return(data)
-
   }

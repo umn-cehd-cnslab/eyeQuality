@@ -14,7 +14,8 @@ mergeAdjacentFixations(
   fixationStart,
   fixationLength,
   mergeDistance_va = 0.5,
-  mergeTimeGap_ms = 75
+  mergeTimeGap_ms = 75,
+  sampling_interval = 3.3
 )
 }
 \arguments{
@@ -37,6 +38,8 @@ mergeAdjacentFixations(
 \item{mergeDistance_va}{maximum distance (in VA) between two fixations to be merged. Default: 0/5 VA}
 
 \item{mergeTimeGap_ms}{maximum time lapsed (in ms) between two fixations to be merged. Default: 75 ms}
+
+\item{sampling_interval}{recording's actual sample-to-sample interval, in ms (i.e. 1000 / recordingFrequency_hz). Used to convert a gap duration in samples to ms when comparing against mergeTimeGap_ms. Default: 3.3, matching a ~303 Hz recording}
 }
 \value{
 return list of updated fixation metrics, including classification (class.adj), duration, and distance

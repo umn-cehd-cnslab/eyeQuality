@@ -20,23 +20,23 @@ classifyGazeIVT(
 \arguments{
 \item{data}{a dataframe}
 
+\item{velocity}{string - variable column name containing velocity (in visual angles)}
+
 \item{gazeX_va}{string - variable column name containing X gaze coordinates in visual angles}
 
 \item{gazeY_va}{string - variable column name containing Y gaze coordinates in visual angles}
 
+\item{recordingFrequency_hz}{recording frequency in Hz}
+
+\item{fixationVelocityThreshold}{fixation classifier velocity threshold in VA/s. Default: 50 VA / s}
+
+\item{maxAdjacentFixationAngle}{maximum distance (in VA) between two fixations to be merged. Default: 0/5 VA}
+
+\item{maxAdjacentFixationTime}{maximum time lapsed (in ms) between two fixations to be merged. Default: 75 ms}
+
+\item{minFixationDuration}{threshold for minimum duration of a given fixation to be considered acceptable. Default: 60 ms}
+
 \item{...}{additional arguments are of either the form value or tag = value. Component names are created based on the tag (if present) or the deparsed argument itself.}
-
-\item{input_velocity}{string - variable column name containing velocity (in visual angles)}
-
-\item{recHz}{recording frequency in Hz}
-
-\item{IVT_thresh}{fixation classifier velocity threshold in VA/s. Default: 50 VA / s}
-
-\item{max_ang_adj_fix}{maximum distance (in VA) between two fixations to be merged. Default: 0/5 VA}
-
-\item{max_time_adj_fix}{maximum time lapsed (in ms) between two fixations to be merged. Default: 75 ms}
-
-\item{min_fix_dur}{threshold for minimum duration of a given fixation to be considered acceptable. Default: 60 ms}
 }
 \value{
 outputs_dfs

@@ -9,9 +9,9 @@ checkGazeDataExists(data, gazeColumn, ...)
 \arguments{
 \item{data}{a dataframe}
 
-\item{...}{additional passed parameters from parent function}
+\item{gazeColumn}{column containing gaze data to assess}
 
-\item{gazeCol}{column containing gaze data to assess}
+\item{...}{additional passed parameters from parent function}
 }
 \value{
 dataExists a Boolean indicating if any valid gaze data exists

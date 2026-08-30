@@ -25,11 +25,11 @@ was primarily tested using data exports from Tobii Studio and Tobii Pro).
 
 
 ## Installation
-You can install the eyeQuality from [GitHub](https://github.com/elab-umn/eyeQuality/) with:
+You can install the eyeQuality from [GitHub](https://github.com/umn-cehd-cnslab/eyeQuality/) with:
 
 ``` r
 # install.packages("devtools")
-devtools::install_github("elab-umn/eyeQuality")
+devtools::install_github("umn-cehd-cnslab/eyeQuality")
 ```
 
 Alternatively, you can install from source by downloading the package via github. Follow instructions outlined [here](https://www.dataquest.io/blog/install-package-r/)
@@ -55,7 +55,7 @@ git commands in the Terminal)
 1. Add documentation using roxygen (see [R package roxygen instructions](https://r-pkgs.org/man.html))
 1. Once your changes are ready to be merged, submit a [pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request) on github
 
-If you find any bugs or have feature requests, [open an issue on github](https://github.com/elab-umn/eyetrackingELabR/issues). 
+If you find any bugs or have feature requests, [open an issue on github](https://github.com/umn-cehd-cnslab/eyeQuality/issues).
 Please be as detailed as possible in your issue.
 
 ## Getting started
@@ -113,114 +113,138 @@ list_bids_derivative_files(".") # show the full list of processed data
 ```{r dataDict, echo = FALSE, warning=FALSE}
 library(knitr)
 
-#Basic recording information definitions
-recording_Variables <- c("event", "eventValue", "recordingDuration_ms", 
-                         "resolutionHeight", "resolutionWidth", "eyeTrackerTimestamp",
-                         "recordingTimestamp_ms")
-recording_Definitions <- c("Stimulus event label", "Stimulus event value", "Total recording duration (ms)",
-                           "Recording screen resolution height (px)", "Recording screen resolution width (px)",
-                           "Internal eye tracker timestamp (unit?)", "Recording timecourse timestamp (ms)")
+# Basic recording information definitions
+recording_Variables <- c(
+  "event", "eventValue", "recordingDuration_ms",
+  "resolutionHeight", "resolutionWidth", "eyeTrackerTimestamp",
+  "recordingTimestamp_ms"
+)
+recording_Definitions <- c(
+  "Stimulus event label", "Stimulus event value", "Total recording duration (ms)",
+  "Recording screen resolution height (px)", "Recording screen resolution width (px)",
+  "Internal eye tracker timestamp (unit?)", "Recording timecourse timestamp (ms)"
+)
 
 recording_Table <- data.frame(recording_Variables, recording_Definitions)
 kable(recording_Table, col.names = c("Recording Information Variables", "Definitions"))
 
-#GazePoint Definitions
-GP_Variables <- c("gazeLeftX", "gazeLeftY", "gazeRightX","gazeRightY",
-"gazeLeftX.int", "gazeLeftY.int", "gazeRightX.int", "gazeRightY.int",
-"gazeX.eyeSelect", "gazeY.eyeSelect", "gazeX.smooth", "gazeY.smooth",
-"gazeX.va","gazeY.va",
-"gazeX.preprocessed_px", "gazeY.preprocessed_px",
-"gazeX.preprocessed_va", "gazeY.preprocessed_va")
-GP_Definitions <- c("Raw left eye X gaze position in pixels",
-"Raw left eye Y gaze position in pixels",
-"Raw right eye X gaze position in pixels",
-"Raw right eye Y gaze position in pixels",
-"Left eye X gaze position in pixels after interpolation",
-"Left eye Y gaze position in pixels after interpolation",
-"Right eye X gaze position in pixels after interpolation",
-"Right eye Y gaze position in pixels after interpolation",
-"Composite X gaze position after interpolation and eye selection",
-"Composite Y gaze position after interpolation and eye selection",
-"Composite X gaze position after interpolation, eye selection, and smoothing",
-"Composite Y gaze position after interpolation, eye selection, and smoothing",
-"X gaze position in visual angles",
-"Y gaze position in visual angles",
-"FINAL PREPROCESSED GAZE X POSITION IN PIXEL SPACE",
-"FINAL PREPROCESSED GAZE Y POSITION IN PIXEL SPACE",
-"FINAL PREPROCESSED GAZE X POSITION IN VISUAL ANGLE SPACE",
-"FINAL PREPROCESSED GAZE Y POSITIONN IN VISUAL ANGLE SPACE")
+# GazePoint Definitions
+GP_Variables <- c(
+  "gazeLeftX", "gazeLeftY", "gazeRightX", "gazeRightY",
+  "gazeLeftX.int", "gazeLeftY.int", "gazeRightX.int", "gazeRightY.int",
+  "gazeX.eyeSelect", "gazeY.eyeSelect", "gazeX.smooth", "gazeY.smooth",
+  "gazeX.va", "gazeY.va",
+  "gazeX.preprocessed_px", "gazeY.preprocessed_px",
+  "gazeX.preprocessed_va", "gazeY.preprocessed_va"
+)
+GP_Definitions <- c(
+  "Raw left eye X gaze position in pixels",
+  "Raw left eye Y gaze position in pixels",
+  "Raw right eye X gaze position in pixels",
+  "Raw right eye Y gaze position in pixels",
+  "Left eye X gaze position in pixels after interpolation",
+  "Left eye Y gaze position in pixels after interpolation",
+  "Right eye X gaze position in pixels after interpolation",
+  "Right eye Y gaze position in pixels after interpolation",
+  "Composite X gaze position after interpolation and eye selection",
+  "Composite Y gaze position after interpolation and eye selection",
+  "Composite X gaze position after interpolation, eye selection, and smoothing",
+  "Composite Y gaze position after interpolation, eye selection, and smoothing",
+  "X gaze position in visual angles",
+  "Y gaze position in visual angles",
+  "FINAL PREPROCESSED GAZE X POSITION IN PIXEL SPACE",
+  "FINAL PREPROCESSED GAZE Y POSITION IN PIXEL SPACE",
+  "FINAL PREPROCESSED GAZE X POSITION IN VISUAL ANGLE SPACE",
+  "FINAL PREPROCESSED GAZE Y POSITION IN VISUAL ANGLE SPACE"
+)
 
 GP_Table <- data.frame(GP_Variables, GP_Definitions)
 kable(GP_Table, col.names = c("Gaze Position Variables", "Definitions"))
 
-##Z distance table
-Z_Variables <- c("distanceLeftZ", "distanceRightZ", "distanceLeftZ.int","distanceRightZ.int",
-"distanceZ.eyeSelect", "distanceZ.smooth", "distanceZ.preprocessed_mm")
-Z_Definitions <- c("Raw left eye Z position (distance from screen in mm)",
-"Raw right eye Z position (distance from screen in mm)",
-"Left eye Z position (distance from screen in mm) after interpolation",
-"Right eye Z position (distance from screen in mm) after interpolation",
-"Composite eye Z position (distance from screen) after interpolation and eye selection",
-"Composite eye Z position (distance from screen) after interpolation, eye selection, and smoothing",
-"FINAL PREPROCESSED Z DISTANCE POSITION IN MM")
+## Z distance table
+Z_Variables <- c(
+  "distanceLeftZ", "distanceRightZ", "distanceLeftZ.int", "distanceRightZ.int",
+  "distanceZ.eyeSelect", "distanceZ.smooth", "distanceZ.preprocessed_mm"
+)
+Z_Definitions <- c(
+  "Raw left eye Z position (distance from screen in mm)",
+  "Raw right eye Z position (distance from screen in mm)",
+  "Left eye Z position (distance from screen in mm) after interpolation",
+  "Right eye Z position (distance from screen in mm) after interpolation",
+  "Composite eye Z position (distance from screen) after interpolation and eye selection",
+  "Composite eye Z position (distance from screen) after interpolation, eye selection, and smoothing",
+  "FINAL PREPROCESSED Z DISTANCE POSITION IN MM"
+)
 
 Z_Table <- data.frame(Z_Variables, Z_Definitions)
 kable(Z_Table, col.names = c("Z Distance Variables", "Definitions"))
 
-#Velocity Definitions
-Vel_Variables <- c("velocityX_va_ms", "velocityY_va_ms", "velocityEuclidean_va_ms",
-"velocityX.smooth_va_ms", "velocityY.smooth_va_ms", "velocityEuclidean.smooth_va_ms",
-"velocityX.preprocessed_va_ms", "velocityY.preprocessed_va_ms", "velocityEuclidean.preprocessed_va_ms")
+# Velocity Definitions
+Vel_Variables <- c(
+  "velocityX_va_ms", "velocityY_va_ms", "velocityEuclidean_va_ms",
+  "velocityX.smooth_va_ms", "velocityY.smooth_va_ms", "velocityEuclidean.smooth_va_ms",
+  "velocityX.preprocessed_va_ms", "velocityY.preprocessed_va_ms", "velocityEuclidean.preprocessed_va_ms"
+)
 Vel_Definitions <- c(
-"X gaze velocity in VA/second (lagged by two gazepoints)",
-"Y gaze velocity in VA/second (lagged by two gazepoints)",
-"Euclidean velocity in VA/second (lagged by two gazepoints)",
-"X gaze velocity in VA/second after smoothing",
-"Y gaze velocity in VA/second after smoothing",
-"Euclidean velocity in VA / second after smoothing",
-"FINAL PREPROCESSED X GAZE VELOCITY IN VA/SECOND",
-"FINAL PREPROCESSED Y GAZE VELOCITY IN VA/SECOND",
-"FINAL PREPROCESSED EUCIDEAN VELOCITY IN VA/SECOND")
+  "X gaze velocity in VA/second (lagged by two gazepoints)",
+  "Y gaze velocity in VA/second (lagged by two gazepoints)",
+  "Euclidean velocity in VA/second (lagged by two gazepoints)",
+  "X gaze velocity in VA/second after smoothing",
+  "Y gaze velocity in VA/second after smoothing",
+  "Euclidean velocity in VA / second after smoothing",
+  "FINAL PREPROCESSED X GAZE VELOCITY IN VA/SECOND",
+  "FINAL PREPROCESSED Y GAZE VELOCITY IN VA/SECOND",
+  "FINAL PREPROCESSED EUCLIDEAN VELOCITY IN VA/SECOND"
+)
 
 Vel_Table <- data.frame(Vel_Variables, Vel_Definitions)
 kable(Vel_Table, col.names = c("Velocity Variables", "Definitions"))
 
-#IVT Definitions
-IVT_Variables <- c("IVT.classification", "IVT.fixationIndex", "IVT.saccadeIndex","IVT.fixationDuration_ms")
-IVT_Definitions <- c("FINAL IVT FILTER CLASSIFICATION", 
+# IVT Definitions
+IVT_Variables <- c("IVT.classification", "IVT.fixationIndex", "IVT.saccadeIndex", "IVT.fixationDuration_ms")
+IVT_Definitions <- c(
+  "FINAL IVT FILTER CLASSIFICATION",
   "Index number of fixation",
   "Index number of saccade",
-  "Total duration of fixation (ms)")
+  "Total duration of fixation (ms)"
+)
 IVT_Table <- data.frame(IVT_Variables, IVT_Definitions)
 kable(IVT_Table, col.names = c("IVT Variables", "Definitions"))
 
-#Validity Definitions
-validity_Variables <- c("validLeft", "validRight", "gazeLeft.offscreen", "gazeRight.offscreen",
-                        "offscreen.classification")
-  
-validity_Definitions <- c("Input for classifying left eye validity", "Input for classigying right eye validity",
-                          "Classification of left eye offscreen gaze validity", "Classification of right eye offscreen gaze validity",
-                          "FINAL CLASSIFICATION OF OVERALL OFFSCREEN VALIDITY")
+# Validity Definitions
+validity_Variables <- c(
+  "validLeft", "validRight", "gazeLeft.offscreen", "gazeRight.offscreen",
+  "offscreen.classification"
+)
+
+validity_Definitions <- c(
+  "Input for classifying left eye validity", "Input for classifying right eye validity",
+  "Classification of left eye offscreen gaze validity", "Classification of right eye offscreen gaze validity",
+  "FINAL CLASSIFICATION OF OVERALL OFFSCREEN VALIDITY"
+)
 
 validity_Table <- data.frame(validity_Variables, validity_Definitions)
 kable(validity_Table, col.names = c("Validity Variables", "Definitions"))
 
-#Pupil Definitions
-Pupil_Variables <- c("pupilLeft", "pupilRight", "pupilLeft.int",
-"pupilRight.int", "pupil.eyeSelect", "pupil.smooth", "pupil.preprocessed",
-"pupilLeft.blink", "pupilRight.blink", "bothEyes.blink", "blink.classification")
+# Pupil Definitions
+Pupil_Variables <- c(
+  "pupilLeft", "pupilRight", "pupilLeft.int",
+  "pupilRight.int", "pupil.eyeSelect", "pupil.smooth", "pupil.preprocessed",
+  "pupilLeft.blink", "pupilRight.blink", "bothEyes.blink", "blink.classification"
+)
 Pupil_Definitions <- c(
-"Raw left pupil data",
-"Raw right pupil data",
-"Interpolated left pupil data",
-"Interpolated right pupil data",
-"Pupil data after interpolation and eye selection",
-"Pupil data after interpolation, eye selection, and smoothing",
-"FINAL PREPROCESSED PUPIL DATA",
-"Flags blinks in left eye (where 1 = blink)",
-"Flags blinks in right eye (where 1 = blink)",
-"Flags where blinks occur concurrently in both left and right eyes",
-"FINAL BLINK CLASSIFICATION (based on eyeSelection method)")
+  "Raw left pupil data",
+  "Raw right pupil data",
+  "Interpolated left pupil data",
+  "Interpolated right pupil data",
+  "Pupil data after interpolation and eye selection",
+  "Pupil data after interpolation, eye selection, and smoothing",
+  "FINAL PREPROCESSED PUPIL DATA",
+  "Flags blinks in left eye (where 1 = blink)",
+  "Flags blinks in right eye (where 1 = blink)",
+  "Flags where blinks occur concurrently in both left and right eyes",
+  "FINAL BLINK CLASSIFICATION (based on eyeSelection method)"
+)
 Pupil_Table <- data.frame(Pupil_Variables, Pupil_Definitions)
 kable(Pupil_Table, col.names = c("Pupil and Blink Variables", "Definitions"))
 ```

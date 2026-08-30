@@ -9,13 +9,13 @@
 #'
 standardizeColumnNames <- function(data, software) {
   if (str_detect(software, "TobiiStudio") |
-      str_detect(software, "TobiiPro")) {
+    str_detect(software, "TobiiPro")) {
     renameColumns(data, software)
-  }
-  else
+  } else {
     stop(
       "warning: Your software input should be 'TobiiPro' or  'TobiiStudio'.
           Other eye tracking programs are not supported by this package. To custom assign column names,
           from your software, please see our help document & template"
     )
+  }
 }
